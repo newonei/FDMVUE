@@ -20,7 +20,7 @@ import StepHeader from './step-header.vue';
  */
 import '../../shared/report-spec.css';
 
-const props = defineProps<{ submitting: boolean }>();
+const props = defineProps<{ finishSelected?: boolean; submitting: boolean }>();
 const emit = defineEmits<{ back: []; submit: [] }>();
 const job = useJob();
 const labels = computed(() => makeLabels(job.options));
@@ -33,6 +33,8 @@ const matches = ref<FdmgongchangWageApi.Match[]>([]);
 const mates = ref<FdmgongchangFactoryApi.Operator[]>([]);
 const loading = ref(true);
 const finishConfirmed = ref(false);
+const needsFinishConfirmation = computed(() => (job.finish || job.createFinish) && !props.finishSelected);
+const submitText = computed(() => `${job.prepare ? '报工' : '提交'}${props.finishSelected ? '并完工' : ''}`);
 let seed = Math.max(0, ...job.pieces.map((line) => line.key));
 const unit = computed(() => stageOf(job, job.process?.outputStage)?.unit ?? '');
 const primaryWorkerId = computed(() => job.onBehalfOf?.id ?? job.my?.userId);
@@ -98,7 +100,7 @@ const total = computed(() => isSlice.value ? allocation.value.amount : job.piece
 const sliceShare = (userId?: number) => allocation.value.shares.find((share) => share.userId === userId)?.amount ?? 0;
 
 function submit() {
-  if ((job.finish || job.createFinish) && !finishConfirmed.value) {
+  if (needsFinishConfirmation.value && !finishConfirmed.value) {
     message.warning('请核对本批已经全部做完，并确认结束生产');
     return;
   }
@@ -143,8 +145,8 @@ function addMate() {
             </div>
           </template>
           <span class="text-sm">{{ job.task?.contractCode || job.order?.orderNo || '本批生产' }}<template v-if="job.task"> · 任务 #{{ job.task.id }}</template></span>
-          <Checkbox v-if="job.finish || job.createFinish" v-model:checked="finishConfirmed" aria-label="确认本批全部做完">我已核对：本批全部做完，提交后结束生产</Checkbox>
-          <span v-else class="text-sm">只登记本次产出，工序单继续在制，下次接着报。</span>
+          <Checkbox v-if="needsFinishConfirmation" v-model:checked="finishConfirmed" aria-label="确认本批全部做完">我已核对：本批全部做完，提交后结束生产</Checkbox>
+          <span v-else-if="!job.finish && !job.createFinish" class="text-sm">只登记本次产出，工序单继续在制，下次接着报。</span>
         </section>
         <section v-if="isSlice && sliceItem" class="flex flex-col gap-2 rounded-lg border border-primary/30 bg-card p-3">
           <span class="text-sm font-bold">本次开片工资</span>
@@ -217,7 +219,7 @@ function addMate() {
         type="button"
         @click="submit"
       >
-        {{ props.submitting ? '提交中…' : `${job.prepare ? '报工' : '提交'}${total > 0 ? `（计件 ¥${formatQty(total)}）` : ''}` }}
+        {{ props.submitting ? '提交中…' : `${submitText}${total > 0 ? `（计件 ¥${formatQty(total)}）` : ''}` }}
       </button>
     </footer>
   </div>

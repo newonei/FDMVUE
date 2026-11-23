@@ -38,7 +38,7 @@ import PickStep from './modules/pick-step.vue';
 import PieceStep from './modules/piece-step.vue';
 import ReportStep from './modules/report-step.vue';
 import { defaultReportMaterial, loadOrderDraft } from './order-report';
-import { prefillReportQuantity, reportErrors } from './report-quantity';
+import { canFinishWithoutOutput, prefillReportQuantity, reportErrors } from './report-quantity';
 import { applyIssuePlan, issuePayload } from './task-issue';
 import { applyJobTarget, createJob, goodTotal, outputPayload, provideJob } from './use-job';
 
@@ -283,7 +283,7 @@ async function continueOrder(order: Api.Order, supplement = false) {
 function reportFromList(draft: OrderDraft, details = false) {
   if (loading.value || submitting.value) return;
   reset(draft.process, draft.task);
-  Object.assign(job, draft);
+  Object.assign(job, draft, { finish: true });
   if (details || reportErrors(job).length > 0) {
     listReportMode.value = 'details';
     job.step = 'report';
@@ -304,6 +304,10 @@ function supplementFromReport() {
 function afterReport() {
   // 返回修改实际良品后，计件数量同步到这次实际产出。
   for (const piece of job.pieces) piece.quantity = job.process?.code === 'SLICE' ? sliceVolume(job.outputs) : goodTotal(job);
+  if (job.finish && canFinishWithoutOutput(job)) {
+    void submit();
+    return;
+  }
   // 任务报工进入最终确认，即使本次全部为不良品。
   if (job.prepare || job.finish || job.createFinish || goodTotal(job) > 0) job.step = 'piece';
   else void submit();
@@ -320,6 +324,7 @@ async function submit() {
   submitting.value = true;
   const before = toNumber(job.my?.todayAmount) ?? 0;
   const good = goodTotal(job);
+  const closingOnly = job.finish && canFinishWithoutOutput(job);
   try {
     const lines = Object.entries(job.returns)
       .filter(([, qty]) => (qty ?? 0) > 0)
@@ -340,7 +345,7 @@ async function submit() {
         pieceworks: piecePayload(),
       });
     }
-    job.result = { action: 'report', amount: 0, good, unit: '' };
+    job.result = { action: closingOnly ? 'finish' : 'report', amount: 0, good, unit: '' };
     if (listReportMode.value) {
       for (const line of job.outputs) {
         line.goodQuantity = line.defectQuantity = line.reportTotal = undefined;
@@ -348,11 +353,12 @@ async function submit() {
       }
     }
     job.step = 'done';
-    if (await reloadAfterSave()) {
+    if (await reloadAfterSave() && !closingOnly) {
       job.result.amount = Math.max(0, (toNumber(job.my?.todayAmount) ?? 0) - before);
     }
   } catch (error) {
     reportError.value = reportFailureText(error, !!(job.task && job.order));
+    if (job.step === 'home') message.error(reportError.value);
   } finally {
     submitting.value = false;
   }
@@ -478,7 +484,7 @@ function back() {
           @next="afterReport"
           @supplement="supplementFromReport"
         />
-        <PieceStep v-else-if="job.step === 'piece'" :submitting="submitting" @back="back" @submit="submit" />
+        <PieceStep v-else-if="job.step === 'piece'" :finish-selected="!!listReportMode && job.finish" :submitting="submitting" @back="back" @submit="submit" />
         <DoneStep v-else-if="job.step === 'done'" @again="again" @home="goHome" />
       </template>
       <div v-else class="h-80"></div>

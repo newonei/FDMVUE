@@ -7,9 +7,9 @@ import { computed, ref, watch } from 'vue';
 
 import { businessError } from '../../shared/business-error';
 import LaminationCounters from '../../shared/lamination-counters.vue';
-import { attrSummary, makeLabels, toNumber } from '../../stage-stock/model';
+import { attrSummary, makeLabels } from '../../stage-stock/model';
 import { loadOrderDraft } from '../order-report';
-import { hasExcessDefects } from '../report-quantity';
+import { canFinishWithoutOutput, hasExcessDefects, hasNewOutput } from '../report-quantity';
 import { useJob } from '../use-job';
 import ReportQuantityFields from './report-quantity-fields.vue';
 
@@ -28,11 +28,12 @@ const attempted = ref(false);
 const retry = ref(0);
 const labels = computed(() => makeLabels(job.options));
 const orderLabel = computed(() => props.order.scheduleTaskId ? `任务 #${props.order.scheduleTaskId}` : props.order.orderNo);
+const finishingWithoutOutput = computed(() => !!draft.value && canFinishWithoutOutput(draft.value));
 const quantityError = computed(() => {
   if (!attempted.value || !draft.value) return '';
   const outputs = draft.value.outputs;
   if (outputs.some((line) => hasExcessDefects(line))) return '瑕疵数量不能超过本次产量。';
-  if (!outputs.some((line) => (toNumber(line.goodQuantity) ?? 0) + (toNumber(line.defectQuantity) ?? 0) > 0)) return '请填写本次产量。';
+  if (!finishingWithoutOutput.value && !hasNewOutput(outputs)) return '请填写本次产量。';
   return '';
 });
 
@@ -104,11 +105,11 @@ function submit() {
       </div>
       <p v-if="quantityError" class="m-0 text-base text-destructive" role="alert">{{ quantityError }}</p>
       <button
-        v-if="draft.outputs.length"
+        v-if="draft.outputs.length || finishingWithoutOutput"
         class="min-h-12 w-full rounded-md bg-primary px-4 text-base font-bold text-primary-foreground"
         type="submit"
       >
-        提交
+        {{ finishingWithoutOutput ? '直接完工' : '提交并完工' }}
       </button>
       <button v-else class="min-h-12 w-full rounded-md bg-primary px-4 text-base font-bold text-primary-foreground" type="button" @click="emit('details', draft)">
         查看工序单

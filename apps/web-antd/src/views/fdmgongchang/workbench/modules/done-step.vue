@@ -10,6 +10,7 @@ const job = useJob();
 const foaming = computed(() => job.process?.code === 'MIX');
 const title = computed(() => {
   if (job.result.action === 'report') return '报工好了';
+  if (job.result.action === 'finish') return '工序单已完工';
   if (job.result.action === 'supplement') return '补领完成';
   return foaming.value ? '发泡开工完成' : '领料开工完成';
 });
@@ -28,14 +29,14 @@ const percent = computed(() => {
         <svg aria-label="提交成功" fill="none" height="30" role="img" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.6" viewBox="0 0 24 24" width="30"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
       </div>
       <h1 class="m-0 text-xl font-bold">{{ title }}</h1>
-      <p class="m-0 text-sm leading-relaxed text-muted-foreground">
+      <p v-if="job.result.action !== 'finish'" class="m-0 text-sm leading-relaxed text-muted-foreground">
         <template v-if="job.result.action === 'report'">本次实际产出已登记<template v-if="job.result.good > 0">，{{ formatQty(job.result.good) }} {{ output?.unit }}{{ output?.label }}已入库，可供下工序领取</template><br />{{ job.finish || job.createFinish ? '本批生产已结束' : '工序单继续在制，下次只报新增产出' }}</template>
         <template v-else-if="job.supplement && job.order?.status === 'COMPLETED'">补登的料已经算进 {{ job.order?.orderNo }} 的领料</template>
         <template v-else-if="job.supplement">补领材料已计入 {{ job.order?.orderNo }}，做完后从在制工序单报产出。</template>
         <template v-else-if="foaming">生产完成后，从「正在做」报本工序的实际产出。原料出入库另行登记。</template>
         <template v-else>本次领料已从库存扣减。生产完成后，从「在制工序单」报本工序的实际产出。</template>
       </p>
-      <section class="grid w-full grid-cols-2 gap-3 rounded-lg bg-card p-3 text-left border border-border">
+      <section v-if="job.result.action !== 'finish'" class="grid w-full grid-cols-2 gap-3 rounded-lg bg-card p-3 text-left border border-border">
         <div class="flex flex-col">
           <span class="text-xs text-muted-foreground">这批计件</span>
           <span class="text-lg font-bold text-primary">¥{{ formatQty(job.result.amount) }}</span>

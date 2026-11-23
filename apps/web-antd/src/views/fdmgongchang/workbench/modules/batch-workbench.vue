@@ -87,7 +87,7 @@ async function load() {
         try {
           const cached = props.reportDrafts.get(order.id);
           const draft = cached ? cloneDeep(cached) : await loadOrderDraft(home, order.id);
-          return Object.assign(makeJob(), draft);
+          return Object.assign(makeJob(), draft, { finish: true });
         } catch (error) {
           throw new Error(`${order.orderNo}：${businessError(error).msg}`, { cause: error });
         }
@@ -172,7 +172,8 @@ async function submit() {
       }
     }
     const ids = await sendBatch();
-    message.success(issue.value ? `已为 ${ids.length} 项任务开工` : `已为 ${ids.length} 张工序单登记产出`);
+    const finished = jobs.value.filter((job) => job.finish).length;
+    message.success(issue.value ? `已为 ${ids.length} 项任务开工` : `已处理 ${ids.length} 张工序单，其中 ${finished} 张已完工`);
     emit('saved');
   } catch (error) {
     const { code, msg } = businessError(error);

@@ -56,7 +56,7 @@ export function createJob() {
     productionItem: undefined as undefined | { allowPlainEmboss?: boolean; id: number; label: string; layerRule?: string; orderNo: string; targetThickness?: null | number | string },
     /** 发泡配方及已知计划锅数，开工时记录。 */
     recipe: undefined as undefined | { batches?: number; code: string },
-    result: { action: 'issue' as 'issue' | 'report' | 'supplement', amount: 0, good: 0, unit: '' },
+    result: { action: 'issue' as 'finish' | 'issue' | 'report' | 'supplement', amount: 0, good: 0, unit: '' },
     returns: {} as Record<number, null | number>,
     sourceStage: '',
     step: 'home' as Step,

@@ -15,7 +15,7 @@ import {
   validateOutputs,
 } from '../../stage-stock/model';
 import AttrFields from '../../stage-stock/modules/attr-fields.vue';
-import { reportErrors } from '../report-quantity';
+import { canFinishWithoutOutput, reportErrors } from '../report-quantity';
 import { goodTotal, jobAllowsPlainEmboss, slicePlanThicknessError, stageOf, useJob } from '../use-job';
 import ReportQuantityFields from './report-quantity-fields.vue';
 import StepHeader from './step-header.vue';
@@ -52,6 +52,12 @@ const errors = ref<string[]>([]);
 const slicing = computed(() => job.process?.code === 'SLICE');
 const tracksMaterials = computed(() => job.process?.code !== 'MIX');
 const planThicknessError = computed(() => slicePlanThicknessError(job));
+const finishingWithoutOutput = computed(() => job.finish && canFinishWithoutOutput(job));
+const submitText = computed(() => {
+  if (finishingWithoutOutput.value) return '直接完工';
+  if (job.prepare || job.finish || job.createFinish || goodTotal(job) > 0) return '下一步：核对本次报工';
+  return '提交本次产出';
+});
 
 const inputColors = computed(
   () =>
@@ -118,8 +124,9 @@ function next() {
 
         <label v-if="!job.createFinish" class="flex min-h-11 cursor-pointer items-center gap-3 text-base font-semibold">
           <input v-model="job.finish" class="size-5 shrink-0 accent-primary" type="checkbox" />
-          全部做完，结束本次任务
+          本次报工后完工
         </label>
+        <p v-if="props.embedded && finishingWithoutOutput" class="m-0 text-sm text-muted-foreground">已有报工记录，本次只完工。</p>
 
         <section v-if="tracksMaterials && !job.createFinish && job.finish && job.order" class="flex flex-col gap-1.5 rounded-lg border border-border bg-card p-3">
           <span class="text-sm font-bold">有没用完的料？填退回多少（没有就不用填）</span>
@@ -159,7 +166,7 @@ function next() {
       </div>
       <footer v-if="!props.embedded" class="flex flex-col gap-2 px-3 pb-4 sm:px-4">
         <button class="min-h-12 w-full rounded-md bg-primary text-base font-semibold text-primary-foreground" type="submit">
-          {{ job.prepare || job.finish || job.createFinish || goodTotal(job) > 0 ? '下一步：核对本次报工' : '提交本次产出' }}
+          {{ submitText }}
         </button>
         <button v-if="tracksMaterials && orderActions" class="min-h-11 rounded-md border border-border text-base font-semibold" type="button" @click="emit('supplement')">补领材料</button>
       </footer>

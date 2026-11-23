@@ -3,7 +3,7 @@ import type { Job } from './use-job';
 
 import { quantityPrecision } from '../shared/quantity';
 import { toNumber, validateOutputs } from '../stage-stock/model';
-import { jobAllowsPlainEmboss, outputPayload, slicePlanThicknessError } from './use-job';
+import { jobAllowsPlainEmboss, slicePlanThicknessError } from './use-job';
 
 const quantity = (value: unknown) => Math.max(0, toNumber(value) ?? 0);
 const round = (value: number) => Math.round(value * 1000) / 1000;
@@ -29,9 +29,17 @@ export function hasExcessDefects(line: OutputDraft) {
   return !line.laminateLayers && quantity(line.defectQuantity) > (line.reportTotal ?? line.goodQuantity ?? 0);
 }
 
+export function hasNewOutput(outputs: OutputDraft[]) {
+  return outputs.some((line) => (toNumber(line.goodQuantity) ?? 0) + (toNumber(line.defectQuantity) ?? 0) > 0);
+}
+
+export function canFinishWithoutOutput(job: Pick<Job, 'order' | 'outputs'>) {
+  return (job.order?.reportCount ?? 0) > 0 && !hasNewOutput(job.outputs);
+}
+
 export function reportErrors(job: Job) {
   if (job.outputs.some((line) => hasExcessDefects(line))) return ['瑕疵数量不能超过本次产量。'];
-  if (!job.createFinish && job.finish && (job.order?.reportCount ?? 0) > 0 && outputPayload(job).length === 0) return [];
+  if (job.finish && canFinishWithoutOutput(job)) return [];
   const errors = validateOutputs(job.process?.code ?? '', job.process?.outputStage ?? '', job.outputs, { allowPlainEmboss: jobAllowsPlainEmboss(job) });
   const thicknessError = slicePlanThicknessError(job);
   if (thicknessError) errors.push(thicknessError);
