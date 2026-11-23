@@ -31,9 +31,12 @@ import {
   getProcurementFinancePage,
   getProcurementFinanceSummary,
 } from '#/api/fdmplatform/procurement-finance';
+import AiReviewStatus from '#/views/fdmaicheck/components/AiReviewStatus.vue';
+import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewStatuses';
 
 import { useInMergedView } from '../../components/merged-view';
 import { rows as businessRows, errorText, money } from '../../data';
+import { procurementFinanceAiCheckTypes } from '../../documents/ai-check-types';
 import BusinessDocumentDetail from '../../documents/BusinessDocumentDetail.vue';
 import { withoutDetailQuery } from '../../documents/navigation';
 import { useOwnedRoute } from '../../documents/useOwnedRoute';
@@ -65,6 +68,14 @@ const effectiveType = computed(() =>
     : props.type,
 );
 const rows = ref<ProcurementFinanceRecord[]>([]);
+const { statusFor, refresh: refreshReviewStatuses } = useAiReviewStatuses(() =>
+  active.value
+    ? rows.value.map((row) => ({
+        docType: procurementFinanceAiCheckTypes[row.type],
+        docId: row.standaloneId ?? row.id,
+      }))
+    : [],
+);
 const total = ref(0);
 const page = ref(1);
 const keyword = ref('');
@@ -177,6 +188,7 @@ async function load() {
     if (run === sequence) {
       rows.value = result.list;
       total.value = result.total;
+      void refreshReviewStatuses();
     }
   } catch (error) {
     if (run === sequence) pageError.value = errorText(error);
@@ -225,6 +237,7 @@ const columns = computed(() =>
           ellipsis: true,
         },
         { title: '状态', key: 'state', width: 110 },
+        { title: 'AI 审核', key: 'aiReview', width: 170 },
         { title: '登记人', key: 'creator', width: 100, ellipsis: true },
         { title: '操作', key: 'action', width: 100, fixed: 'right' as const },
       ]
@@ -233,6 +246,7 @@ const columns = computed(() =>
         { title: '金额', key: 'money', width: 170, align: 'right' as const },
         { title: '付款主体', key: 'payer', width: 250, ellipsis: true },
         { title: '状态', key: 'state', width: 120 },
+        { title: 'AI 审核', key: 'aiReview', width: 170 },
         { title: '操作', key: 'action', width: 140, fixed: 'right' as const },
       ],
 );
@@ -515,7 +529,7 @@ watch(
           class="fdm-business-table"
           size="small"
           table-layout="fixed"
-          :scroll="{ x: 1100 }"
+          :scroll="{ x: isPayment ? 1600 : 1180 }"
           :data-source="rows"
           :loading="loading"
           row-key="id"
@@ -534,7 +548,7 @@ watch(
                 <TableSummaryCell :index="0" align="right">
                   <span class="num">{{ pageTotal }}</span>
                 </TableSummaryCell>
-                <TableSummaryCell :index="1" :col-span="9">
+                <TableSummaryCell :index="1" :col-span="columns.length - 1">
                   本页合计
                 </TableSummaryCell>
               </TableSummaryRow>
@@ -571,7 +585,19 @@ watch(
               "
             >
               {{ financeRecordStatus(record) }}
-</Tag><span v-else-if="column.key === 'creator'" class="fdm-cell-line">{{
+            </Tag>
+            <AiReviewStatus
+              v-else-if="column.key === 'aiReview'"
+              :status="
+                statusFor(
+                  procurementFinanceAiCheckTypes[
+                    (record as ProcurementFinanceRecord).type
+                  ],
+                  record.standaloneId ?? record.id,
+                )
+              "
+            />
+            <span v-else-if="column.key === 'creator'" class="fdm-cell-line">{{
               record.createdByName || '—'
             }}</span><Button
               v-else-if="column.key === 'action'"

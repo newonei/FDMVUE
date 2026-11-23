@@ -234,6 +234,7 @@ vi.mock('ant-design-vue', () => {
         ),
     }),
     Empty: block,
+    Tag: block,
     Select: block,
     Modal: { confirm: mocks.confirm },
     message: { success: mocks.success, error: mocks.error },

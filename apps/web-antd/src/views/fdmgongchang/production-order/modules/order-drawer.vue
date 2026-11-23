@@ -28,6 +28,7 @@ import {
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { factoryToday } from '../../shared/factory-date';
+import { colorModeText, parameterText, textureText, thicknessText } from '../manufacturing';
 import { dateText, num, ORDER_STATUS, routeProblem, specText, timeText } from '../shared';
 import AuxPanel from './aux-panel.vue';
 import DeliveryModal from './delivery-modal.vue';
@@ -48,7 +49,7 @@ import SupplyMatch from './supply-match.vue';
  * 生产要求读采购单下单资料，数量跟着采购单走（接单后有变更要工厂确认）；做好的货开「生产入库」单进本厂仓库，
  * 采购单到货随之更新，之后由仓库销售出库或其它出库（库存中心）。
  */
-const props = defineProps<{ mode: 'factory' | 'mine'; orderId?: number }>();
+const props = defineProps<{ mode: 'factory' | 'mine'; orderId?: number; statusHint?: Api.Order['status'] }>();
 const emit = defineEmits<{ changed: []; copy: [order: Api.Order] }>();
 const open = defineModel<boolean>('open', { required: true });
 const { hasAccessByCodes } = useAccess();
@@ -56,6 +57,11 @@ const canHandleOrder = computed(() => hasAccessByCodes(['fdmgongchang:production
 
 const order = ref<Api.Order>();
 const loading = ref(false);
+const loadError = ref(false);
+let loadVersion = 0;
+const acceptInModal = ref(false);
+const acceptView = ref<'items' | 'material' | 'purchase' | 'stock'>('items');
+const acceptNavigation = ref<HTMLElement>();
 const busy = ref(false);
 const targetRefreshing = ref(false);
 const targetRefreshError = ref(false);
@@ -72,6 +78,7 @@ const configOpen = ref(false);
 const supplementItem = ref<Api.Item>();
 const supplementOpen = ref(false);
 function editProductionConfig(item: Api.Item) {
+  if (canHandle.value) selectAcceptView('items');
   configItemId.value = item.id;
   configOpen.value = true;
 }
@@ -105,32 +112,66 @@ const canSupplementRoute = computed(() => props.mode === 'factory' && order.valu
 /** 多个产品待定工艺时才显示批量设置。 */
 const canBatchRoute = computed(() => factoryRoute.value && canHandle.value && activeItems.value.length > 1);
 const canPlan = computed(() => props.mode === 'factory' && (canHandle.value || canProgress.value));
+const materialSaving = computed(() => !!materialPlan.value?.saving);
+const overlayProps = computed(() => acceptInModal.value ? {
+  centered: true,
+  closable: !busy.value && !configOpen.value && !materialSaving.value,
+  footer: canHandle.value ? undefined : null,
+  keyboard: !busy.value && !configOpen.value && !materialSaving.value,
+  maskClosable: false,
+  width: 'min(1440px, calc(100vw - 32px))',
+  wrapClassName: 'production-accept-dialog',
+} : {
+  resizeKey: 'factory-production-order',
+  width: 'min(760px, 100vw)',
+});
+const acceptViews = computed(() => [
+  { key: 'items', label: `产品明细（${order.value?.items.length ?? 0}）` },
+  { key: 'material', label: '用料逆推' },
+  { key: 'stock', label: '库存匹配' },
+  ...(fromPurchase.value ? [{ key: 'purchase', label: '采购资料' } as const] : []),
+] as const);
 const allDone = computed(() =>
   (order.value?.items ?? []).every((i) => num(i.completedQuantity) >= num(i.quantity)),
 );
 const deliveries = computed(() => order.value?.deliveries ?? []);
 
+function selectAcceptView(view: typeof acceptView.value) {
+  if (view === acceptView.value) return;
+  acceptView.value = view;
+  const body = acceptNavigation.value?.closest('.ant-modal-body');
+  if (body) body.scrollTop = 0;
+}
+
 async function load() {
-  if (!props.orderId) return;
+  const id = props.orderId;
+  if (!id || !open.value) return;
+  const version = ++loadVersion;
+  loadError.value = false;
   targetRefreshError.value = false;
   loading.value = true;
   try {
-    order.value = await getProductionOrder(props.orderId);
-    const required = dateText(order.value.requiredDate);
+    const fresh = await getProductionOrder(id);
+    if (version !== loadVersion) return;
+    if (!order.value) acceptInModal.value = props.mode === 'factory' && canHandleOrder.value && fresh.status === 'SUBMITTED';
+    order.value = fresh;
+    const required = dateText(fresh.requiredDate);
     promisedDate.value = required ? dayjs(required) : undefined;
     reply.value = '';
     editingRoute.value = undefined;
+    await loadRoutes();
+  } catch {
+    if (version === loadVersion) loadError.value = true;
   } finally {
-    loading.value = false;
+    if (version === loadVersion) loading.value = false;
   }
-  await loadRoutes();
 }
 
 /** 工厂定工艺：已定过的沿用，没定过的带出这个产品上次在本厂用的工艺。 */
 async function loadRoutes() {
   const o = order.value;
   if (!o || props.mode !== 'factory' || !factoryRoute.value || !['ACCEPTED', 'SUBMITTED'].includes(o.status)) return;
-  routeOptions.value = await getRouteOptions(o.factoryId).catch(() => undefined);
+  const options = await getRouteOptions(o.factoryId).catch(() => undefined);
   const next: Record<number, RouteDraft> = {};
   await Promise.all(
     o.items.map(async (i) => {
@@ -142,6 +183,8 @@ async function loadRoutes() {
       next[i.id] = last ? { routeId: last.routeId ?? undefined, steps: [...last.steps] } : { steps: [] };
     }),
   );
+  if (order.value !== o) return;
+  routeOptions.value = options;
   drafts.value = next;
   batchDraft.value = { steps: [] };
   batchIds.value = o.items.filter((i) => num(i.quantity) > 0).map((i) => i.id);
@@ -227,15 +270,26 @@ function confirmChange() {
   return run(() => confirmProductionOrderChange(id), '已确认采购单变更');
 }
 
-watch(open, (value) => {
+watch(() => [open.value, props.orderId] as const, ([value]) => {
+  ++loadVersion;
   ++targetRefreshVersion;
+  order.value = undefined;
+  routeOptions.value = undefined;
+  drafts.value = {};
+  batchDraft.value = { steps: [] };
+  batchIds.value = [];
+  configOpen.value = false;
+  configItemId.value = undefined;
   targetRefreshing.value = false;
   targetRefreshError.value = false;
   supplementOpen.value = false;
   supplementItem.value = undefined;
-  if (value) load();
-  else order.value = undefined;
-});
+  if (value) {
+    acceptView.value = 'items';
+    acceptInModal.value = props.mode === 'factory' && canHandleOrder.value && (!props.statusHint || props.statusHint === 'SUBMITTED');
+    load();
+  }
+}, { immediate: true });
 
 async function run(action: () => Promise<unknown>, text: string) {
   busy.value = true;
@@ -252,7 +306,7 @@ async function run(action: () => Promise<unknown>, text: string) {
 }
 
 function accept() {
-  if (targetRefreshing.value || targetRefreshError.value) return;
+  if (loadError.value || materialSaving.value || targetRefreshing.value || targetRefreshError.value) return;
   if (!order.value) return;
   const id = order.value.id;
   if (!promisedDate.value) {
@@ -270,6 +324,7 @@ function accept() {
     for (const item of activeItems.value) {
       const problem = draftProblem(item);
       if (problem) {
+        selectAcceptView('items');
         message.warning(`「${item.productName}」：${problem}`);
         return;
       }
@@ -289,7 +344,7 @@ function accept() {
 }
 
 function reject() {
-  if (!order.value) return;
+  if (!order.value || loadError.value || materialSaving.value) return;
   if (!reply.value.trim()) {
     message.warning('退回时请写明原因，方便下单人修改');
     return;
@@ -367,9 +422,17 @@ function producedQty(item: Api.Item) {
 </script>
 
 <template>
-  <FdmResizableDrawer resize-key="factory-production-order" v-model:open="open" :title="order ? `生产订单 ${order.orderNo}` : '生产订单'" width="min(760px, 100vw)">
+  <component
+    :is="acceptInModal ? Modal : FdmResizableDrawer"
+    v-model:open="open"
+    v-bind="overlayProps"
+    :title="order ? `生产订单 ${order.orderNo}` : '生产订单'"
+  >
     <Spin :spinning="loading">
-      <div v-if="order" class="flex flex-col gap-4 text-sm">
+      <Alert v-if="loadError" type="error" show-icon message="订单加载失败">
+        <template #action><Button size="small" @click="load">重新加载</Button></template>
+      </Alert>
+      <div v-else-if="order" class="flex flex-col gap-4 text-sm">
         <div class="flex flex-wrap items-center gap-2">
           <Tag v-if="status" :color="status.color" class="m-0">{{ status.label }}</Tag>
           <span class="text-muted-foreground">{{ order.factoryName }}</span>
@@ -391,42 +454,64 @@ function producedQty(item: Api.Item) {
         <p v-else-if="fromPurchase && order.sourceChangeNote && order.status === 'SUBMITTED'" class="m-0 text-xs text-warning">
           {{ order.sourceChangeNote }}
         </p>
-        <Descriptions :column="{ xs: 1, sm: 2 }" size="small" bordered>
-          <Descriptions.Item v-if="fromPurchase" :span="2" label="来源">
-            <SourcePurchaseLink :order="order" />
-            <template v-if="order.sourceContractCode"> · 合同 {{ order.sourceContractCode }}</template>
-            <span v-if="order.customerName" class="text-muted-foreground">（{{ order.customerName }}）</span>
-          </Descriptions.Item>
-          <Descriptions.Item :label="fromPurchase ? '采购员' : '下单人'">{{ order.requesterName }}<span v-if="order.requesterDeptName" class="text-muted-foreground">（{{ order.requesterDeptName }}）</span></Descriptions.Item>
-          <Descriptions.Item label="下单时间">{{ timeText(order.createTime) }}</Descriptions.Item>
-          <Descriptions.Item :label="fromPurchase ? '采购单交期' : '希望交货'">{{ dateText(order.requiredDate) || '没填' }}</Descriptions.Item>
-          <Descriptions.Item label="工厂交期">{{ dateText(order.promisedDate) || '—' }}</Descriptions.Item>
-          <Descriptions.Item v-if="order.remark" :span="2" label="备注">{{ order.remark }}</Descriptions.Item>
-          <Descriptions.Item v-if="order.reply" :span="2" :label="order.status === 'REJECTED' ? '退回原因' : '工厂回复'">
-            {{ order.reply }}<span class="text-muted-foreground"> — {{ order.handlerName }} {{ timeText(order.handledAt) }}</span>
-          </Descriptions.Item>
-        </Descriptions>
+        <div class="flex flex-col gap-3" :class="{ 'accept-overview': canHandle }">
+          <Descriptions :column="{ xs: 1, sm: 2 }" size="small" bordered>
+            <Descriptions.Item v-if="fromPurchase" :span="2" label="来源">
+              <SourcePurchaseLink :order="order" />
+              <template v-if="order.sourceContractCode"> · 合同 {{ order.sourceContractCode }}</template>
+              <span v-if="order.customerName" class="text-muted-foreground">（{{ order.customerName }}）</span>
+            </Descriptions.Item>
+            <Descriptions.Item :label="fromPurchase ? '采购员' : '下单人'">{{ order.requesterName }}<span v-if="order.requesterDeptName" class="text-muted-foreground">（{{ order.requesterDeptName }}）</span></Descriptions.Item>
+            <Descriptions.Item label="下单时间">{{ timeText(order.createTime) }}</Descriptions.Item>
+            <Descriptions.Item :label="fromPurchase ? '采购单交期' : '希望交货'">{{ dateText(order.requiredDate) || '没填' }}</Descriptions.Item>
+            <Descriptions.Item label="工厂交期">{{ dateText(order.promisedDate) || '—' }}</Descriptions.Item>
+            <Descriptions.Item v-if="order.remark" :span="2" label="备注">{{ order.remark }}</Descriptions.Item>
+            <Descriptions.Item v-if="order.reply" :span="2" :label="order.status === 'REJECTED' ? '退回原因' : '工厂回复'">
+              {{ order.reply }}<span class="text-muted-foreground"> — {{ order.handlerName }} {{ timeText(order.handledAt) }}</span>
+            </Descriptions.Item>
+          </Descriptions>
 
-        <section v-if="canHandle" class="accept-form flex flex-col gap-3 rounded-lg border border-primary/25 bg-primary/5 p-4">
-          <h3 class="m-0 text-base font-semibold">接单处理</h3>
-          <p class="m-0 text-xs text-muted-foreground">先回复交期，再逐产品确认制造参数和工艺。基础参数完整并保存后才能接单。</p>
-          <Alert v-if="incompleteItems.length > 0" type="warning" show-icon :message="`${incompleteItems.length} 个产品尚未完整确认生产参数，请在明细中点击「修改参数与工艺」补齐。`" />
-          <label for="po-promised" class="flex flex-col gap-1 text-xs text-muted-foreground">
-            {{ fromPurchase ? '回复交期（默认是采购单交期，没填要自己选）' : '回复交期（默认是下单人希望的日期）' }}
-            <DatePicker id="po-promised" v-model:value="promisedDate" :disabled-date="disabledDate" class="w-full sm:w-60" />
-          </label>
-          <label for="po-reply" class="flex flex-col gap-1 text-xs text-muted-foreground">
-            说明（退回时必填）
-            <Input id="po-reply" v-model:value="reply" :maxlength="255" placeholder="例如 排在下周三开工 / 这个颜色缺料" />
-          </label>
-          <p v-if="fromPurchase" class="m-0 text-xs text-muted-foreground">
-            工艺由工厂定：在下方产品明细中选好要走的工序再接单；没开工序单前都还能改。接单后再按采购单定辅料用量。
-          </p>
-        </section>
+          <section v-if="canHandle" class="flex min-w-0 flex-col justify-center gap-2 rounded-lg border border-primary/25 bg-primary/5 px-4 py-3">
+            <h3 class="m-0 text-base font-semibold">接单处理</h3>
+            <div class="accept-form-fields">
+              <label for="po-promised" class="flex flex-col gap-1 text-xs text-muted-foreground">
+                回复交期（接单必填）
+                <DatePicker id="po-promised" v-model:value="promisedDate" :disabled-date="disabledDate" class="w-full" />
+              </label>
+              <label for="po-reply" class="flex min-w-0 flex-col gap-1 text-xs text-muted-foreground">
+                工厂回复（退回时必填）
+                <Input id="po-reply" v-model:value="reply" :maxlength="255" placeholder="填写交期说明或退回原因" />
+              </label>
+            </div>
+          </section>
+        </div>
 
-        <section class="flex flex-col gap-2">
-          <h3 class="m-0 text-sm font-semibold">明细</h3>
-          <div v-if="canBatchRoute" class="flex flex-col gap-2 rounded-md bg-muted/40 p-3">
+        <Alert v-if="targetRefreshError" type="warning" show-icon message="参数已保存，订单刷新失败。请重新加载后再接单或保存工艺，以免覆盖新参数。">
+          <template #action><Button size="small" :loading="targetRefreshing" @click="onTargetChanged">重新加载已保存参数</Button></template>
+        </Alert>
+
+        <nav v-if="canHandle" ref="acceptNavigation" aria-label="接单信息" class="accept-navigation">
+          <Button
+            v-for="view in acceptViews"
+            :key="view.key"
+            :aria-pressed="acceptView === view.key"
+            :type="acceptView === view.key ? 'primary' : 'text'"
+            @click="selectAcceptView(view.key)"
+          >
+{{ view.label }}
+</Button>
+        </nav>
+
+        <section v-show="!canHandle || acceptView === 'items'" aria-label="产品明细" class="grid gap-2" :class="{ 'accept-items-grid': canHandle }">
+          <h3 v-if="!canHandle" class="m-0 text-sm font-semibold">明细</h3>
+          <Alert
+            v-if="canHandle && incompleteItems.length > 0"
+            class="col-span-full"
+            type="warning"
+            show-icon
+            :message="`${incompleteItems.length} 个产品尚未完整确认生产参数，请补齐并保存后接单。`"
+          />
+          <div v-if="canBatchRoute" class="col-span-full flex flex-col gap-2 rounded-md bg-muted/40 p-3">
             <span class="text-xs font-semibold text-foreground">批量设置工序</span>
             <RoutePicker id="po-batch" v-model="batchDraft" :options="routeOptions" />
             <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs" role="group" aria-label="套用到哪些产品">
@@ -447,9 +532,9 @@ function producedQty(item: Api.Item) {
               <Button size="small" type="primary" @click="applyBatchRoute">套用到勾选的 {{ batchIds.length }} 个产品</Button>
             </span>
           </div>
-          <div v-for="i in order.items" :key="i.id" class="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border px-3 py-2">
-            <span class="flex min-w-0 flex-1 flex-col">
-              <span>{{ i.productName }}</span>
+          <div v-for="i in order.items" :key="i.id" class="flex flex-wrap items-start justify-between gap-3 rounded-md border border-border px-3 py-2.5">
+            <div class="flex min-w-0 flex-1 flex-col">
+              <span :class="{ 'font-medium': canHandle }">{{ i.productName }}</span>
               <span class="text-xs text-muted-foreground">{{ i.productCode }} · {{ specText(i) }}</span>
               <span class="flex flex-wrap gap-x-3">
                 <Button v-if="canPlan" class="!px-0" type="link" size="small" :disabled="targetRefreshing || targetRefreshError" @click="editProductionConfig(i)">修改参数与工艺</Button>
@@ -460,7 +545,14 @@ function producedQty(item: Api.Item) {
                 >补工序</Button>
               </span>
               <span v-if="canHandle && savedProductionConfigProblems(i).length > 0" class="text-xs text-orange-600">{{ savedProductionConfigProblems(i).join('；') }}</span>
-              <span v-if="i.printing" class="text-xs text-muted-foreground">{{ i.printing }}</span>
+              <div v-if="canHandle && i.targetConfirmedAt" class="my-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                <span>{{ colorModeText(i.targetColorMode) }} · 成品总厚 {{ thicknessText(i.targetThickness) }}</span>
+                <span>正面 {{ parameterText(i.targetFrontColor) }} · {{ thicknessText(i.targetFrontThickness) }} · {{ textureText(i, 'FRONT') }}</span>
+                <span v-if="i.targetConstructionType === 'DOUBLE_LAYER'">反面 {{ parameterText(i.targetBackColor) }} · {{ thicknessText(i.targetBackThickness) }} · {{ textureText(i, 'BACK') }}</span>
+              </div>
+              <span v-if="i.printing || i.packaging" class="text-xs text-muted-foreground">
+                <template v-if="i.printing">印花：{{ i.printing }}</template><template v-if="i.printing && i.packaging"> · </template><template v-if="i.packaging">包装：{{ i.packaging }}</template>
+              </span>
               <span v-if="(i.auxUsages ?? []).length > 0" class="text-xs text-muted-foreground">
                 辅料：{{
                   (i.auxUsages ?? [])
@@ -512,7 +604,7 @@ function producedQty(item: Api.Item) {
                   </span>
                 </template>
               </span>
-            </span>
+            </div>
             <span class="flex shrink-0 flex-col items-end gap-1 text-right">
               <span><b>{{ num(i.quantity) }}</b> {{ i.unit }}</span>
               <span v-if="order.status !== 'SUBMITTED' && fromPurchase" class="text-xs text-muted-foreground">
@@ -536,22 +628,23 @@ function producedQty(item: Api.Item) {
           </div>
         </section>
 
-        <PurchaseSheet v-if="fromPurchase" :order-id="order.id" :items="order.items" />
-
-        <AuxPanel
-          v-if="fromPurchase && mode === 'factory'"
-          :key="`aux-${order.id}-${order.items.map((i) => (i.processes ?? []).join(',')).join('|')}`"
-          :editable="canProgress"
-          :items="order.items"
-          :order-id="order.id"
-          :route-options="routeOptions"
-        />
-
-        <Alert v-if="targetRefreshError" type="warning" show-icon message="参数已保存，订单刷新失败。请重新加载后再接单或保存工艺，以免覆盖新参数。">
-          <template #action><Button size="small" :loading="targetRefreshing" @click="onTargetChanged">重新加载已保存参数</Button></template>
-        </Alert>
-        <SupplyMatch v-if="canPlan" :items="order.items" :order-id="order.id" />
-        <MaterialPlan v-if="canPlan" ref="materialPlan" :editable="canPlan" :order-id="order.id" />
+        <div v-if="fromPurchase" v-show="!canHandle || acceptView === 'purchase'" class="flex flex-col gap-4">
+          <PurchaseSheet :order-id="order.id" :items="order.items" />
+          <AuxPanel
+            v-if="mode === 'factory'"
+            :key="`aux-${order.id}-${order.items.map((i) => (i.processes ?? []).join(',')).join('|')}`"
+            :editable="canProgress"
+            :items="order.items"
+            :order-id="order.id"
+            :route-options="routeOptions"
+          />
+        </div>
+        <section v-if="canPlan" v-show="!canHandle || acceptView === 'stock'" aria-label="库存匹配">
+          <SupplyMatch :items="order.items" :order-id="order.id" />
+        </section>
+        <section v-if="canPlan" v-show="!canHandle || acceptView === 'material'" aria-label="用料逆推">
+          <MaterialPlan ref="materialPlan" :editable="canPlan" :order-id="order.id" />
+        </section>
 
         <p v-if="order.status === 'ACCEPTED' && fromPurchase" class="m-0 text-xs text-muted-foreground">
           这张单来自采购单：做好的货点「生产入库」开入库单进本厂仓库，采购单到货同一步更新；
@@ -624,6 +717,7 @@ function producedQty(item: Api.Item) {
           </Popconfirm>
         </div>
       </div>
+      <div v-else-if="loading" class="min-h-24"></div>
     </Spin>
     <DeliveryModal
       v-model:open="deliveryOpen"
@@ -656,15 +750,18 @@ function producedQty(item: Api.Item) {
     <template v-if="canHandle" #footer>
       <div class="accept-footer">
         <div class="min-w-0 flex-1 text-xs text-muted-foreground">
-          <b class="block text-sm text-foreground">{{ order?.orderNo }}</b>
-          <span v-if="targetRefreshError" class="text-destructive">请先重新加载已保存参数</span>
-          <span v-else>交期：{{ promisedDate?.format('YYYY-MM-DD') || '待填写' }} · {{ incompleteItems.length > 0 ? `${incompleteItems.length} 个产品待确认生产参数` : '基础参数已确认，请核对产品工艺后接单' }}</span>
+          <b class="block text-sm text-foreground">交期：{{ promisedDate?.format('YYYY-MM-DD') || '待填写' }}</b>
+          <div v-if="targetRefreshError" class="text-destructive">请先重新加载已保存参数</div>
+          <button v-else-if="incompleteItems.length > 0" type="button" class="text-left text-primary hover:underline disabled:opacity-50" :disabled="loading || loadError || materialSaving || targetRefreshing" @click="editProductionConfig(incompleteItems[0]!)">
+            {{ incompleteItems.length }} 个产品待确认生产参数 · 去补齐
+          </button>
+          <span v-else>基础参数已确认，请核对产品工艺</span>
         </div>
-        <Button :loading="busy" :disabled="loading || targetRefreshing || targetRefreshError" danger @click="reject">退回</Button>
-        <Button :loading="busy || targetRefreshing" :disabled="loading || targetRefreshError" type="primary" size="large" @click="accept">接单</Button>
+        <Button :loading="busy" :disabled="loading || loadError || materialSaving || targetRefreshing || targetRefreshError" danger @click="reject">退回</Button>
+        <Button :loading="busy || targetRefreshing" :disabled="loading || loadError || materialSaving || targetRefreshError" type="primary" size="large" @click="accept">接单</Button>
       </div>
     </template>
-  </FdmResizableDrawer>
+  </component>
   <ItemProductionConfigModal v-if="order && configItemId" v-model:open="configOpen" :order-id="order.id" :item-id="configItemId" @saved="onTargetChanged" />
   <RouteSupplementModal
     v-if="order && supplementItem"
@@ -674,15 +771,72 @@ function producedQty(item: Api.Item) {
 </template>
 
 <style scoped>
+.accept-form-fields {
+  display: grid;
+  grid-template-columns: minmax(146px, 168px) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.accept-navigation {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 0;
+  background: hsl(var(--background));
+  border-bottom: 1px solid hsl(var(--border));
+}
+
 .accept-footer {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
   align-items: center;
   padding: 6px 0;
+  text-align: left;
 }
 
 .accept-footer > .ant-btn-primary {
   min-width: 112px;
+}
+
+@media (min-width: 1050px) {
+  .accept-overview {
+    display: grid;
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  }
+
+  .accept-items-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 600px) {
+  .accept-form-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+</style>
+
+<style>
+.production-accept-dialog .ant-modal-content {
+  display: flex;
+  flex-direction: column;
+  min-height: min(700px, calc(100dvh - 32px));
+  max-height: calc(100dvh - 32px);
+}
+
+.production-accept-dialog .ant-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.production-accept-dialog .ant-modal-header,
+.production-accept-dialog .ant-modal-footer {
+  flex: none;
 }
 </style>

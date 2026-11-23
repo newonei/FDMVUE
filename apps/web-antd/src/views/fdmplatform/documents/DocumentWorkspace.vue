@@ -26,6 +26,8 @@ import {
 import dayjs from 'dayjs';
 
 import { getBusinessPage, getContract, getDirectory } from '#/api/fdmplatform';
+import AiReviewStatus from '#/views/fdmaicheck/components/AiReviewStatus.vue';
+import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewStatuses';
 
 import CompletionScopeFilter from '../components/CompletionScope.vue';
 import LineColumnSettings from '../components/LineColumnSettings.vue';
@@ -46,6 +48,10 @@ import {
   transferStatusOptions,
 } from '../purchase/request-transfer';
 import { channelFilter } from '../sales-channel';
+import {
+  contractRecordAiCheckTypes,
+  documentRowAiReviewTarget,
+} from './ai-check-types';
 import BusinessDocumentDetail from './BusinessDocumentDetail.vue';
 import {
   completionFilter,
@@ -144,6 +150,28 @@ const contractId = computed(() => queryContractId(route.query.contractId));
 const contractLabel = ref('');
 const directory = ref<Directory>();
 const records = ref<DocumentRow[]>([]);
+const reviewDocType = computed(() =>
+  purchaseInvoice.value
+    ? 'PURCHASE_INVOICE'
+    : contractRecordAiCheckTypes[effectiveKind.value],
+);
+const reviewTargets = computed(() =>
+  records.value.map((row) =>
+    documentRowAiReviewTarget(row, reviewDocType.value),
+  ),
+);
+const { statusFor, refresh: refreshReviewStatuses } = useAiReviewStatuses(() =>
+  routeActive.value ? reviewTargets.value : [],
+);
+function reviewStatus(row: DocumentRow) {
+  const { docType, docId } = documentRowAiReviewTarget(
+    row,
+    reviewDocType.value,
+  );
+  return docType
+    ? statusFor(docType, docId)
+    : { state: 'UNAVAILABLE' as const };
+}
 const loading = ref(false);
 const pageError = ref('');
 const keyword = ref('');
@@ -265,6 +293,9 @@ watch(
 const updateOrder = ref<'ASC' | 'DESC'>('DESC');
 const documentColumns = computed(() => [
   { title: '单据 / 关联合同', key: 'contract', width: 280, locked: true },
+  ...(reviewDocType.value || reviewTargets.value.some(({ docType }) => docType)
+    ? [{ title: 'AI 审核', key: 'aiReview', width: 180, locked: true }]
+    : []),
   { title: '客户', key: 'customer', width: 190, ellipsis: true },
   { title: '订单所属公司', key: 'company', width: 180 },
   ...config.value.fields.map((pair) => {
@@ -491,6 +522,10 @@ function search() {
   pageNo.value = 1;
   void load();
 }
+async function refreshDocuments() {
+  await load();
+  void refreshReviewStatuses();
+}
 async function loadContext() {
   contractLabel.value = '';
   if (contractId.value) {
@@ -561,7 +596,7 @@ function clearSearch() {
 }
 function actionSaved() {
   actionOpen.value = false;
-  void load();
+  void refreshDocuments();
 }
 function cancelReceipt(row: DocumentRow) {
   if (
@@ -685,7 +720,9 @@ onMounted(async () => {
                 ? `新建${config.title}`
                 : actionTitle(action)
             }}
-</Button><Button :loading="loading" @click="load">刷新</Button>
+</Button><Button :loading="loading" @click="refreshDocuments">
+刷新
+</Button>
 </Space><Alert v-if="contractId" type="info" show-icon>
           <template #message>
             <Space>
@@ -877,6 +914,10 @@ onMounted(async () => {
                 {{ record.contractName }}
               </div>
             </div>
+            <AiReviewStatus
+              v-else-if="column.key === 'aiReview'"
+              :status="reviewStatus(record as DocumentRow)"
+            />
             <RelatedLink
               v-else-if="column.key === 'customer'"
               class="fdm-cell-line"
@@ -952,13 +993,13 @@ onMounted(async () => {
       :open="Boolean(selectedStandaloneId) && routeActive"
       :kind="effectiveKind"
       @close="closeDetail"
-      @updated="load"
+      @updated="refreshDocuments"
     /><RecordDetail
       :open="detailOpen && routeActive"
       :kind="effectiveKind"
       :row="selectedRow"
       @close="closeDetail"
-      @updated="load"
+      @updated="refreshDocuments"
     /><DocumentAction
       :open="actionOpen && routeActive"
       :kind="actionKind"

@@ -7,6 +7,7 @@ import type {
 } from '#/api/fdmplatform/procurement';
 
 import { computed, defineAsyncComponent, ref, watch } from 'vue';
+import { useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
 import { downloadFileFromBlobPart } from '@vben/utils';
@@ -34,9 +35,13 @@ import {
   getPurchaseInvoicePage,
 } from '#/api/fdmplatform/procurement';
 import { getProcurementFinanceSummary } from '#/api/fdmplatform/procurement-finance';
+import AiReviewStatus from '#/views/fdmaicheck/components/AiReviewStatus.vue';
+import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewStatuses';
 
 import FilePreviewButton from '../../components/FilePreviewButton.vue';
 import { errorText } from '../../data';
+import { referenceId } from '../../documents/navigation';
+import { useOwnedRoute } from '../../documents/useOwnedRoute';
 import { useRouteOwner } from '../../documents/useRouteOwner';
 import FinanceDocument from '../../finance/procurement/components/FinanceDocument.vue';
 import InvoiceSourcesDialog from '../../finance/procurement/components/InvoiceSourcesDialog.vue';
@@ -68,7 +73,14 @@ const TYPE_NAMES: Record<PurchaseInvoice['invoiceType'], string> = {
   OTHER: '其他',
 };
 const active = useRouteOwner();
+const route = useOwnedRoute();
+const router = useRouter();
 const rows = ref<PurchaseInvoice[]>([]);
+const { statusFor, refresh: refreshReviewStatuses } = useAiReviewStatuses(() =>
+  active.value
+    ? rows.value.map((row) => ({ docType: 'PURCHASE_INVOICE', docId: row.id }))
+    : [],
+);
 const total = ref(0);
 const validTotals = ref<Array<{ amount: unknown; currency: string }>>([]);
 const page = ref(1);
@@ -97,6 +109,22 @@ const uploadOrder = ref<{
 }>();
 const openedOrder = ref<{ contractId: string; orderId: string }>();
 let sequence = 0;
+
+watch(
+  () => route.query.invoiceId,
+  (invoiceId) => {
+    detailId.value = referenceId(invoiceId);
+  },
+  { immediate: true },
+);
+
+function closeDetail() {
+  detailId.value = undefined;
+  if (!active.value || route.query.invoiceId === undefined) return;
+  const query = { ...route.query };
+  delete query.invoiceId;
+  void router.replace({ query });
+}
 
 function money(value: unknown) {
   const amount = new BigNumber(String(value ?? ''));
@@ -150,6 +178,7 @@ async function load() {
     rows.value = result.list;
     total.value = result.total;
     validTotals.value = result.validTotals;
+    void refreshReviewStatuses();
   } catch (error) {
     if (run === sequence) pageError.value = errorText(error);
   } finally {
@@ -330,7 +359,7 @@ watch(active, (value) => value && void load(), { immediate: true });
           size="small"
           row-key="id"
           table-layout="fixed"
-          :scroll="{ x: 1780 }"
+          :scroll="{ x: 1950 }"
           :data-source="rows"
           :loading="loading"
           :pagination="{
@@ -361,6 +390,7 @@ watch(active, (value) => value && void load(), { immediate: true });
             { title: '对应付款', key: 'payment', width: 140 },
             { title: '原件', key: 'file', width: 140, ellipsis: true },
             { title: '状态', key: 'status', width: 70 },
+            { title: 'AI 审核', key: 'aiReview', width: 170 },
             { title: '操作', key: 'action', width: 200, fixed: 'right' },
           ]"
           @change="
@@ -377,19 +407,19 @@ watch(active, (value) => value && void load(), { immediate: true });
                 <TableSummaryCell :index="0" align="right">
                   <span class="num">{{ pageTotal }}</span>
                 </TableSummaryCell>
-                <TableSummaryCell :index="1" :col-span="14">
+                <TableSummaryCell :index="1" :col-span="15">
                   本页合计（有效发票）
                 </TableSummaryCell>
-                <TableSummaryCell :index="15" />
+                <TableSummaryCell :index="16" />
               </TableSummaryRow>
               <TableSummaryRow class="sum-row">
                 <TableSummaryCell :index="0" align="right">
                   <span class="num">{{ allTotal }}</span>
                 </TableSummaryCell>
-                <TableSummaryCell :index="1" :col-span="14">
+                <TableSummaryCell :index="1" :col-span="15">
                   全部合计（有效发票）
                 </TableSummaryCell>
-                <TableSummaryCell :index="15" />
+                <TableSummaryCell :index="16" />
               </TableSummaryRow>
             </TableSummary>
           </template>
@@ -483,6 +513,10 @@ watch(active, (value) => value && void load(), { immediate: true });
             >
               {{ record.status === 'VALID' ? '有效' : '已作废' }}
             </Tag>
+            <AiReviewStatus
+              v-else-if="column.key === 'aiReview'"
+              :status="statusFor('PURCHASE_INVOICE', record.id)"
+            />
             <span v-else-if="column.key === 'action'" class="actions">
               <Button
                 type="link"
@@ -556,7 +590,7 @@ watch(active, (value) => value && void load(), { immediate: true });
       :open="!!detailId && active"
       :invoice-id="detailId"
       :reload="detailReload"
-      @close="detailId = undefined"
+      @close="closeDetail"
       @add-payment="addPayment"
       @open-order="openSourceOrder"
       @open-payment="(id) => (openedPayment = id)"

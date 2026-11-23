@@ -43,6 +43,7 @@ import { getProcurementSettings } from '#/api/fdmplatform/procurement';
 import { attachmentSize } from '#/api/fdmplatform/submission-files';
 import { businessDocumentActionWithAttachments } from '#/api/fdmplatform/submissions';
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
+import AiCheckPanel from '#/views/fdmaicheck/components/AiCheckPanel.vue';
 
 import ActionDialog from '../components/ActionDialog.vue';
 import AttachmentActions from '../components/AttachmentActions.vue';
@@ -54,6 +55,7 @@ import RecordTable from '../components/RecordTable.vue';
 import RenameFileDialog from '../components/RenameFileDialog.vue';
 import { errorText, label, money, rows } from '../data';
 import { downloadBlob } from '../purchase/manage/model';
+import { standaloneAiCheckType } from './ai-check-types';
 import {
   businessDocumentActionDefinition,
   businessDocumentActionDisabled,
@@ -72,6 +74,7 @@ import { useOwnedRoute } from './useOwnedRoute';
 const props = defineProps<{
   contractId?: string;
   embedded?: boolean;
+  expectedType?: string;
   id?: string;
   kind?: DocumentKind;
   open: boolean;
@@ -147,6 +150,9 @@ const actions = computed(
     ) ?? [],
 );
 const record = computed(() => view.value?.record);
+const aiCheckType = computed(() =>
+  view.value ? standaloneAiCheckType(view.value) : undefined,
+);
 async function load() {
   const run = ++sequence;
   view.value = undefined;
@@ -172,7 +178,11 @@ async function load() {
       value.contractId !== props.contractId
     )
       throw new Error('此单据不属于当前合同，请刷新后重新选择');
-    view.value = requireBusinessDocumentKind(value, props.kind);
+    view.value = requireBusinessDocumentKind(
+      value,
+      props.kind,
+      props.expectedType,
+    );
     directory.value = people;
     await loadFiles();
   } catch (error) {
@@ -221,7 +231,11 @@ async function removeUploadedFile(file: BusinessDocumentFile) {
     try {
       const value = await getBusinessDocument(file.documentId);
       if (run !== sequence) return;
-      view.value = requireBusinessDocumentKind(value, props.kind);
+      view.value = requireBusinessDocumentKind(
+        value,
+        props.kind,
+        props.expectedType,
+      );
       emit('updated', view.value);
       await loadFiles();
     } catch (error) {
@@ -279,7 +293,14 @@ async function upload(event: Event) {
   }
 }
 watch(
-  () => [props.open, props.id, props.kind, props.contractId, props.embedded],
+  () => [
+    props.open,
+    props.id,
+    props.kind,
+    props.contractId,
+    props.embedded,
+    props.expectedType,
+  ],
   () => {
     void load();
   },
@@ -513,6 +534,13 @@ async function submit(
       <Space direction="vertical" size="middle" style="width: 100%">
         <Alert v-if="pageError" type="error" show-icon :message="pageError" />
         <template v-if="view">
+          <AiCheckPanel
+            v-if="open && aiCheckType"
+            :doc-type="aiCheckType"
+            :doc-id="view.id"
+            :revision="view.version"
+            default-collapsed
+          />
           <Space wrap>
             <Button
               v-for="action in actions"

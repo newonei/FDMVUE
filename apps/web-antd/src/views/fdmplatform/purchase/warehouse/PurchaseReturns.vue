@@ -9,17 +9,25 @@ import { Alert, Button, Input, Select, Table, Tag } from 'ant-design-vue';
 
 import { getDirectory } from '#/api/fdmplatform';
 import { getProcurementSettings } from '#/api/fdmplatform/procurement';
-import { getPurchaseReturns } from '#/api/fdmplatform/warehouse';
+import {
+  getPurchaseReturn,
+  getPurchaseReturns,
+} from '#/api/fdmplatform/warehouse';
+import AiCheckPanel from '#/views/fdmaicheck/components/AiCheckPanel.vue';
+import AiReviewStatus from '#/views/fdmaicheck/components/AiReviewStatus.vue';
+import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewStatuses';
 
 import { errorText } from '../../data';
 import { personName } from '../../directory';
 import { linesTitle, money, qty } from './model';
+import { useWarehouseDocumentLink } from './useWarehouseDocumentLink';
 
 import './warehouse-pages.css';
 
 defineOptions({ name: 'FdmPlatformPurchaseReturns' });
 
 const rows = ref<PurchaseReturn[]>([]);
+const expandedRowKeys = ref<(number | string)[]>([]);
 const total = ref(0);
 const pageNo = ref(1);
 const keyword = ref('');
@@ -28,6 +36,26 @@ const warehouses = ref<ProcurementSetting[]>([]);
 const directory = ref<Directory>();
 const loading = ref(false);
 const error = ref('');
+const { active, linkedId } = useWarehouseDocumentLink(
+  'returnId',
+  getPurchaseReturn,
+  (document) => {
+    keyword.value = document.code;
+    warehouseId.value = undefined;
+    pageNo.value = 1;
+    rows.value = [document];
+    total.value = 1;
+    expandedRowKeys.value = [document.id];
+  },
+  (error_) => {
+    error.value = errorText(error_);
+  },
+);
+const { statusFor, refresh: refreshReviewStatuses } = useAiReviewStatuses(() =>
+  active.value
+    ? rows.value.map(({ id }) => ({ docType: 'PURCHASE_RETURN', docId: id }))
+    : [],
+);
 
 const columns = [
   { title: '退货单号', key: 'code', width: 170 },
@@ -38,6 +66,7 @@ const columns = [
   { title: '金额', key: 'amount', width: 130, align: 'right' as const },
   { title: '原因', key: 'reason', width: 180 },
   { title: '退货日期 / 经办', key: 'date', width: 130 },
+  { title: 'AI 审核', key: 'aiReview', width: 180 },
 ];
 
 async function load(reset = false) {
@@ -59,11 +88,12 @@ async function load(reset = false) {
     loading.value = false;
   }
 }
+
 function sum(row: PurchaseReturn) {
   return row.lines.reduce((value, line) => value + Number(line.quantity), 0);
 }
 onMounted(async () => {
-  void load();
+  if (!linkedId.value) void load();
   try {
     [warehouses.value, directory.value] = await Promise.all([
       getProcurementSettings('warehouses'),
@@ -96,7 +126,9 @@ onMounted(async () => {
         @change="load(true)"
       />
       <span class="grow"></span>
-      <Button :loading="loading" @click="load()">刷新</Button>
+      <Button :loading="loading" @click="load().then(refreshReviewStatuses)">
+        刷新
+      </Button>
     </div>
     <Alert v-if="error" type="error" :message="error" show-icon />
     <Table
@@ -106,8 +138,9 @@ onMounted(async () => {
       row-key="id"
       :columns="columns"
       :data-source="rows"
+      v-model:expanded-row-keys="expandedRowKeys"
       :loading="loading"
-      :scroll="{ x: 1310 }"
+      :scroll="{ x: 1490 }"
       :pagination="{
         current: pageNo,
         pageSize: 20,
@@ -126,6 +159,12 @@ onMounted(async () => {
         还没有采购退货单。在「采购入库」找到对应入库单，点「退货」。
       </template>
       <template #expandedRowRender="{ record }">
+        <AiCheckPanel
+          v-if="active && expandedRowKeys.includes(record.id)"
+          doc-type="PURCHASE_RETURN"
+          :doc-id="record.id"
+          default-collapsed
+        />
         <table class="lines">
           <tr>
             <th>产品 / 规格</th>
@@ -183,6 +222,10 @@ onMounted(async () => {
             personName(directory, record.createdBy)
           }}</span>
         </div>
+        <AiReviewStatus
+          v-else-if="column.key === 'aiReview'"
+          :status="statusFor('PURCHASE_RETURN', record.id)"
+        />
       </template>
     </Table>
   </div>

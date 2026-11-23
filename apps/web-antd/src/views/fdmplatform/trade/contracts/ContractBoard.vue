@@ -40,8 +40,8 @@ import {
   getContractBoard,
   getContractBoardOverview,
 } from '#/api/fdmplatform/contract-board';
-import AiRiskTag from '#/views/fdmaicheck/components/AiRiskTag.vue';
-import { useAiRiskLevels } from '#/views/fdmaicheck/components/useAiRiskLevels';
+import AiReviewStatus from '#/views/fdmaicheck/components/AiReviewStatus.vue';
+import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewStatuses';
 
 import ContractDetail from '../../components/ContractDetail.vue';
 import LineColumnSettings from '../../components/LineColumnSettings.vue';
@@ -61,7 +61,10 @@ import RelatedLink from '../../documents/RelatedLink.vue';
 import { useOwnedRoute } from '../../documents/useOwnedRoute';
 import { useRouteOwner } from '../../documents/useRouteOwner';
 import ContractEditor from '../../products/components/ContractEditor.vue';
-import { contractInternalOrderNo } from '../../sales-channel';
+import {
+  contractAiCheckType,
+  contractInternalOrderNo,
+} from '../../sales-channel';
 import ContractFilterPanel from './ContractFilterPanel.vue';
 import ContractRowPanel from './ContractRowPanel.vue';
 import {
@@ -113,9 +116,14 @@ const directory = ref<Directory>();
 provide('fdmPlatformDirectory', directory);
 const overview = ref<ContractBoardOverview>();
 const rows = ref<ContractBoardRow[]>([]);
-const { levels: riskLevels } = useAiRiskLevels('CONTRACT', () =>
-  rows.value.map((row) => row.id),
+const { statusFor, refresh: refreshReviewStatuses } = useAiReviewStatuses(() =>
+  routeActive.value
+    ? rows.value.map((row) => ({ docType: reviewType(row), docId: row.id }))
+    : [],
 );
+function reviewType(row: ContractBoardRow) {
+  return contractAiCheckType(row.salesChannel ?? props.salesChannel);
+}
 const total = ref(0);
 const pageNo = ref(1);
 const pageSize = ref(20);
@@ -248,6 +256,7 @@ const boardColumns = computed(() =>
   tab.value === 'JINZHI'
     ? [
         { title: '内部单号', key: 'contract', width: 190, locked: true },
+        { title: 'AI 审核', key: 'aiReview', width: 170, locked: true },
         { title: '客户', key: 'customer', width: 190 },
         { title: '签订日期', key: 'signed', width: 110, ...sortable('SIGNED') },
         { title: '产品', key: 'product', width: 230 },
@@ -269,6 +278,7 @@ const boardColumns = computed(() =>
           width: 196,
           locked: true,
         },
+        { title: 'AI 审核', key: 'aiReview', width: 170, locked: true },
         { title: '客户', key: 'customer', width: 150 },
         { title: '产品', key: 'product', width: 210 },
         { title: '进度', key: 'progress', width: 186 },
@@ -346,6 +356,7 @@ async function load(reset = false) {
     if (run !== sequence) return;
     rows.value = result.list;
     total.value = result.total;
+    void refreshReviewStatuses();
     expandedKeys.value = expandedKeys.value.filter((key) =>
       result.list.some((row) => row.id === key),
     );
@@ -1015,17 +1026,20 @@ onMounted(async () => {
               <span
                 v-if="
                   tab !== 'JINZHI' &&
-                  (record.sample ||
-                    record.status === 'DRAFT' ||
-                    riskLevels[record.id])
+                  (record.sample || record.status === 'DRAFT')
                 "
                 class="tags"
               >
                 <Tag v-if="record.status === 'DRAFT'" class="mini">草稿</Tag>
                 <Tag v-if="record.sample" class="mini">样品</Tag>
-                <AiRiskTag :level="riskLevels[record.id]" />
               </span>
             </div>
+            <AiReviewStatus
+              v-else-if="column.key === 'aiReview'"
+              :status="
+                statusFor(reviewType(record as ContractBoardRow), record.id)
+              "
+            />
             <div v-else-if="column.key === 'customer'" class="cell">
               <RelatedLink
                 :target="entityTarget('customer', record.customerId)"

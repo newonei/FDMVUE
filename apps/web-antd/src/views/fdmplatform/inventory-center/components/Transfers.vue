@@ -17,12 +17,17 @@ import {
 import { getDirectory } from '#/api/fdmplatform';
 import {
   getInventoryWarehouses,
+  getTransfer,
   getTransfers,
 } from '#/api/fdmplatform/warehouse';
+import AiCheckPanel from '#/views/fdmaicheck/components/AiCheckPanel.vue';
+import AiReviewStatus from '#/views/fdmaicheck/components/AiReviewStatus.vue';
+import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewStatuses';
 
 import { errorText } from '../../data';
 import { personName } from '../../directory';
 import { linesTitle, money, qty } from '../../purchase/warehouse/model';
+import { useWarehouseDocumentLink } from '../../purchase/warehouse/useWarehouseDocumentLink';
 import VoidDialog from '../../purchase/warehouse/VoidDialog.vue';
 import PickDialog from './PickDialog.vue';
 
@@ -31,6 +36,7 @@ import '../../purchase/warehouse/warehouse-pages.css';
 defineOptions({ name: 'FdmInventoryTransfers' });
 
 const rows = ref<Transfer[]>([]);
+const expandedRowKeys = ref<(number | string)[]>([]);
 const total = ref(0);
 const pageNo = ref(1);
 const keyword = ref('');
@@ -41,6 +47,26 @@ const loading = ref(false);
 const error = ref('');
 const creating = ref(false);
 const voiding = ref<Transfer>();
+const { active, linkedId } = useWarehouseDocumentLink(
+  'transferId',
+  getTransfer,
+  (document) => {
+    keyword.value = document.code;
+    warehouseId.value = undefined;
+    pageNo.value = 1;
+    rows.value = [document];
+    total.value = 1;
+    expandedRowKeys.value = [document.id];
+  },
+  (error_) => {
+    error.value = errorText(error_);
+  },
+);
+const { statusFor, refresh: refreshReviewStatuses } = useAiReviewStatuses(() =>
+  active.value
+    ? rows.value.map(({ id }) => ({ docType: 'STOCK_TRANSFER', docId: id }))
+    : [],
+);
 
 const columns = [
   { title: '调拨单号', key: 'code', width: 180 },
@@ -48,6 +74,7 @@ const columns = [
   { title: '产品', key: 'product', width: 240 },
   { title: '数量', key: 'quantity', width: 100, align: 'right' as const },
   { title: '调拨日期 / 经办', key: 'date', width: 130 },
+  { title: 'AI 审核', key: 'aiReview', width: 180 },
   { title: '操作', key: 'action', width: 110, fixed: 'right' as const },
 ];
 
@@ -84,7 +111,7 @@ function voided(code: string) {
   void load();
 }
 onMounted(async () => {
-  void load();
+  if (!linkedId.value) void load();
   try {
     [warehouses.value, directory.value] = await Promise.all([
       getInventoryWarehouses(),
@@ -117,7 +144,9 @@ onMounted(async () => {
         @change="load(true)"
       />
       <span class="grow"></span>
-      <Button :loading="loading" @click="load()">刷新</Button>
+      <Button :loading="loading" @click="load().then(refreshReviewStatuses)">
+        刷新
+      </Button>
       <Button type="primary" @click="creating = true">新建调拨</Button>
     </div>
     <Alert v-if="error" type="error" :message="error" show-icon />
@@ -128,8 +157,9 @@ onMounted(async () => {
       row-key="id"
       :columns="columns"
       :data-source="rows"
+      v-model:expanded-row-keys="expandedRowKeys"
       :loading="loading"
-      :scroll="{ x: 980 }"
+      :scroll="{ x: 1160 }"
       :row-class-name="
         (record: Transfer) => (record.status === 'VOIDED' ? 'voided' : '')
       "
@@ -151,6 +181,12 @@ onMounted(async () => {
         还没有调拨单。货从一个仓库搬到另一个仓库时点右上角「新建调拨」，成本跟着货走。
       </template>
       <template #expandedRowRender="{ record }">
+        <AiCheckPanel
+          v-if="active && expandedRowKeys.includes(record.id)"
+          doc-type="STOCK_TRANSFER"
+          :doc-id="record.id"
+          default-collapsed
+        />
         <table class="lines">
           <tr>
             <th>产品 / 规格</th>
@@ -199,6 +235,10 @@ onMounted(async () => {
             personName(directory, record.createdBy)
           }}</span>
         </div>
+        <AiReviewStatus
+          v-else-if="column.key === 'aiReview'"
+          :status="statusFor('STOCK_TRANSFER', record.id)"
+        />
         <div v-else-if="column.key === 'action'" class="row-actions">
           <span
             v-if="record.status === 'VOIDED'"

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   channelFilter,
+  contractAiCheckType,
   isSampleBusinessType,
   salesChannelOf,
   sampleBusinessType,
@@ -28,6 +29,13 @@ describe('sales channel', () => {
     expect(isSampleBusinessType('DOMESTIC_SAMPLE')).toBe(true);
     expect(isSampleBusinessType('SAMPLE')).toBe(true);
     expect(isSampleBusinessType('DOMESTIC')).toBe(false);
+  });
+
+  it('routes samples and legacy contracts to their business line check', () => {
+    expect(contractAiCheckType('DOMESTIC')).toBe('CONTRACT_DOMESTIC');
+    expect(contractAiCheckType('DOMESTIC_SAMPLE')).toBe('CONTRACT_DOMESTIC');
+    expect(contractAiCheckType('SAMPLE')).toBe('CONTRACT_FOREIGN');
+    expect(contractAiCheckType(null)).toBe('CONTRACT_FOREIGN');
   });
 
   it('drops the channel filter when a contract is already selected', () => {

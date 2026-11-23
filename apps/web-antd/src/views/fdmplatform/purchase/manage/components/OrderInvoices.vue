@@ -24,6 +24,8 @@ import {
   getOrderInvoices,
   setOrderNoInvoice,
 } from '#/api/fdmplatform/procurement';
+import AiReviewStatus from '#/views/fdmaicheck/components/AiReviewStatus.vue';
+import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewStatuses';
 
 import FilePreviewButton from '../../../components/FilePreviewButton.vue';
 import { errorText } from '../../../data';
@@ -47,6 +49,9 @@ const TYPE_NAMES: Record<PurchaseInvoice['invoiceType'], string> = {
   OTHER: '其他',
 };
 const invoices = ref<PurchaseInvoice[]>([]);
+const { statusFor, refresh: refreshReviewStatuses } = useAiReviewStatuses(() =>
+  invoices.value.map((row) => ({ docType: 'PURCHASE_INVOICE', docId: row.id })),
+);
 const invoiced = ref('0');
 const loading = ref(false);
 const editing = ref<PurchaseInvoice>();
@@ -81,6 +86,7 @@ async function load() {
       b.createdAt.localeCompare(a.createdAt),
     );
     invoiced.value = String(result.invoicedAmount);
+    void refreshReviewStatuses();
   } catch (error_) {
     error.value = errorText(error_);
   } finally {
@@ -165,6 +171,7 @@ watch(() => props.view.id, load, { immediate: true });
       :data-source="invoices"
       :loading="loading"
       :pagination="false"
+      :scroll="{ x: 900 }"
       :columns="[
         { title: '发票号码', key: 'invoiceNo' },
         { title: '原件', key: 'file' },
@@ -174,6 +181,7 @@ watch(() => props.view.id, load, { immediate: true });
         { title: '开票日期', dataIndex: 'invoiceDate' },
         { title: '对应付款', key: 'payment' },
         { title: '状态', key: 'status' },
+        { title: 'AI 审核', key: 'aiReview', width: 170 },
         { title: '', key: 'action', width: 100 },
       ]"
     >
@@ -182,6 +190,10 @@ watch(() => props.view.id, load, { immediate: true });
         <span v-if="column.key === 'invoiceNo'">{{
           record.invoiceNo ?? '—'
         }}</span>
+        <AiReviewStatus
+          v-else-if="column.key === 'aiReview'"
+          :status="statusFor('PURCHASE_INVOICE', record.id)"
+        />
         <template v-else-if="column.key === 'file' && record.file">
           <Button
             type="link"

@@ -55,11 +55,17 @@ import { downloadContractProductAttachment } from '#/api/fdmplatform/products';
 import { getStockOuts } from '#/api/fdmplatform/warehouse';
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 import AiCheckPanel from '#/views/fdmaicheck/components/AiCheckPanel.vue';
+import AiReviewStatus from '#/views/fdmaicheck/components/AiReviewStatus.vue';
+import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewStatuses';
 
 import { productCategoryLabel } from '../contract-categories';
 import { errorText, label, money, receiptStatusLabel, rows } from '../data';
 import { formatTemporalField } from '../date-display';
 import { departmentLabel, personLabel, personName } from '../directory';
+import {
+  receiptAiReviewType,
+  shipmentAiReviewType,
+} from '../documents/ai-check-types';
 import BusinessDocumentDetail from '../documents/BusinessDocumentDetail.vue';
 import DocumentAction from '../documents/DocumentAction.vue';
 import ImportedContractCompletion from '../documents/ImportedContractCompletion.vue';
@@ -74,7 +80,11 @@ import { contractConfigurationSummary } from '../products/components/contract-pr
 import ContractEditor from '../products/components/ContractEditor.vue';
 import OrderSubDocMenu from '../purchase/manage/components/OrderSubDocMenu.vue';
 import { linesTitle } from '../purchase/warehouse/model';
-import { contractInternalOrderNo, salesChannelOf } from '../sales-channel';
+import {
+  contractAiCheckType,
+  contractInternalOrderNo,
+  salesChannelOf,
+} from '../sales-channel';
 import { detailTabFor } from '../workspaces';
 import { contractMainline, contractNextStep } from './contract-mainline';
 import { contractItemPipeline } from './contract-progress';
@@ -391,6 +401,50 @@ const purchaseRows = computed(() => {
 const shipmentRows = computed(() => rows(props.contract?.shipments));
 const receiptRows = computed(() => rows(props.contract?.finance?.receipts));
 const invoiceRows = computed(() => rows(props.contract?.finance?.invoices));
+const { statusFor } = useAiReviewStatuses(() => {
+  if (!props.open || !props.contract) return [];
+  switch (activeTab.value) {
+    case 'delivery': {
+      return [
+        ...stockOuts.value.map(({ id }) => ({
+          docType: 'STOCK_OUT' as const,
+          docId: id,
+        })),
+        ...shipmentRows.value.map((shipment) => ({
+          docType: shipmentAiReviewType(shipment),
+          docId: shipment.id,
+        })),
+      ];
+    }
+    case 'finance': {
+      return [
+        ...receiptRows.value.map((receipt) => ({
+          docType: receiptAiReviewType(receipt),
+          docId: receipt.id,
+        })),
+        ...invoiceRows.value.map(({ id }) => ({
+          docType: 'SALES_INVOICE' as const,
+          docId: id,
+        })),
+      ];
+    }
+    case 'purchase': {
+      return [
+        ...purchaseRows.value.requests.map(({ id }) => ({
+          docType: 'PURCHASE_REQUEST' as const,
+          docId: id,
+        })),
+        ...purchaseRows.value.orders.map(({ id }) => ({
+          docType: 'PURCHASE_ORDER' as const,
+          docId: id,
+        })),
+      ];
+    }
+    default: {
+      return [];
+    }
+  }
+});
 const itemName = (id: unknown) =>
   props.contract?.items.find((item) => item.id === id)?.skuName ?? '未匹配明细';
 function orderProgress(order: BusinessRecord) {
@@ -1021,7 +1075,12 @@ async function download(file: { id: string; name: string }) {
           </div>
         </section>
 
-        <AiCheckPanel v-if="!ended" doc-type="CONTRACT" :doc-id="contract.id" />
+        <AiCheckPanel
+          v-if="!ended"
+          :doc-type="contractAiCheckType(contract.businessType)"
+          :doc-id="contract.id"
+          :revision="contract.version"
+        />
 
         <Button
           v-if="
@@ -1171,7 +1230,10 @@ async function download(file: { id: string; name: string }) {
                   }}</span>
                   <span>{{ rows(request.items).length }} 项 · 需求
                     {{ requestDue(request) }}</span>
-                  <span>{{ label(request.assignmentStatus) }}</span>
+                  <span>{{ label(request.assignmentStatus) }}
+                    <AiReviewStatus
+                      :status="statusFor('PURCHASE_REQUEST', request.id)"
+                  /></span>
                 </div>
               </div>
               <p v-else class="muted">还没有采购申请</p>
@@ -1211,8 +1273,10 @@ async function download(file: { id: string; name: string }) {
                   <span class="strong">{{ order.code || '采购单' }} ·
                     {{ order.supplierName || '供应商未注明' }}</span>
                   <span>{{ nativeMoney(order.amount, order.currency) }}</span>
-                  <span>到货 {{ orderProgress(order) }} ·
-                    {{ label(order.status) }}</span>
+                  <span>到货 {{ orderProgress(order) }} · {{ label(order.status) }}
+                    <AiReviewStatus
+                      :status="statusFor('PURCHASE_ORDER', order.id)"
+                  /></span>
                 </button>
               </div>
               <p v-else class="muted">还没有采购单</p>
@@ -1258,9 +1322,8 @@ async function download(file: { id: string; name: string }) {
                     >{{ out.code }}</a>
                   <span>{{ out.warehouseName }}</span>
                   <span>{{ linesTitle(out.lines) }}</span>
-                  <span>{{
-                    out.status === 'VOIDED' ? '已作废' : out.shippedDate
-                  }}</span>
+                  <span>{{ out.status === 'VOIDED' ? '已作废' : out.shippedDate }}
+                    <AiReviewStatus :status="statusFor('STOCK_OUT', out.id)" /></span>
                 </div>
               </div>
               <p v-else-if="!stockOutsError" class="muted">还没有出库单</p>
@@ -1277,10 +1340,15 @@ async function download(file: { id: string; name: string }) {
                   <span>{{ shipment.kind === 'RETURN' ? '退回 ' : ''
                     }}{{ shipment.quantity }}</span>
                   <span>{{
-                    String(
-                      shipment.shippedDate ?? shipment.occurredAt ?? '',
-                    ).slice(0, 10) || '日期未填'
-                  }}</span>
+                      String(
+                        shipment.shippedDate ?? shipment.occurredAt ?? '',
+                      ).slice(0, 10) || '日期未填'
+                    }}
+                    <AiReviewStatus
+                      :status="
+                        statusFor(shipmentAiReviewType(shipment), shipment.id)
+                      "
+                  /></span>
                 </div>
               </div>
               <p v-else class="muted">还没有发货记录</p>
@@ -1460,7 +1528,11 @@ async function download(file: { id: string; name: string }) {
                             ? 'green'
                             : 'orange'
                       "
-                      >{{ receiptStatusLabel(receipt.status) }}</Tag></span>
+                      >{{ receiptStatusLabel(receipt.status) }}</Tag><AiReviewStatus
+                      :status="
+                        statusFor(receiptAiReviewType(receipt), receipt.id)
+                      "
+                  /></span>
                 </div>
               </div>
               <p v-else class="muted">还没有登记回款</p>
@@ -1478,7 +1550,10 @@ async function download(file: { id: string; name: string }) {
                   }}</span>
                   <span>{{ invoice.issuerName ?? '' }}
                     {{ invoice.issuedAt ?? '' }}
-                    {{ label(invoice.status) }}</span>
+                    {{ label(invoice.status) }}
+                    <AiReviewStatus
+                      :status="statusFor('SALES_INVOICE', invoice.id)"
+                  /></span>
                 </div>
               </div>
               <p v-else class="muted">还没有开票</p>

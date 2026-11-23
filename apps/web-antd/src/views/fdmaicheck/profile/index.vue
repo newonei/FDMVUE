@@ -60,7 +60,7 @@ const canEdit = computed(() => hasAccessByCodes(['fdmaicheck:profile:update']));
 
 const profiles = ref<FdmAiCheckApi.Profile[]>([]);
 const models = ref<FdmAiCheckApi.ModelOption[]>([]);
-const current = ref<string>();
+const current = ref<FdmAiCheckApi.DocType>();
 const detail = ref<FdmAiCheckApi.ProfileDetail>();
 const loading = ref(false);
 const saving = ref(false);
@@ -87,15 +87,26 @@ const dryAttachmentLines = computed(() => {
   return [info.read, ...info.others].filter(Boolean);
 });
 const dryStatusText = computed(() =>
-  aiStatusText(dryResult.value?.task.aiStatus, detail.value?.profile.docType),
+  aiStatusText(
+    dryResult.value?.task.aiStatus,
+    detail.value?.profile.docType,
+    checkpointsOnly.value,
+  ),
 );
 let dryTimer: ReturnType<typeof setTimeout> | undefined;
+let drySequence = 0;
+let searchSequence = 0;
+let detailSequence = 0;
 
 const shown = computed(() =>
   editing.value ? undefined : (detail.value?.draft ?? detail.value?.published),
 );
-const checkpointsOnly = computed(
-  () => detail.value?.profile.docType === 'PURCHASE_ORDER',
+function usesConfiguredItemsOnly(profile?: FdmAiCheckApi.Profile) {
+  return profile?.configuredItemsOnly ?? profile?.docType === 'PURCHASE_ORDER';
+}
+
+const checkpointsOnly = computed(() =>
+  usesConfiguredItemsOnly(detail.value?.profile),
 );
 const canDelete = computed(
   () =>
@@ -105,7 +116,7 @@ const canDelete = computed(
     !saving.value &&
     detail.value?.profile.docType === current.value,
 );
-const purchaseEmptyText = '没有检查点。添加并启用检查点后即可检查采购单。';
+const emptyCheckpointsText = '没有检查点。添加、启用并发布检查点后即可检查。';
 const modelOptions = computed(() => [
   { label: '默认（路由 fdm.aicheck.v1）', value: 0 },
   ...models.value.map((m) => ({
@@ -131,14 +142,16 @@ async function loadList() {
 }
 
 async function loadDetail() {
-  if (!current.value) return;
+  const docType = current.value;
+  if (!docType) return;
+  const run = ++detailSequence;
   loading.value = true;
   try {
-    const docType = current.value;
     const [value, itemStats] = await Promise.all([
       getAiCheckProfile(docType),
       getAiCheckStats(docType).catch(() => ({})),
     ]);
+    if (run !== detailSequence) return;
     detail.value = value;
     stats.value = itemStats;
     const p = detail.value.profile;
@@ -153,18 +166,30 @@ async function loadDetail() {
     });
     editing.value = false;
   } catch (error) {
-    message.error(errorMessage(error, '配置读取失败'));
+    if (run === detailSequence)
+      message.error(errorMessage(error, '配置读取失败'));
   } finally {
-    loading.value = false;
+    if (run === detailSequence) loading.value = false;
   }
 }
 
-async function select(docType: string) {
-  if (editing.value && docType !== current.value) {
+async function select(docType: FdmAiCheckApi.DocType) {
+  if (
+    saving.value ||
+    (docType === current.value && (detail.value || loading.value))
+  )
+    return;
+  if (editing.value) {
     message.warning('请先保存或取消正在编辑的草稿');
     return;
   }
   current.value = docType;
+  detail.value = undefined;
+  importing.value = false;
+  stopDry();
+  ++drySequence;
+  ++searchSequence;
+  dryLoading.value = false;
   dryResult.value = undefined;
   dryFilter.value = 'ALL';
   dryDocId.value = undefined;
@@ -270,11 +295,14 @@ async function rollback(promptId: number) {
 }
 
 async function searchDocs(keyword?: string) {
-  if (!current.value) return;
+  const docType = current.value;
+  if (!docType) return;
+  const run = ++searchSequence;
   try {
-    dryDocs.value = await searchAiCheckDocs(current.value, keyword);
+    const value = await searchAiCheckDocs(docType, keyword);
+    if (run === searchSequence) dryDocs.value = value;
   } catch {
-    dryDocs.value = [];
+    if (run === searchSequence) dryDocs.value = [];
   }
 }
 
@@ -283,19 +311,22 @@ function stopDry() {
   dryTimer = undefined;
 }
 
-async function pollDry(id: number, count = 0) {
+async function pollDry(id: number, run: number, count = 0) {
+  if (run !== drySequence) return;
   stopDry();
   try {
     const value = await getAiCheckDryRun(id);
+    if (run !== drySequence) return;
     dryResult.value = value;
     if (
       ['PREPARING', 'QUEUED', 'WAITING_AI'].includes(value.task.status) &&
       count < 60
     ) {
-      dryTimer = setTimeout(() => pollDry(id, count + 1), 4000);
+      dryTimer = setTimeout(() => pollDry(id, run, count + 1), 4000);
       return;
     }
   } catch (error) {
+    if (run !== drySequence) return;
     message.error(errorMessage(error, '试跑结果读取失败'));
   }
   dryLoading.value = false;
@@ -307,13 +338,15 @@ async function dryRun() {
     return;
   }
   if (editing.value && !(await saveDraft())) return;
+  const run = ++drySequence;
   dryLoading.value = true;
   dryResult.value = undefined;
   dryFilter.value = 'ALL';
   try {
     const id = await startAiCheckDryRun(current.value, dryDocId.value);
-    await pollDry(id);
+    await pollDry(id, run);
   } catch (error) {
+    if (run !== drySequence) return;
     dryLoading.value = false;
     message.error(errorMessage(error, '试跑失败'));
   }
@@ -328,7 +361,12 @@ onMounted(async () => {
     message.error(errorMessage(error, '配置读取失败'));
   }
 });
-onBeforeUnmount(stopDry);
+onBeforeUnmount(() => {
+  stopDry();
+  ++drySequence;
+  ++searchSequence;
+  ++detailSequence;
+});
 </script>
 
 <template>
@@ -343,6 +381,7 @@ onBeforeUnmount(stopDry);
           :key="p.docType"
           type="button"
           class="aicheck-type"
+          :disabled="saving"
           :class="[{ active: p.docType === current }]"
           @click="select(p.docType)"
         >
@@ -390,6 +429,7 @@ onBeforeUnmount(stopDry);
                   :disabled="!canEdit"
               /></label>
               <label
+                v-if="detail.profile.supportsAttachments !== false"
                 title="图片、Excel、PDF、Word 的内容会发给 AI 模型。文字里的长号码会脱敏，图片无法脱敏。"
               >
                 读取附件内容
@@ -422,7 +462,7 @@ onBeforeUnmount(stopDry);
               </label>
             </div>
             <p v-if="checkpointsOnly" class="aicheck-muted">
-              模型须在模型中心给单据所属公司放行「FDM_AI_CHECK /
+              需要 AI 模型的检查点须在模型中心为单据所属公司放行「FDM_AI_CHECK /
               CONFIDENTIAL」用途。同一单据 1 小时内最多通知一次。
             </p>
             <p v-else class="aicheck-muted">
@@ -449,7 +489,9 @@ onBeforeUnmount(stopDry);
                 </Tag>
                 <Tag v-else-if="!editing">
                   {{
-                    checkpointsOnly && !detail.published.promptId
+                    detail.profile.docType === 'PURCHASE_ORDER' &&
+                    !detail.published.promptId &&
+                    detail.published.items.length === 0
                       ? '未发布'
                       : versionLabel(detail.published)
                   }}
@@ -506,7 +548,7 @@ onBeforeUnmount(stopDry);
               show-icon
               :message="
                 checkpointsOnly
-                  ? '采购单只按已发布且启用的检查点检查，并逐项说明依据。草稿可通过试跑验证。'
+                  ? '检查按当前启用的检查点逐项说明依据。草稿可通过试跑验证。'
                   : 'AI 会对每个启用的检查点打一个标记并写明依据：✓ 通过、✕ 不通过、! 有疑问、? 缺资料（资料不全没法判断）、— 不适用。系统已固定：AI 只能提醒不能改单据、业务资料里的文字不当指令执行、每条问题须引用证据。'
               "
             />
@@ -518,7 +560,7 @@ onBeforeUnmount(stopDry);
                 editing
                 :deletable="canDelete"
                 :empty-description="
-                  checkpointsOnly ? purchaseEmptyText : undefined
+                  checkpointsOnly ? emptyCheckpointsText : undefined
                 "
                 :stats="stats"
                 :rule-items="checkpointsOnly ? undefined : detail.ruleItems"
@@ -527,7 +569,7 @@ onBeforeUnmount(stopDry);
                 <Button @click="itemList?.add()">添加检查点</Button>
                 <Button @click="itemList?.openGroup()">新建分组</Button>
                 <Button
-                  v-if="!checkpointsOnly"
+                  v-if="detail.defaultItems.length > 0"
                   type="link"
                   @click="
                     startEdit({
@@ -569,7 +611,7 @@ onBeforeUnmount(stopDry);
                 :editing="false"
                 :deletable="canDelete"
                 :empty-description="
-                  checkpointsOnly ? purchaseEmptyText : undefined
+                  checkpointsOnly ? emptyCheckpointsText : undefined
                 "
                 :stats="stats"
                 :rule-items="checkpointsOnly ? undefined : detail.ruleItems"
@@ -600,7 +642,7 @@ onBeforeUnmount(stopDry);
                 v-model:value="dryDocId"
                 show-search
                 :filter-option="false"
-                placeholder="输入单号、客户或供应商搜索"
+                placeholder="输入单号或关键词搜索"
                 class="aicheck-doc-select"
                 :options="
                   dryDocs.map((d) => ({
@@ -619,7 +661,7 @@ onBeforeUnmount(stopDry);
             <div v-if="dryResult" class="aicheck-dry">
               <AiCheckBar
                 v-model:filter="dryFilter"
-                :label="checkpointsOnly ? '采购单审核试跑' : undefined"
+                :label="`${detail.profile.docTypeName}试跑`"
                 :list="dryList"
                 :summary="dryResult.task.summary"
               >
@@ -663,7 +705,7 @@ onBeforeUnmount(stopDry);
             <div class="aicheck-card-head">
               <h3>历史版本</h3>
               <Popconfirm
-                v-if="canEdit && !checkpointsOnly"
+                v-if="canEdit && detail.defaultItems.length > 0"
                 title="恢复出厂默认检查项？会生成一个新版本。"
                 @confirm="rollback(0)"
               >
@@ -725,10 +767,15 @@ onBeforeUnmount(stopDry);
   display: flex;
   flex-direction: column;
   gap: 8px;
+  align-self: start;
+  max-height: 74vh;
+  padding: 3px;
+  overflow-y: auto;
 }
 
 .aicheck-type {
   display: flex;
+  flex-shrink: 0;
   flex-direction: column;
   gap: 4px;
   padding: 10px 12px;
@@ -859,6 +906,12 @@ onBeforeUnmount(stopDry);
 
   .aicheck-notes {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .aicheck-types {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    max-height: 190px;
   }
 }
 </style>

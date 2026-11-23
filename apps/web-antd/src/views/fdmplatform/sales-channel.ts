@@ -19,6 +19,12 @@ export function salesChannelOf(value?: null | string): SalesChannel {
     : 'FOREIGN';
 }
 
+export function contractAiCheckType(businessType?: null | string) {
+  return salesChannelOf(businessType) === 'DOMESTIC'
+    ? 'CONTRACT_DOMESTIC'
+    : 'CONTRACT_FOREIGN';
+}
+
 export function contractInternalOrderNo(
   contract: { code?: null | string; name?: null | string },
   channel: SalesChannel,

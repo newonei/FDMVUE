@@ -14,8 +14,11 @@ import {
 } from 'ant-design-vue';
 
 import { getPurchaseReturns, getStockIns } from '#/api/fdmplatform/warehouse';
+import AiReviewStatus from '#/views/fdmaicheck/components/AiReviewStatus.vue';
+import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewStatuses';
 
 import { errorText } from '../../../data';
+import { referenceId } from '../../../documents/navigation';
 import { money, qty } from '../../warehouse/model';
 import PurchaseReturnDialog from '../../warehouse/PurchaseReturnDialog.vue';
 import { canReturn, canVoidStockIn } from '../../warehouse/return-model';
@@ -37,6 +40,22 @@ const emit = defineEmits<{ changed: [] }>();
 
 const stockIns = ref<StockIn[]>([]);
 const returns = ref<PurchaseReturn[]>([]);
+const { statusFor, refresh: refreshReviewStatuses } = useAiReviewStatuses(
+  () => [
+    ...stockIns.value.map((row) => ({
+      docType: 'STOCK_IN' as const,
+      docId: row.id,
+    })),
+    ...returns.value.map((row) => ({
+      docType: 'PURCHASE_RETURN' as const,
+      docId: row.id,
+    })),
+    ...(props.otherArrivals ?? []).map((row) => ({
+      docType: 'ARRIVAL' as const,
+      docId: referenceId(row.id),
+    })),
+  ],
+);
 const loading = ref(false);
 const error = ref('');
 const receiving = ref(false);
@@ -74,6 +93,7 @@ async function load() {
     ]);
     stockIns.value = ins.list;
     returns.value = outs.list;
+    void refreshReviewStatuses();
   } catch (error_) {
     error.value = errorText(error_);
   } finally {
@@ -121,7 +141,7 @@ watch(() => props.orderId, load, { immediate: true });
         :data-source="stockIns"
         :loading="loading"
         :pagination="false"
-        :scroll="{ x: 860 }"
+        :scroll="{ x: 1030 }"
         :row-class-name="
           (record: StockIn) => (record.status === 'VOIDED' ? 'voided' : '')
         "
@@ -132,6 +152,7 @@ watch(() => props.orderId, load, { immediate: true });
           { title: '实收 / 合格', key: 'quantity', width: 110, align: 'right' },
           { title: '已退', key: 'returned', width: 70, align: 'right' },
           { title: '金额', key: 'amount', width: 120, align: 'right' },
+          { title: 'AI 审核', key: 'aiReview', width: 170 },
           { title: '操作', key: 'action', width: 130 },
         ]"
       >
@@ -170,6 +191,10 @@ watch(() => props.orderId, load, { immediate: true });
           <span v-else-if="column.key === 'amount'" class="num">{{
             money(record.amount, record.currency)
           }}</span>
+          <AiReviewStatus
+            v-else-if="column.key === 'aiReview'"
+            :status="statusFor('STOCK_IN', record.id)"
+          />
           <div v-else-if="column.key === 'action'" class="row-actions">
             <span
               v-if="record.status === 'VOIDED'"
@@ -212,12 +237,13 @@ watch(() => props.orderId, load, { immediate: true });
         row-key="id"
         :data-source="otherArrivals"
         :pagination="false"
-        :scroll="{ x: 860 }"
+        :scroll="{ x: 1030 }"
         :columns="[
           { title: '到货凭据', key: 'code', width: 190 },
           { title: '登记时间', key: 'time', width: 140 },
           { title: '实收 / 合格', key: 'quantity', width: 110, align: 'right' },
           { title: '已退', key: 'returned', width: 70, align: 'right' },
+          { title: 'AI 审核', key: 'aiReview', width: 170 },
           { title: '说明', key: 'note' },
         ]"
       >
@@ -237,6 +263,10 @@ watch(() => props.orderId, load, { immediate: true });
           <span v-else-if="column.key === 'returned'" class="num">{{
             arrivalReturned(record) ? qty(arrivalReturned(record)) : '—'
           }}</span>
+          <AiReviewStatus
+            v-else-if="column.key === 'aiReview'"
+            :status="statusFor('ARRIVAL', referenceId(record.id))"
+          />
           <span v-else-if="column.key === 'note'" class="muted">{{
             factoryArrival(record)
               ? '工厂外采到货，要作废请到工厂「到货入库」的到货记录里作废'
@@ -257,7 +287,7 @@ watch(() => props.orderId, load, { immediate: true });
         :data-source="returns"
         :loading="loading"
         :pagination="false"
-        :scroll="{ x: 860 }"
+        :scroll="{ x: 1030 }"
         :columns="[
           { title: '退货单号', key: 'code', width: 190 },
           { title: '退货日期', dataIndex: 'returnedDate', width: 100 },
@@ -265,6 +295,7 @@ watch(() => props.orderId, load, { immediate: true });
           { title: '数量', key: 'quantity', width: 80, align: 'right' },
           { title: '金额', key: 'amount', width: 120, align: 'right' },
           { title: '原因', key: 'reason', width: 220 },
+          { title: 'AI 审核', key: 'aiReview', width: 170 },
         ]"
       >
         <template #emptyText>这张采购单没有退过货</template>
@@ -288,6 +319,10 @@ watch(() => props.orderId, load, { immediate: true });
             class="ellipsis"
             :title="record.reason"
             >{{ record.reason }}</span>
+          <AiReviewStatus
+            v-else-if="column.key === 'aiReview'"
+            :status="statusFor('PURCHASE_RETURN', record.id)"
+          />
         </template>
       </Table>
     </Card>

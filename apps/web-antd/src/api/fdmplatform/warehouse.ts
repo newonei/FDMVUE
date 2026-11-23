@@ -442,7 +442,9 @@ export function getStockIns(
   });
 }
 export function getStockIn(id: string) {
-  return requestClient.get<StockIn>(`${base}/stock-ins/${id}`);
+  return requestClient.get<StockIn>(
+    `${base}/stock-ins/${encodeURIComponent(id)}`,
+  );
 }
 export function createOtherIn(data: OtherInCreate) {
   return requestClient.post<StockIn>(`${base}/other-ins`, data);
@@ -459,7 +461,9 @@ export function getStockOuts(
   });
 }
 export function getStockOut(id: string) {
-  return requestClient.get<StockOut>(`${base}/stock-outs/${id}`);
+  return requestClient.get<StockOut>(
+    `${base}/stock-outs/${encodeURIComponent(id)}`,
+  );
 }
 export function createStockOut(data: StockOutCreate) {
   return requestClient.post<StockOut>(`${base}/stock-outs`, data);
@@ -475,6 +479,11 @@ export function getTransfers(params: PageParams) {
     params,
   });
 }
+export function getTransfer(id: string) {
+  return requestClient.get<Transfer>(
+    `${base}/transfers/${encodeURIComponent(id)}`,
+  );
+}
 export function createTransfer(data: TransferCreate) {
   return requestClient.post<Transfer>(`${base}/transfers`, data);
 }
@@ -488,6 +497,11 @@ export function getStocktakes(params: PageParams) {
   return requestClient.get<PageResult<Stocktake>>(`${base}/stocktakes/page`, {
     params,
   });
+}
+export function getStocktake(id: string) {
+  return requestClient.get<Stocktake>(
+    `${base}/stocktakes/${encodeURIComponent(id)}`,
+  );
 }
 export function createStocktake(data: StocktakeCreate) {
   return requestClient.post<Stocktake>(`${base}/stocktakes`, data);
@@ -549,6 +563,12 @@ export function getPurchaseReturns(
     { params },
   );
 }
+export function getPurchaseReturn(id: string) {
+  return requestClient.get<PurchaseReturn>(
+    `${base}/purchase-returns/${encodeURIComponent(id)}`,
+  );
+}
+
 export function createPurchaseReturn(data: PurchaseReturnCreate) {
   return requestClient.post<PurchaseReturn>(`${base}/purchase-returns`, data);
 }

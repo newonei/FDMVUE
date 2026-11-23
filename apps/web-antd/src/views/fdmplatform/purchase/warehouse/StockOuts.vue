@@ -21,8 +21,11 @@ import { getDirectory } from '#/api/fdmplatform';
 import { getProcurementSettings } from '#/api/fdmplatform/procurement';
 import {
   getInventoryWarehouses,
+  getStockOut,
   getStockOuts,
 } from '#/api/fdmplatform/warehouse';
+import AiReviewStatus from '#/views/fdmaicheck/components/AiReviewStatus.vue';
+import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewStatuses';
 
 import { errorText } from '../../data';
 import { personName } from '../../directory';
@@ -38,6 +41,7 @@ import PickDialog from '../../inventory-center/components/PickDialog.vue';
 import StockDocDrawer from '../../inventory-center/components/StockDocDrawer.vue';
 import { money, qty } from './model';
 import StockOutDialog from './StockOutDialog.vue';
+import { useWarehouseDocumentLink } from './useWarehouseDocumentLink';
 import VoidDialog from './VoidDialog.vue';
 
 import './warehouse-pages.css';
@@ -78,6 +82,24 @@ const creating = ref(false);
 const creatingOther = ref(false);
 const voiding = ref<StockOut>();
 const viewing = ref<StockOut>();
+const { active, clearLink } = useWarehouseDocumentLink(
+  'stockOutId',
+  getStockOut,
+  (document) => {
+    viewing.value = document;
+  },
+  (error_) => message.error(errorText(error_)),
+);
+const { statusFor, refresh: refreshReviewStatuses } = useAiReviewStatuses(() =>
+  active.value
+    ? rows.value.map(({ id }) => ({ docType: 'STOCK_OUT', docId: id }))
+    : [],
+);
+
+function closeDetail() {
+  viewing.value = undefined;
+  clearLink();
+}
 const viewActions = computed(() =>
   viewing.value && canVoid(viewing.value)
     ? [{ key: 'void', label: '作废出库', danger: true }]
@@ -92,6 +114,7 @@ const columns = [
   { title: '出库仓库', key: 'warehouse', width: 110 },
   { title: '出库日期', key: 'date', width: 105 },
   { title: '出库状态', key: 'status', width: 90 },
+  { title: 'AI 审核', key: 'aiReview', width: 180 },
   { title: '经办人', key: 'person', width: 90 },
   { title: '单据类型', key: 'kind', width: 90 },
   { title: '数量', key: 'quantity', width: 90, align: 'right' as const },
@@ -141,7 +164,7 @@ function savedOther(code: string) {
 }
 function voided(code: string) {
   voiding.value = undefined;
-  viewing.value = undefined;
+  closeDetail();
   message.success(`已作废 ${code}`);
   void load();
 }
@@ -191,7 +214,9 @@ onMounted(async () => {
         @change="load(true)"
       />
       <span class="grow"></span>
-      <Button :loading="loading" @click="load()">刷新</Button>
+      <Button :loading="loading" @click="load().then(refreshReviewStatuses)">
+        刷新
+      </Button>
       <template v-if="canCreate">
         <Button @click="creatingOther = true">其它出库</Button>
         <Button type="primary" @click="creating = true">新建销售出库</Button>
@@ -206,7 +231,7 @@ onMounted(async () => {
       :columns="columns"
       :data-source="rows"
       :loading="loading"
-      :scroll="{ x: 1560 }"
+      :scroll="{ x: 1740 }"
       :row-class-name="
         (record: StockOut) => (record.status === 'VOIDED' ? 'voided' : '')
       "
@@ -258,6 +283,10 @@ onMounted(async () => {
           </Tag>
           <span v-else class="in">已出库</span>
         </span>
+        <AiReviewStatus
+          v-else-if="column.key === 'aiReview'"
+          :status="statusFor('STOCK_OUT', record.id)"
+        />
         <span v-else-if="column.key === 'person'">{{
           personName(directory, record.createdBy)
         }}</span>
@@ -287,19 +316,19 @@ onMounted(async () => {
       </template>
       <template #summary>
         <Table.Summary.Row v-if="rows.length">
-          <Table.Summary.Cell :index="0" :col-span="9">
+          <Table.Summary.Cell :index="0" :col-span="10">
             本页合计（不含作废）
           </Table.Summary.Cell>
-          <Table.Summary.Cell :index="9" align="right">
+          <Table.Summary.Cell :index="10" align="right">
             {{ qty(pageSum(rows, quantity)) }}
           </Table.Summary.Cell>
-          <Table.Summary.Cell :index="10" align="right">
+          <Table.Summary.Cell :index="11" align="right">
             {{ money(pageSum(rows, outSalesAmount), '') }}
           </Table.Summary.Cell>
-          <Table.Summary.Cell :index="11" align="right">
+          <Table.Summary.Cell :index="12" align="right">
             {{ money(pageSum(rows, (row) => row.costAmount)) }}
           </Table.Summary.Cell>
-          <Table.Summary.Cell :index="12" />
+          <Table.Summary.Cell :index="13" />
         </Table.Summary.Row>
       </template>
     </Table>
@@ -311,9 +340,9 @@ onMounted(async () => {
       @saved="savedOther"
     />
     <StockDocDrawer
-      :stock-out="viewing"
+      :stock-out="active ? viewing : undefined"
       :actions="viewActions"
-      @close="viewing = undefined"
+      @close="closeDetail"
       @action="voiding = viewing"
     />
     <VoidDialog

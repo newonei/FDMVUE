@@ -12,12 +12,17 @@ import { Alert, Button, Input, message, Select, Table } from 'ant-design-vue';
 import { getDirectory } from '#/api/fdmplatform';
 import {
   getInventoryWarehouses,
+  getStocktake,
   getStocktakes,
 } from '#/api/fdmplatform/warehouse';
+import AiCheckPanel from '#/views/fdmaicheck/components/AiCheckPanel.vue';
+import AiReviewStatus from '#/views/fdmaicheck/components/AiReviewStatus.vue';
+import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewStatuses';
 
 import { errorText } from '../../data';
 import { personName } from '../../directory';
 import { money, qty } from '../../purchase/warehouse/model';
+import { useWarehouseDocumentLink } from '../../purchase/warehouse/useWarehouseDocumentLink';
 import StocktakeDialog from './StocktakeDialog.vue';
 
 import '../../purchase/warehouse/warehouse-pages.css';
@@ -25,6 +30,7 @@ import '../../purchase/warehouse/warehouse-pages.css';
 defineOptions({ name: 'FdmInventoryStocktakes' });
 
 const rows = ref<Stocktake[]>([]);
+const expandedRowKeys = ref<(number | string)[]>([]);
 const total = ref(0);
 const pageNo = ref(1);
 const keyword = ref('');
@@ -34,6 +40,26 @@ const directory = ref<Directory>();
 const loading = ref(false);
 const error = ref('');
 const creating = ref(false);
+const { active, linkedId } = useWarehouseDocumentLink(
+  'stocktakeId',
+  getStocktake,
+  (document) => {
+    keyword.value = document.code;
+    warehouseId.value = undefined;
+    pageNo.value = 1;
+    rows.value = [document];
+    total.value = 1;
+    expandedRowKeys.value = [document.id];
+  },
+  (error_) => {
+    error.value = errorText(error_);
+  },
+);
+const { statusFor, refresh: refreshReviewStatuses } = useAiReviewStatuses(() =>
+  active.value
+    ? rows.value.map(({ id }) => ({ docType: 'STOCKTAKE', docId: id }))
+    : [],
+);
 
 const columns = [
   { title: '盘点单号', key: 'code', width: 180 },
@@ -42,6 +68,7 @@ const columns = [
   { title: '盘盈金额', key: 'gain', width: 130, align: 'right' as const },
   { title: '盘亏金额', key: 'loss', width: 130, align: 'right' as const },
   { title: '盘点日期 / 经办', key: 'date', width: 130 },
+  { title: 'AI 审核', key: 'aiReview', width: 180 },
   { title: '备注', key: 'remark', width: 200 },
 ];
 
@@ -74,7 +101,7 @@ function saved(value: Stocktake) {
   void load(true);
 }
 onMounted(async () => {
-  void load();
+  if (!linkedId.value) void load();
   try {
     [warehouses.value, directory.value] = await Promise.all([
       getInventoryWarehouses(),
@@ -108,7 +135,9 @@ onMounted(async () => {
       />
       <span class="grow"></span>
       <span class="muted">工厂的原料仓、半成品仓也在这里盘点</span>
-      <Button :loading="loading" @click="load()">刷新</Button>
+      <Button :loading="loading" @click="load().then(refreshReviewStatuses)">
+        刷新
+      </Button>
       <Button type="primary" @click="creating = true">新建盘点</Button>
     </div>
     <Alert v-if="error" type="error" :message="error" show-icon />
@@ -119,8 +148,9 @@ onMounted(async () => {
       row-key="id"
       :columns="columns"
       :data-source="rows"
+      v-model:expanded-row-keys="expandedRowKeys"
       :loading="loading"
-      :scroll="{ x: 1020 }"
+      :scroll="{ x: 1200 }"
       :pagination="{
         current: pageNo,
         pageSize: 20,
@@ -139,6 +169,12 @@ onMounted(async () => {
         还没有盘点单。点右上角「新建盘点」，选仓库录实盘数，过账后按差额调整库存。
       </template>
       <template #expandedRowRender="{ record }">
+        <AiCheckPanel
+          v-if="active && expandedRowKeys.includes(record.id)"
+          doc-type="STOCKTAKE"
+          :doc-id="record.id"
+          default-collapsed
+        />
         <table class="lines">
           <tr>
             <th>产品 / 规格</th>
@@ -190,6 +226,10 @@ onMounted(async () => {
             personName(directory, record.createdBy)
           }}</span>
         </div>
+        <AiReviewStatus
+          v-else-if="column.key === 'aiReview'"
+          :status="statusFor('STOCKTAKE', record.id)"
+        />
         <span v-else-if="column.key === 'remark'" class="muted ellipsis">{{
           record.remark
         }}</span>

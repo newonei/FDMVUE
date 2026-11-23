@@ -20,6 +20,7 @@ import { expenseAction, expenseMoney, expensePayment } from './workspace';
 const mocks = vi.hoisted(() => ({
   page: vi.fn(),
   directory: vi.fn(),
+  reviewStatuses: vi.fn(),
   route: { path: '/expenses', query: {} as Record<string, string> },
   push: vi.fn(),
   replace: vi.fn(),
@@ -32,6 +33,9 @@ vi.mock('vue-router', () => ({
 vi.mock('#/api/fdmplatform/expense', () => ({
   getExpenseContext: mocks.directory,
   getExpensePage: mocks.page,
+}));
+vi.mock('#/api/fdmaicheck', () => ({
+  getAiReviewStatuses: mocks.reviewStatuses,
 }));
 vi.mock('./ExpenseSummaryPanel.vue', () => ({
   default: defineComponent({ setup: () => () => h('p', '费用汇总面板') }),
@@ -215,6 +219,7 @@ function button(host: HTMLElement, label: string) {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.page.mockResolvedValue({ list: [entry()], total: 31 });
+  mocks.reviewStatuses.mockResolvedValue({});
   mocks.directory.mockResolvedValue({
     users: [{ id: 1, nickname: '王珊' }],
     companies: [],
@@ -226,6 +231,37 @@ afterEach(() => {
 });
 
 describe('费用报销真实列表和付款事实', () => {
+  it('直接展示已审核的检查项和未审核状态', async () => {
+    mocks.page.mockResolvedValue({
+      list: [entry(), entry('expense-b')],
+      total: 2,
+    });
+    mocks.reviewStatuses.mockResolvedValue({
+      'expense-a': {
+        state: 'COMPLETED',
+        aiStatus: 'SUCCEEDED',
+        counts: { PASS: 2, UNKNOWN: 2 },
+      },
+      'expense-b': { state: 'NOT_REVIEWED' },
+    });
+
+    const { host } = await mount();
+
+    expect(mocks.reviewStatuses).toHaveBeenCalledWith('REIMBURSEMENT', [
+      'expense-a',
+      'expense-b',
+    ]);
+    const reviewed = host.querySelector(
+      '[data-row="expense-a"] .ai-review-status',
+    );
+    expect(reviewed?.textContent).toContain('缺资料 2');
+    expect(reviewed?.textContent).toContain('通过 2');
+    expect(
+      host.querySelector('[data-row="expense-b"] .ai-review-status')
+        ?.textContent,
+    ).toContain('未审核');
+  });
+
   it('切换其他菜单保留当前分页和新建状态，返回后无需重新查询', async () => {
     const { host } = await mount();
     button(host, '第二页').click();

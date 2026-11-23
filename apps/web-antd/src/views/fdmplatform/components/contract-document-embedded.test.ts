@@ -48,6 +48,9 @@ vi.mock('#/api/fdmplatform/submissions', () => ({
   createCustomsWithAttachments: vi.fn(),
   customsActionWithAttachments: mocks.customsAction,
 }));
+vi.mock('#/views/fdmaicheck/components/AiCheckPanel.vue', () => ({
+  default: defineComponent({ render: () => h('div', { 'data-ai-check': '' }) }),
+}));
 vi.mock('../documents/ContractPicker.vue', () => ({
   default: defineComponent({
     props: { open: Boolean },
@@ -629,6 +632,11 @@ describe('embedded customs child', () => {
     click(host, '查看跟进');
     await settle();
     expect(mocks.customs).toHaveBeenCalledExactlyOnceWith('customs-a');
+    expect(
+      host.querySelector(
+        '[data-ai-check][doc-type="CUSTOMS_BATCH"][doc-id="customs-a"]',
+      ),
+    ).toBeTruthy();
     expect(host.querySelector('[data-drawer]')).not.toBeNull();
     expect(busy).toHaveBeenLastCalledWith(true);
     expect(router.currentRoute.value.fullPath).toBe(initialRoute);

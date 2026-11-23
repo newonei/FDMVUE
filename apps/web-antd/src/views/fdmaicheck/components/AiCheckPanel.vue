@@ -24,6 +24,7 @@ import {
   defaultExpanded,
 } from './checklist';
 import { aiStatusText, attachmentSummary, needsReason } from './risk';
+import { notifyAiReviewStatusChanged } from './useAiReviewStatuses';
 
 /**
  * 单据详情里的 AI 检查：单据保存后后台自动检查，每个检查点都有结论。
@@ -34,6 +35,7 @@ const props = defineProps<{
   defaultCollapsed?: boolean;
   docId?: string;
   docType: FdmAiCheckApi.DocType;
+  revision?: number;
 }>();
 const emit = defineEmits<{ changed: [level?: FdmAiCheckApi.Severity] }>();
 
@@ -58,7 +60,10 @@ let timer: ReturnType<typeof setTimeout> | undefined;
 let polls = 0;
 let seq = 0;
 
-const checkpointsOnly = computed(() => props.docType === 'PURCHASE_ORDER');
+const checkpointsOnly = computed(
+  () => result.value?.configuredItemsOnly ?? props.docType === 'PURCHASE_ORDER',
+);
+const purchaseOrder = computed(() => props.docType === 'PURCHASE_ORDER');
 const list = computed(() => {
   const checks = result.value?.latest?.checks;
   const findings = result.value?.findings ?? [];
@@ -82,7 +87,11 @@ const expanded = computed(() =>
 );
 const storageKey = computed(() => `fdmaicheck.expanded.${props.docType}`);
 const notice = computed(() =>
-  aiStatusText(result.value?.latest?.aiStatus, props.docType),
+  aiStatusText(
+    result.value?.latest?.aiStatus,
+    props.docType,
+    checkpointsOnly.value,
+  ),
 );
 const noCheckpoints = computed(
   () => checkpointsOnly.value && result.value?.items?.length === 0,
@@ -126,11 +135,12 @@ function stop() {
 async function load(quiet = false) {
   stop();
   const id = props.docId;
+  const current = ++seq;
   if (!id) {
     result.value = undefined;
+    loading.value = false;
     return;
   }
-  const current = ++seq;
   if (!quiet) loading.value = true;
   try {
     const value = await getAiCheckResult(props.docType, id);
@@ -153,10 +163,12 @@ async function load(quiet = false) {
 }
 
 async function recheck() {
-  if (!props.docId) return;
+  const { docId, docType } = props;
+  if (!docId) return;
   rechecking.value = true;
   try {
-    await recheckAiCheck(props.docType, props.docId);
+    await recheckAiCheck(docType, docId);
+    notifyAiReviewStatusChanged(docType, docId);
     message.success('已重新排队检查，稍后自动刷新');
     polls = 0;
     await load(true);
@@ -187,6 +199,7 @@ async function submitHandle(
   handling.value = finding.id;
   try {
     await handleAiCheckFinding(finding.id, status, text);
+    if (props.docId) notifyAiReviewStatusChanged(props.docType, props.docId);
     reasonFor.value = undefined;
     await load(true);
   } catch (error_: unknown) {
@@ -208,9 +221,25 @@ function confirmReason() {
 }
 
 watch(
-  () => [props.docType, props.docId, props.defaultCollapsed],
-  () => {
+  [
+    () => props.docType,
+    () => props.docId,
+    () => props.defaultCollapsed,
+    () => props.revision,
+  ],
+  ([type, id, collapsed], [previousType, previousId, previousCollapsed]) => {
     polls = 0;
+    if (
+      type === previousType &&
+      id === previousId &&
+      collapsed === previousCollapsed
+    ) {
+      void load(true);
+      return;
+    }
+    result.value = undefined;
+    error.value = '';
+    reasonFor.value = undefined;
     filter.value = 'ALL';
     drawerOpen.value = false;
     readChoice();
@@ -218,7 +247,10 @@ watch(
   },
   { immediate: true },
 );
-onBeforeUnmount(stop);
+onBeforeUnmount(() => {
+  stop();
+  ++seq;
+});
 
 defineExpose({ reload: () => load(true) });
 </script>
@@ -227,11 +259,11 @@ defineExpose({ reload: () => load(true) });
   <section
     v-if="docId"
     class="ai-check"
-    :aria-label="checkpointsOnly ? '采购单审核' : 'AI 检查'"
+    :aria-label="purchaseOrder ? '采购单审核' : 'AI 检查'"
   >
     <AiCheckBar
       v-model:filter="filter"
-      :label="checkpointsOnly ? '采购单审核' : undefined"
+      :label="purchaseOrder ? '采购单审核' : undefined"
       :list="list"
       :summary="summary"
       @select="expandChoice = '1'"
@@ -334,7 +366,7 @@ defineExpose({ reload: () => load(true) });
       :hide-source="checkpointsOnly"
       :list="list"
       :open="drawerOpen"
-      :title="checkpointsOnly ? '采购单审核依据' : undefined"
+      :title="purchaseOrder ? '采购单审核依据' : undefined"
       @close="drawerOpen = false"
     />
     <Modal

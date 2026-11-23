@@ -39,6 +39,7 @@ import {
   procurementFinanceActionWithAttachments,
 } from '#/api/fdmplatform/submissions';
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
+import AiCheckPanel from '#/views/fdmaicheck/components/AiCheckPanel.vue';
 
 import ActionDialog from '../../../components/ActionDialog.vue';
 import AttachmentActions from '../../../components/AttachmentActions.vue';
@@ -49,6 +50,7 @@ import { filePreviewKind } from '../../../components/file-preview';
 import FilePreviewButton from '../../../components/FilePreviewButton.vue';
 import RecordTable from '../../../components/RecordTable.vue';
 import { errorText, field, money, rows, selectField } from '../../../data';
+import { procurementFinanceAiCheckTypes } from '../../../documents/ai-check-types';
 import { needsImportedValue } from '../../../documents/import-completion';
 import { contractReferenceText } from '../../../documents/migration-display';
 import MigrationSource from '../../../documents/MigrationSource.vue';
@@ -817,6 +819,13 @@ async function relatedUpdated() {
           }"
           style="margin-bottom: 12px"
           @changed="reloadAfterApproval"
+        />
+        <AiCheckPanel
+          v-if="open && record"
+          :doc-type="procurementFinanceAiCheckTypes[record.type]"
+          :doc-id="record.id"
+          :revision="record.version"
+          default-collapsed
         />
         <Descriptions
           v-if="record && type !== 'REIMBURSEMENT' && !paymentView"

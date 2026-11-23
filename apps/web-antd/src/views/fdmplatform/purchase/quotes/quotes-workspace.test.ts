@@ -225,6 +225,7 @@ vi.mock('ant-design-vue', () => {
     InputNumber: numeric,
     Modal: modal,
     Pagination: pagination,
+    Tag: block,
     Spin: block,
   };
 });

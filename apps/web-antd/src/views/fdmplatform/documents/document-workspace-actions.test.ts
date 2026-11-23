@@ -17,7 +17,9 @@ const mocks = vi.hoisted(() => ({
   page: vi.fn(),
   contract: vi.fn(),
   directory: vi.fn(),
+  reviews: vi.fn(),
 }));
+vi.mock('#/api/fdmaicheck', () => ({ getAiReviewStatuses: mocks.reviews }));
 vi.mock('#/api/fdmplatform', () => ({
   getBusinessPage: mocks.page,
   getContract: mocks.contract,
@@ -245,6 +247,7 @@ async function search(host: HTMLElement, value: string) {
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.reviews.mockResolvedValue({});
   mocks.page.mockResolvedValue({ list: [row()], total: 21 });
   mocks.directory.mockResolvedValue({
     users: [],
@@ -262,6 +265,50 @@ afterEach(() => {
 });
 
 describe('document list shortcuts and retained context', () => {
+  it('uses the original standalone stock ID and shows unreviewed and completed results in the list', async () => {
+    mocks.page.mockResolvedValue({
+      list: [
+        {
+          ...row(),
+          id: 'shipment-1',
+          record: { id: 'shipment-1', kind: 'OUTBOUND' },
+        },
+        {
+          ...row(),
+          id: 'list-row-id',
+          standaloneId: 'legacy-stock-out',
+          recordType: 'STOCK_OUT',
+          record: { id: 'legacy-record-id' },
+        },
+      ],
+      total: 2,
+    });
+    mocks.reviews.mockImplementation(async (type: string) =>
+      type === 'SHIPMENT'
+        ? { 'shipment-1': { state: 'NOT_REVIEWED' } }
+        : {
+            'legacy-stock-out': {
+              state: 'COMPLETED',
+              counts: { PASS: 2, UNKNOWN: 1 },
+            },
+          },
+    );
+
+    const { host } = await mountWorkspace('shipments', '');
+
+    expect(mocks.reviews).toHaveBeenCalledWith('SHIPMENT', ['shipment-1']);
+    expect(mocks.reviews).toHaveBeenCalledWith('STOCK_OUT', [
+      'legacy-stock-out',
+    ]);
+    expect(
+      host.querySelector('[data-record="shipment-1"]')?.textContent,
+    ).toContain('未审核');
+    const reviewed = host.querySelector(
+      '[data-record="list-row-id"]',
+    )?.textContent;
+    expect(reviewed).toContain('通过 2');
+    expect(reviewed).toContain('缺资料 1');
+  });
   it('日常申请默认只查待转余额，可切换全部历史和独立转单进度', async () => {
     mocks.page.mockResolvedValue({ list: [], total: 0 });
     const view = await mountWorkspace('requests', '?scope=current');

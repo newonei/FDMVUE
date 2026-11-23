@@ -205,7 +205,7 @@ vi.mock('./components/OrderLines.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
 vi.mock('#/api/fdmaicheck', () => ({
-  getAiCheckLevels: vi.fn().mockResolvedValue({}),
+  getAiReviewStatuses: vi.fn().mockResolvedValue({}),
 }));
 vi.mock('#/views/fdmaicheck/components/AiCheckPanel.vue', () => ({
   default: defineComponent({ render: () => null }),

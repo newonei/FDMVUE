@@ -24,6 +24,9 @@ vi.mock('#/api/fdmplatform', () => ({
   getDirectory: mocks.directory,
   refreshAiReview: vi.fn(),
 }));
+vi.mock('#/views/fdmaicheck/components/AiCheckPanel.vue', () => ({
+  default: defineComponent({ render: () => h('div', { 'data-ai-check': '' }) }),
+}));
 vi.mock('./DocumentAction.vue', () => ({
   default: defineComponent({
     props: {
@@ -279,6 +282,11 @@ describe('related document creation inside the source detail', () => {
       record: request,
     };
     await settle();
+    expect(
+      view.host.querySelector(
+        '[data-ai-check][doc-type="PURCHASE_REQUEST"][doc-id="request-a"]',
+      ),
+    ).toBeTruthy();
     expect(view.host.textContent).not.toContain('转成采购单');
     (request.items as BusinessRecord[])[0]!.availableQuantity = 60;
     button(view.host, '刷新当前单据').click();

@@ -58,6 +58,9 @@ import {
   customsActionWithAttachments,
 } from '#/api/fdmplatform/submissions';
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
+import AiCheckPanel from '#/views/fdmaicheck/components/AiCheckPanel.vue';
+import AiReviewStatus from '#/views/fdmaicheck/components/AiReviewStatus.vue';
+import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewStatuses';
 
 import { customsCategories, customsLabel, customsStatuses } from '../customs';
 import { errorText, money } from '../data';
@@ -109,6 +112,22 @@ const loading = ref(false);
 const loadError = ref('');
 const selected = ref<CustomsBatch>();
 const detailOpen = ref(false);
+const { statusFor, refresh: refreshReviewStatuses } = useAiReviewStatuses(() =>
+  routeActive.value || props.embedded
+    ? [
+        ...batches.value.map((batch) => ({
+          docType: 'CUSTOMS_BATCH' as const,
+          docId: batch.id,
+        })),
+        ...(detailOpen.value ? (selected.value?.shipments ?? []) : []).map(
+          (shipment) => ({
+            docType: 'SHIPMENT' as const,
+            docId: shipment.eventId,
+          }),
+        ),
+      ]
+    : [],
+);
 const detailLoading = ref(false);
 const detailError = ref('');
 const files = ref<CustomsFile[]>([]);
@@ -213,6 +232,7 @@ const columns = [
   { key: 'owner', title: '采购负责人', width: 160 },
   { key: 'status', title: '办理状态', width: 140 },
   { key: 'documentStatus', title: '资料状态', width: 110 },
+  { key: 'aiReview', title: 'AI 审核', width: 180 },
   {
     key: 'plannedDate',
     title: '计划出运',
@@ -301,9 +321,10 @@ async function load() {
     if (request === loadSequence) loading.value = false;
   }
 }
-function search() {
+async function search() {
   page.value = 1;
-  void load();
+  await load();
+  void refreshReviewStatuses();
 }
 async function refreshDetail(id: string) {
   const request = ++detailSequence;
@@ -782,7 +803,7 @@ onBeforeUnmount(() => {
       :data-source="batches"
       :loading="loading"
       row-key="id"
-      :scroll="{ x: 860 }"
+      :scroll="{ x: 1040 }"
       :pagination="{
         current: page,
         pageSize,
@@ -833,6 +854,10 @@ onBeforeUnmount(() => {
         <span v-else-if="column.key === 'documentStatus'">{{
           customsLabel(record.documentStatus)
         }}</span>
+        <AiReviewStatus
+          v-else-if="column.key === 'aiReview'"
+          :status="statusFor('CUSTOMS_BATCH', record.id)"
+        />
         <Button
           v-else-if="column.key === 'action'"
           type="link"
@@ -868,6 +893,13 @@ onBeforeUnmount(() => {
         :message="detailError"
       />
       <div v-if="selected" class="customs-detail">
+        <AiCheckPanel
+          v-if="detailOpen && (embedded || routeActive)"
+          doc-type="CUSTOMS_BATCH"
+          :doc-id="selected.id"
+          :revision="selected.version"
+          default-collapsed
+        />
         <Alert
           v-if="detailError"
           type="error"
@@ -975,11 +1007,19 @@ onBeforeUnmount(() => {
                   { title: '发货记录', dataIndex: 'eventId' },
                   { title: '规格版本', dataIndex: 'specVersion' },
                   { title: '本批分配数量', dataIndex: 'quantity' },
+                  { title: 'AI 审核', key: 'aiReview', width: 180 },
                 ]"
                 row-key="eventId"
                 :pagination="false"
                 size="small"
-              />
+              >
+                <template #bodyCell="{ column, record }">
+                  <AiReviewStatus
+                    v-if="column.key === 'aiReview'"
+                    :status="statusFor('SHIPMENT', record.eventId)"
+                  />
+                </template>
+              </Table>
             </div>
             <p class="customs-muted">{{ selected.remark || '暂无补充说明' }}</p>
           </TabPane>

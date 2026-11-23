@@ -34,8 +34,14 @@ import {
 } from '#/api/fdmplatform';
 import { createdOrdersText } from '#/api/fdmplatform/procurement';
 import { getProcurementWorkbench } from '#/api/fdmplatform/procurement-workbench';
+import AiReviewStatus from '#/views/fdmaicheck/components/AiReviewStatus.vue';
+import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewStatuses';
 
 import { errorText } from '../../data';
+import {
+  contractRecordAiCheckTypes,
+  documentRowAiReviewTarget,
+} from '../../documents/ai-check-types';
 import BusinessDocumentDetail from '../../documents/BusinessDocumentDetail.vue';
 import DocumentAction from '../../documents/DocumentAction.vue';
 import DocumentWorkspace from '../../documents/DocumentWorkspace.vue';
@@ -175,6 +181,23 @@ const launchAction = computed(() =>
     : undefined,
 );
 const entries = computed(() => result.value?.list ?? []);
+function reviewTarget(entry: ProcurementWorkItem) {
+  return documentRowAiReviewTarget(
+    entry.row,
+    contractRecordAiCheckTypes[entry.kind],
+  );
+}
+const { statusFor, refresh: refreshReviewStatuses } = useAiReviewStatuses(() =>
+  active.value && !archive.value ? entries.value.map(reviewTarget) : [],
+);
+function reviewStatus(entry: ProcurementWorkItem) {
+  const { docType, docId } = reviewTarget(entry);
+  return statusFor(docType, docId);
+}
+async function refreshWorkbench() {
+  await load();
+  void refreshReviewStatuses();
+}
 const selected = computed(() =>
   entries.value.find((entry) => entry.key === selectedKey.value),
 );
@@ -537,7 +560,7 @@ onBeforeUnmount(() => {
         <template #actions>
           <Button :disabled="childOpen" @click="archive = true">
             全部申请与任务
-</Button><Button :loading="loading" @click="load">刷新</Button>
+</Button><Button :loading="loading" @click="refreshWorkbench">刷新</Button>
         </template>
       </ProcurementPageHeader>
       <Alert
@@ -677,7 +700,7 @@ onBeforeUnmount(() => {
             row-key="key"
             :pagination="false"
             :size="density === 'compact' ? 'small' : 'middle'"
-            :scroll="{ x: 820 }"
+            :scroll="{ x: 1000 }"
             :row-class-name="
               (entry: ProcurementWorkItem) =>
                 entry.key === selectedKey ? 'procurement-row-selected' : ''
@@ -688,6 +711,7 @@ onBeforeUnmount(() => {
               { title: '主线', key: 'mainline', width: 150 },
               { title: '经办人', key: 'owner', width: 100 },
               { title: '交期', key: 'date', width: 120 },
+              { title: 'AI 审核', key: 'aiReview', width: 180 },
               { title: '下一步', key: 'action', width: 170, fixed: 'right' },
             ]"
           >
@@ -774,6 +798,13 @@ onBeforeUnmount(() => {
                 :class="dueBadge(record.dueDate, today).tone"
                 :title="record.dueDate"
                 >{{ dueBadge(record.dueDate, today).text }}</span>
+              <template v-else-if="column.key === 'aiReview'">
+                <AiReviewStatus
+                  v-if="reviewTarget(record as ProcurementWorkItem).docType"
+                  :status="reviewStatus(record as ProcurementWorkItem)"
+                />
+                <span v-else>—</span>
+              </template>
               <div
                 v-else-if="column.key === 'action'"
                 class="workbench-actions"
@@ -859,6 +890,9 @@ onBeforeUnmount(() => {
                     class="due-pill procurement-number"
                     :class="dueBadge(entry.dueDate, today).tone"
                     >{{ dueBadge(entry.dueDate, today).text }}</span>
+                </p>
+                <p v-if="reviewTarget(entry).docType" class="procurement-muted">
+                  AI 审核 <AiReviewStatus :status="reviewStatus(entry)" />
                 </p>
                 <Button
                   size="small"

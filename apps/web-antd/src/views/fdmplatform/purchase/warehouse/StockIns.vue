@@ -25,8 +25,11 @@ import { getDirectory } from '#/api/fdmplatform';
 import { getProcurementSettings } from '#/api/fdmplatform/procurement';
 import {
   getInventoryWarehouses,
+  getStockIn,
   getStockIns,
 } from '#/api/fdmplatform/warehouse';
+import AiReviewStatus from '#/views/fdmaicheck/components/AiReviewStatus.vue';
+import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewStatuses';
 
 import { errorText } from '../../data';
 import { personName } from '../../directory';
@@ -44,6 +47,7 @@ import { money, qty } from './model';
 import PurchaseReturnDialog from './PurchaseReturnDialog.vue';
 import { canReturn, canVoidStockIn } from './return-model';
 import StockInDialog from './StockInDialog.vue';
+import { useWarehouseDocumentLink } from './useWarehouseDocumentLink';
 import VoidDialog from './VoidDialog.vue';
 
 import './warehouse-pages.css';
@@ -76,6 +80,24 @@ const creatingOther = ref(false);
 const returning = ref<StockIn>();
 const voiding = ref<StockIn>();
 const viewing = ref<StockIn>();
+const { active, clearLink } = useWarehouseDocumentLink(
+  'stockInId',
+  getStockIn,
+  (document) => {
+    viewing.value = document;
+  },
+  (error_) => message.error(errorText(error_)),
+);
+const { statusFor, refresh: refreshReviewStatuses } = useAiReviewStatuses(() =>
+  active.value
+    ? rows.value.map(({ id }) => ({ docType: 'STOCK_IN', docId: id }))
+    : [],
+);
+
+function closeDetail() {
+  viewing.value = undefined;
+  clearLink();
+}
 
 function canVoid(row: StockIn) {
   if (!canVoidStockIn(row)) return false;
@@ -115,6 +137,7 @@ const columns = [
   { title: '入库仓库', key: 'warehouse', width: 110 },
   { title: '入库日期', key: 'date', width: 105 },
   { title: '入库状态', key: 'status', width: 90 },
+  { title: 'AI 审核', key: 'aiReview', width: 180 },
   { title: '经办人', key: 'person', width: 90 },
   { title: '单据类型', key: 'kind', width: 90 },
   {
@@ -170,13 +193,13 @@ function savedOther(value: StockIn) {
 }
 function returned(value: { code: string }) {
   returning.value = undefined;
-  viewing.value = undefined;
+  closeDetail();
   message.success(`已办理采购退货 ${value.code}`);
   void load();
 }
 function voided(code: string) {
   voiding.value = undefined;
-  viewing.value = undefined;
+  closeDetail();
   message.success(`已作废 ${code}`);
   void load();
 }
@@ -232,7 +255,9 @@ onMounted(async () => {
         @change="load(true)"
       />
       <span class="grow"></span>
-      <Button :loading="loading" @click="load()">刷新</Button>
+      <Button :loading="loading" @click="load().then(refreshReviewStatuses)">
+        刷新
+      </Button>
       <Button v-if="canCreateOther" @click="creatingOther = true">
         常规入库
       </Button>
@@ -249,7 +274,7 @@ onMounted(async () => {
       :columns="columns"
       :data-source="rows"
       :loading="loading"
-      :scroll="{ x: 1690 }"
+      :scroll="{ x: 1870 }"
       :row-class-name="
         (record: StockIn) => (record.status === 'VOIDED' ? 'voided' : '')
       "
@@ -308,6 +333,10 @@ onMounted(async () => {
           </Tag>
           <span v-else class="in">已入库</span>
         </span>
+        <AiReviewStatus
+          v-else-if="column.key === 'aiReview'"
+          :status="statusFor('STOCK_IN', record.id)"
+        />
         <span v-else-if="column.key === 'person'">{{
           personName(directory, record.createdBy)
         }}</span>
@@ -345,15 +374,15 @@ onMounted(async () => {
       </template>
       <template #summary>
         <Table.Summary.Row v-if="rows.length">
-          <Table.Summary.Cell :index="0" :col-span="9">
+          <Table.Summary.Cell :index="0" :col-span="10">
             本页合计（不含作废）
           </Table.Summary.Cell>
-          <Table.Summary.Cell :index="9" align="right">
+          <Table.Summary.Cell :index="10" align="right">
             {{ qty(pageSum(rows, received)) }} /
             {{ qty(pageSum(rows, accepted)) }}
           </Table.Summary.Cell>
-          <Table.Summary.Cell :index="10" />
           <Table.Summary.Cell :index="11" />
+          <Table.Summary.Cell :index="12" />
         </Table.Summary.Row>
       </template>
     </Table>
@@ -369,10 +398,10 @@ onMounted(async () => {
       @saved="savedOther"
     />
     <StockDocDrawer
-      :stock-in="viewing"
+      :stock-in="active ? viewing : undefined"
       :actions="viewActions"
       :hint="factoryHint"
-      @close="viewing = undefined"
+      @close="closeDetail"
       @action="viewAction"
     />
     <PurchaseReturnDialog

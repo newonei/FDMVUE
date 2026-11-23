@@ -12,8 +12,11 @@ import { Page } from '@vben/common-ui';
 import { Alert, Button, Empty, Input, Pagination, Spin } from 'ant-design-vue';
 
 import { getBusinessPage, getContract } from '#/api/fdmplatform';
+import AiReviewStatus from '#/views/fdmaicheck/components/AiReviewStatus.vue';
+import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewStatuses';
 
 import { errorText, money } from '../../data';
+import { documentRowAiReviewTarget } from '../../documents/ai-check-types';
 import BusinessDocumentDetail from '../../documents/BusinessDocumentDetail.vue';
 import DocumentAction from '../../documents/DocumentAction.vue';
 import { queryContractId } from '../../documents/model';
@@ -45,6 +48,17 @@ const pageNo = ref(1);
 const pageSize = ref(10);
 const total = ref<number>();
 const records = ref<DocumentRow[]>([]);
+const { statusFor, refresh: refreshReviewStatuses } = useAiReviewStatuses(() =>
+  routeActive.value
+    ? records.value.map((row) => documentRowAiReviewTarget(row, 'QUOTE'))
+    : [],
+);
+function reviewStatus(row: DocumentRow) {
+  const { docType, docId } = documentRowAiReviewTarget(row, 'QUOTE');
+  return docType
+    ? statusFor(docType, docId)
+    : { state: 'UNAVAILABLE' as const };
+}
 const loading = ref(false);
 const pageError = ref('');
 const selectedRow = ref<DocumentRow>();
@@ -156,7 +170,7 @@ function clearSearch() {
   search();
 }
 function refresh() {
-  void load(true);
+  void load(true).then(refreshReviewStatuses);
   if (selectedRow.value) void loadComparison(selectedRow.value);
 }
 function openDetail(row: DocumentRow) {
@@ -449,6 +463,9 @@ onBeforeUnmount(() => {
                         ? `有效至 ${row.record.validUntil}`
                         : '有效期待补齐'
                     }}</span></span>
+                  <span class="procurement-muted">
+                    AI 审核 <AiReviewStatus :status="reviewStatus(row)" />
+                  </span>
                 </button>
                 <Button
                   class="record-detail-link"

@@ -564,11 +564,19 @@ describe('production order page', () => {
 
     button('去接单').click();
     await flush();
-    expect(document.body.textContent).toContain('接单处理');
-    expect(document.body.textContent).toContain('工艺 · 单层散装');
-    // 接单前就能看用料逆推：板材张数、原料 kg、锅数，缺的原料标出来
+    const modal = document.querySelector<HTMLElement>('.production-accept-dialog.ant-modal-centered[role="dialog"]')!;
+    expect(modal).toBeTruthy();
+    expect(modal.textContent).toContain('接单处理');
+    expect(modal.textContent).toContain('工艺 · 单层散装');
+    const planSection = modal.querySelector<HTMLElement>('section[aria-label="用料逆推"]')!;
+    expect(planSection.style.display).toBe('none');
+    button('用料逆推', modal).click();
+    await flush();
+    expect(button('用料逆推', modal).getAttribute('aria-pressed')).toBe('true');
+    expect(planSection.style.display).not.toBe('none');
+    expect(modal.querySelector<HTMLElement>('section[aria-label="产品明细"]')?.style.display).toBe('none');
     expect(mocks.materialPlan).toHaveBeenCalledWith(9);
-    const plan = document.body.textContent?.replaceAll(/\s+/g, '') ?? '';
+    const plan = planSection.textContent?.replaceAll(/\s+/g, '') ?? '';
     expect(plan).toContain('用料逆推');
     expect(plan).toContain('按上次建议');
     expect(plan).toContain('成品理论换算：板材2100×1360×48mm');
@@ -576,7 +584,7 @@ describe('production order page', () => {
     expect(plan).toContain('开片按各制造层的实际厚度计算');
     expect(plan).toContain('原料576kg（每张18kg）≈发泡4锅');
     expect(plan).toContain('240kg');
-    button('接单').click();
+    button('接单', modal).click();
     await flush();
     expect(mocks.accept).toHaveBeenCalledWith({ id: 9, promisedDate: '2026-10-20', reply: undefined });
   });

@@ -8,6 +8,7 @@ import { Alert, Button, Space, Tag } from 'ant-design-vue';
 
 import { getDirectory } from '#/api/fdmplatform';
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
+import AiCheckPanel from '#/views/fdmaicheck/components/AiCheckPanel.vue';
 
 import { personName } from '../../directory';
 import { money, qty } from '../../purchase/warehouse/model';
@@ -155,6 +156,12 @@ watch(open, async (value) => {
     </template>
     <div class="stock-doc">
       <Alert v-if="hint" type="info" show-icon :message="hint" />
+      <AiCheckPanel
+        v-if="stockIn || stockOut"
+        :doc-type="stockIn ? 'STOCK_IN' : 'STOCK_OUT'"
+        :doc-id="stockIn?.id ?? stockOut?.id"
+        default-collapsed
+      />
       <section class="doc-card">
         <dl class="doc-fields">
           <div v-for="[label, value] in fields" :key="label">

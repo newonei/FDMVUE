@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { FdmAiCheckApi } from '#/api/fdmaicheck';
 import type {
   ProcurementFinanceRecord,
   ProcurementFinanceType,
@@ -22,8 +23,11 @@ import {
   getProcurementFinanceSummary,
   procurementFinanceAction,
 } from '#/api/fdmplatform/procurement-finance';
+import AiReviewStatus from '#/views/fdmaicheck/components/AiReviewStatus.vue';
+import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewStatuses';
 
 import { errorText } from '../../../data';
+import { procurementFinanceAiCheckTypes } from '../../../documents/ai-check-types';
 import BusinessDocumentDetail from '../../../documents/BusinessDocumentDetail.vue';
 import { useRouteOwner } from '../../../documents/useRouteOwner';
 import {
@@ -92,6 +96,41 @@ function records(key: string) {
     Array.isArray(summary.value[key]) ? summary.value[key] : []
   ) as ProcurementFinanceRecord[];
 }
+const { statusFor, refresh: refreshReviewStatuses } = useAiReviewStatuses(
+  () => {
+    if (!active.value) return [];
+    if (props.mode === 'costs')
+      return records('costAllocations').map((record) => reviewTarget(record));
+    return [
+      ...[
+        'payments',
+        'plans',
+        'requests',
+        'reimbursements',
+        'expensePayments',
+      ].flatMap((key) => records(key).map((record) => reviewTarget(record))),
+      ...paymentRecords.value.flatMap((record) =>
+        (record.invoices ?? []).map((invoice) => ({
+          docType: 'PURCHASE_INVOICE' as const,
+          docId: invoice.id,
+        })),
+      ),
+    ];
+  },
+);
+function reviewTarget(record: ProcurementFinanceRecord): {
+  docId: string;
+  docType: FdmAiCheckApi.DocType;
+} {
+  return {
+    docType: procurementFinanceAiCheckTypes[record.type],
+    docId: record.standaloneId ?? record.id,
+  };
+}
+function reviewStatus(record: ProcurementFinanceRecord) {
+  const target = reviewTarget(record);
+  return statusFor(target.docType, target.docId);
+}
 function money(value: unknown) {
   const amount = new BigNumber(String(value ?? ''));
   return amount.isFinite() ? amount.toFormat(2) : '—';
@@ -105,7 +144,10 @@ async function load() {
       props.contractId,
       props.orderId,
     );
-    if (run === sequence) summary.value = value;
+    if (run === sequence) {
+      summary.value = value;
+      void refreshReviewStatuses();
+    }
   } catch (error) {
     if (run === sequence) pageError.value = errorText(error);
   } finally {
@@ -250,6 +292,7 @@ watch(
             { title: '付款分类', dataIndex: 'paymentMethod' },
             { title: '收票', key: 'invoice' },
             { title: '状态', key: 'state' },
+            { title: 'AI 审核', key: 'aiReview', width: 170 },
           ]"
         >
           <template #emptyText>
@@ -318,6 +361,10 @@ watch(
             >
               {{ financeRecordStatus(record) }}
             </Tag>
+            <AiReviewStatus
+              v-else-if="column.key === 'aiReview'"
+              :status="reviewStatus(record as ProcurementFinanceRecord)"
+            />
           </template>
           <template #expandedRowRender="{ record }">
             <div class="invoices">
@@ -360,6 +407,7 @@ watch(
                   { title: '税率', key: 'tax' },
                   { title: '金额', key: 'amount', align: 'right' },
                   { title: '状态', key: 'status' },
+                  { title: 'AI 审核', key: 'aiReview', width: 170 },
                 ]"
               >
                 <template #bodyCell="{ column: col, record: invoice }">
@@ -377,6 +425,10 @@ watch(
                   >
                     {{ invoice.status === 'VALID' ? '有效' : '已作废' }}
                   </Tag>
+                  <AiReviewStatus
+                    v-else-if="col.key === 'aiReview'"
+                    :status="statusFor('PURCHASE_INVOICE', invoice.id)"
+                  />
                 </template>
               </Table>
             </div>
@@ -399,6 +451,7 @@ watch(
             { title: '金额', dataIndex: 'amount' },
             { title: '币种', dataIndex: 'currency' },
             { title: '状态', key: 'state' },
+            { title: 'AI 审核', key: 'aiReview', width: 170 },
           ]"
         >
           <template #bodyCell="{ column, record }">
@@ -412,6 +465,10 @@ watch(
             <Tag v-else-if="column.key === 'state'">
               {{ financeRecordStatus(record) }}
             </Tag>
+            <AiReviewStatus
+              v-else-if="column.key === 'aiReview'"
+              :status="reviewStatus(record as ProcurementFinanceRecord)"
+            />
           </template>
         </Table>
       </Card>
@@ -437,6 +494,7 @@ watch(
           { title: '金额', dataIndex: 'amount' },
           { title: '币种', dataIndex: 'currency' },
           { title: '状态', key: 'state' },
+          { title: 'AI 审核', key: 'aiReview', width: 170 },
         ]"
       >
         <template #bodyCell="{ column, record }">
@@ -450,6 +508,10 @@ watch(
           <Tag v-else-if="column.key === 'state'">
             {{ financeRecordStatus(record) }}
           </Tag>
+          <AiReviewStatus
+            v-else-if="column.key === 'aiReview'"
+            :status="reviewStatus(record as ProcurementFinanceRecord)"
+          />
         </template>
       </Table>
     </Card>

@@ -6,6 +6,9 @@ import { computed, ref, watch } from 'vue';
 import { Alert, Button, Empty, InputNumber } from 'ant-design-vue';
 import BigNumber from 'bignumber.js';
 
+import AiReviewStatus from '#/views/fdmaicheck/components/AiReviewStatus.vue';
+import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewStatuses';
+
 import { contractQuickActionReason } from '../../components/contract-workflow';
 import ProcurementStatusBadge from '../components/ProcurementStatusBadge.vue';
 import {
@@ -37,6 +40,12 @@ const source = computed(() =>
 const assignmentId = computed(() => String(source.value?.assignmentId ?? ''));
 const comparison = computed(() =>
   compareTaskQuotes(props.contract, assignmentId.value, quantity.value),
+);
+const { statusFor } = useAiReviewStatuses(() =>
+  comparison.value.entries.map(({ quote }) => ({
+    docType: 'QUOTE' as const,
+    docId: quote.id,
+  })),
 );
 const selected = computed(() =>
   comparison.value.entries.find(
@@ -225,6 +234,10 @@ watch(
             <span v-if="lowestId === entry.quote.id" class="lowest-badge">最低价</span>
             <span class="procurement-muted">版本 {{ entry.quote.version ?? '待补齐' }}</span>
           </div>
+          <span class="procurement-muted">
+            AI 审核
+            <AiReviewStatus :status="statusFor('QUOTE', entry.quote.id)" />
+          </span>
         </header>
         <div class="quote-price procurement-number">
           <span>{{ entry.quote.currency || '币种待补齐' }}</span>

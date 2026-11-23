@@ -47,6 +47,9 @@ vi.mock('#/api/fdmplatform/procurement', () => ({
 vi.mock('#/api/fdmplatform/business-documents', () => ({
   downloadBusinessDocumentFile: vi.fn(),
 }));
+vi.mock('#/views/fdmaicheck/components/AiCheckPanel.vue', () => ({
+  default: defineComponent({ render: () => h('div', { 'data-ai-check': '' }) }),
+}));
 vi.mock('@vben/utils', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@vben/utils')>()),
   formatDate: (value: string) => value,
@@ -950,6 +953,11 @@ describe('采购财务直接生效与历史单据兼容', () => {
       allowedActions: ['UPDATE', 'SUBMIT', 'CANCEL'],
     });
     const host = await mount({ type: 'PAYMENT', recordId: 'payment' });
+    expect(
+      host.querySelector(
+        '[data-ai-check][doc-type="PAYMENT"][doc-id="payment"]',
+      ),
+    ).toBeTruthy();
     expect(host.textContent).toContain('待财务审核');
     expect(host.textContent).toContain('财务审核');
     expect(host.textContent).not.toContain('确认实际付款');

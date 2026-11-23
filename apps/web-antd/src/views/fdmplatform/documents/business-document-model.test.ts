@@ -3,6 +3,7 @@ import type { BusinessDocument } from '#/api/fdmplatform/business-documents';
 
 import { describe, expect, it } from 'vitest';
 
+import { standaloneAiCheckType } from './ai-check-types';
 import {
   businessDocumentActionDefinition,
   businessDocumentLines,
@@ -29,6 +30,35 @@ const doc = {
   allowedActions: ['MATCH_SOURCE', 'CANCEL_ORDER', 'SAVE_DETAILS'],
 } as BusinessDocument;
 describe('standalone native business documents', () => {
+  it('matches historical inventory and return records with their check types', () => {
+    const stockIn = { ...doc, type: 'STOCK_IN' };
+    const stockOut = { ...doc, type: 'STOCK_OUT' };
+    const stocktake = { ...doc, type: 'STOCKTAKE' };
+    const returnShipment = {
+      ...doc,
+      type: 'SHIPMENT',
+      record: { id: 'return', originalShipmentId: 'shipment' },
+    };
+    expect(
+      standaloneAiCheckType(requireBusinessDocumentKind(stockIn, 'arrivals')),
+    ).toBe('STOCK_IN');
+    expect(
+      standaloneAiCheckType(requireBusinessDocumentKind(stockOut, 'shipments')),
+    ).toBe('STOCK_OUT');
+    expect(
+      standaloneAiCheckType(
+        requireBusinessDocumentKind(stocktake, undefined, 'STOCKTAKE'),
+      ),
+    ).toBe('STOCKTAKE');
+    expect(
+      standaloneAiCheckType(
+        requireBusinessDocumentKind(returnShipment, 'salesReturns'),
+      ),
+    ).toBe('SALES_RETURN');
+    expect(() =>
+      requireBusinessDocumentKind(stockIn, undefined, 'STOCKTAKE'),
+    ).toThrow('目标单据不属于当前菜单');
+  });
   it('does not offer replacement of a known zero amount while still allowing company zero to be completed', () => {
     const invoice = {
       ...doc,

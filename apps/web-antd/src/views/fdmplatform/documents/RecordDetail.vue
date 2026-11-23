@@ -43,6 +43,7 @@ import { getAttachments, getContract, getDirectory } from '#/api/fdmplatform';
 import { getContractFiles } from '#/api/fdmplatform/contract-files';
 import { createdOrdersText } from '#/api/fdmplatform/procurement';
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
+import AiCheckPanel from '#/views/fdmaicheck/components/AiCheckPanel.vue';
 
 import AttachmentPanel from '../components/AttachmentPanel.vue';
 import ContractFilesPanel from '../components/ContractFilesPanel.vue';
@@ -57,6 +58,7 @@ import {
   transferStatusLabel,
 } from '../purchase/request-transfer';
 import { salesChannelOf } from '../sales-channel';
+import { contractRecordAiCheckTypes } from './ai-check-types';
 import { documentAttachmentTarget } from './attachment-target';
 import DocumentAction from './DocumentAction.vue';
 import { migrationCell } from './migration-display';
@@ -201,6 +203,7 @@ const purchaseOrder = computed(() => {
   };
 });
 const config = computed(() => documentDefinitions[props.kind]);
+const aiCheckType = computed(() => contractRecordAiCheckTypes[props.kind]);
 /** 回款记录用金智式抬头 + 分组字段，其它单据沿用通用字段表 */
 const receipt = computed(() => props.kind === 'receipts');
 const procurement = computed(() =>
@@ -705,6 +708,13 @@ const mainAction = computed(() => {
       size="large"
       style="width: 100%"
     >
+      <AiCheckPanel
+        v-if="open && aiCheckType"
+        :doc-type="aiCheckType"
+        :doc-id="record.id"
+        :revision="contract.version"
+        default-collapsed
+      />
       <ReceiptSummary
         v-if="receipt"
         :contract="contract"

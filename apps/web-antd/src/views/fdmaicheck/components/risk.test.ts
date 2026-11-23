@@ -56,6 +56,16 @@ describe('aI 风险检查显示', () => {
     );
     expect(aiStatusText('NOT_REQUIRED', 'PURCHASE_ORDER')).toBe('');
   });
+
+  it('uses the reported provider mode for other documents', () => {
+    expect(aiStatusText('NO_CHECKPOINTS', 'REIMBURSEMENT', true)).toBe(
+      '未启用检查点，未执行检查',
+    );
+    expect(aiStatusText('FAILED', 'PAYMENT', true)).toBe('AI 检查未完成');
+    expect(aiStatusText('FAILED', 'PAYMENT', false)).toBe(
+      'AI 检查未完成，只保留了规则检查结果',
+    );
+  });
 });
 
 describe('attachmentSummary', () => {

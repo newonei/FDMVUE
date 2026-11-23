@@ -2,7 +2,32 @@ import { requestClient } from '#/api/request';
 
 /** 单据 AI 风险检查（Issue #91）。读权限跟单据本身走：能看单据就能看它的风险。 */
 export namespace FdmAiCheckApi {
-  export type DocType = 'CONTRACT' | 'PURCHASE_ORDER';
+  export type DocType =
+    | 'ARRIVAL'
+    | 'CONTRACT_DOMESTIC'
+    | 'CONTRACT_FOREIGN'
+    | 'COST_ALLOCATION'
+    | 'CUSTOMS_BATCH'
+    | 'PAYMENT'
+    | 'PAYMENT_PLAN'
+    | 'PAYMENT_REQUEST'
+    | 'PURCHASE_INVOICE'
+    | 'PURCHASE_ORDER'
+    | 'PURCHASE_PLAN'
+    | 'PURCHASE_REQUEST'
+    | 'PURCHASE_RETURN'
+    | 'QUOTE'
+    | 'RECEIPT'
+    | 'RECEIPT_ALLOCATION'
+    | 'REFUND'
+    | 'REIMBURSEMENT'
+    | 'SALES_INVOICE'
+    | 'SALES_RETURN'
+    | 'SHIPMENT'
+    | 'STOCK_IN'
+    | 'STOCK_OUT'
+    | 'STOCK_TRANSFER'
+    | 'STOCKTAKE';
   export type Severity = 'HIGH' | 'INFO' | 'NONE' | 'WARNING';
   export type FindingStatus =
     | 'FALSE_POSITIVE'
@@ -48,6 +73,14 @@ export namespace FdmAiCheckApi {
     | 'UNKNOWN'
     | 'WARN';
 
+  export interface ReviewStatus {
+    state: 'COMPLETED' | 'FAILED' | 'NOT_REVIEWED' | 'QUEUED' | 'RUNNING';
+    aiStatus?: string;
+    riskLevel?: Severity;
+    counts?: Partial<Record<VerdictResult, number>>;
+    checkedAt?: string;
+  }
+
   /** 一个检查点的结论。 */
   export interface Verdict {
     source: 'AI' | 'RULE';
@@ -87,6 +120,7 @@ export namespace FdmAiCheckApi {
   export interface Result {
     docType: DocType;
     docId: string;
+    configuredItemsOnly?: boolean;
     /** 待处理风险里最高的等级；从没检查过为空 */
     riskLevel?: Severity;
     openCount?: number;
@@ -140,12 +174,14 @@ export namespace FdmAiCheckApi {
   export interface Profile {
     docType: DocType;
     docTypeName: string;
+    configuredItemsOnly?: boolean;
     enabled: boolean;
     modelId?: number;
     triggerOnCreate: boolean;
     triggerOnUpdate: boolean;
     includeBatch: boolean;
     readAttachments: boolean;
+    supportsAttachments?: boolean;
     notifyLevel: Exclude<Severity, 'NONE'>;
     publishedVersionNo?: number;
     hasDraft: boolean;
@@ -234,6 +270,17 @@ export function getAiCheckLevels(
   return requestClient.post<Record<string, FdmAiCheckApi.Severity>>(
     `${base}/check/levels`,
     { docType, docIds },
+  );
+}
+
+export function getAiReviewStatuses(
+  docType: FdmAiCheckApi.DocType,
+  docIds: string[],
+) {
+  return requestClient.post<Record<string, FdmAiCheckApi.ReviewStatus>>(
+    `${base}/check/list-status`,
+    { docType, docIds },
+    { silent: true },
   );
 }
 

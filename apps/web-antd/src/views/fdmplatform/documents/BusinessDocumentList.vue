@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { FdmAiCheckApi } from '#/api/fdmaicheck';
 import type { DocumentRow, PageResource } from '#/api/fdmplatform';
 
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
@@ -7,8 +8,11 @@ import { useRouter } from 'vue-router';
 import { Alert, Button, Input, Space, Table, Tag } from 'ant-design-vue';
 
 import { getBusinessPage } from '#/api/fdmplatform';
+import AiReviewStatus from '#/views/fdmaicheck/components/AiReviewStatus.vue';
+import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewStatuses';
 
 import { errorText, label, money } from '../data';
+import { documentRowAiReviewTarget } from './ai-check-types';
 import BusinessDocumentDetail from './BusinessDocumentDetail.vue';
 import { withoutDetailQuery } from './navigation';
 import { useOwnedRoute } from './useOwnedRoute';
@@ -18,6 +22,30 @@ const route = useOwnedRoute();
 const router = useRouter();
 const active = useRouteOwner();
 const records = ref<DocumentRow[]>([]);
+const resourceReviewTypes: Partial<
+  Record<PageResource, FdmAiCheckApi.DocType>
+> = {
+  'stock-ins': 'STOCK_IN',
+  'stock-outs': 'STOCK_OUT',
+  stocktakes: 'STOCKTAKE',
+};
+const reviewDocType = computed(() => resourceReviewTypes[props.resource]);
+const { statusFor, refresh: refreshReviewStatuses } = useAiReviewStatuses(() =>
+  active.value
+    ? records.value.map((row) =>
+        documentRowAiReviewTarget(row, reviewDocType.value),
+      )
+    : [],
+);
+function reviewStatus(row: DocumentRow) {
+  const { docType, docId } = documentRowAiReviewTarget(
+    row,
+    reviewDocType.value,
+  );
+  return docType
+    ? statusFor(docType, docId)
+    : { state: 'UNAVAILABLE' as const };
+}
 const page = ref(1);
 const pageSize = ref(20);
 const total = ref(0);
@@ -51,6 +79,10 @@ async function load() {
   } finally {
     if (run === sequence) loading.value = false;
   }
+}
+async function refreshDocuments() {
+  await load();
+  void refreshReviewStatuses();
 }
 let listResource: PageResource | undefined;
 watch(
@@ -93,7 +125,9 @@ function close() {
           page = 1;
           load();
         "
-      /><Button :loading="loading" @click="load">刷新</Button>
+      /><Button :loading="loading" @click="refreshDocuments">
+刷新
+</Button>
 </Space><Alert v-if="pageError" type="error" :message="pageError" /><Table
       :data-source="records"
       row-key="id"
@@ -105,6 +139,9 @@ function close() {
         { title: '数量 / 单位', key: 'quantity' },
         { title: '金额 / 币种', key: 'amount' },
         { title: '业务日期', key: 'date' },
+        ...(reviewDocType
+          ? [{ title: 'AI 审核', key: 'aiReview', width: 180 }]
+          : []),
         { title: '办理', key: 'action' },
       ]"
       @change="
@@ -132,7 +169,10 @@ function close() {
           }}
 </Button><Tag v-else-if="column.key === 'status'">
           {{ label(record.record.status) }}
-</Tag><span v-else-if="column.key === 'quantity'">{{ record.record.quantity ?? '未注明' }}
+</Tag><AiReviewStatus
+          v-else-if="column.key === 'aiReview'"
+          :status="reviewStatus(record as DocumentRow)"
+        /><span v-else-if="column.key === 'quantity'">{{ record.record.quantity ?? '未注明' }}
           {{ record.record.unit || '' }}</span><span v-else-if="column.key === 'amount'">{{ money(record.record.amount, '', '未注明') }}
           {{ record.record.currency || '（币种未注明）' }}</span><span v-else-if="column.key === 'date'">{{
           record.migration?.sourceDate ||
@@ -146,6 +186,6 @@ function close() {
     :id="selectedId"
     :open="Boolean(selectedId) && active"
     @close="close"
-    @updated="load"
+    @updated="refreshDocuments"
   />
 </template>

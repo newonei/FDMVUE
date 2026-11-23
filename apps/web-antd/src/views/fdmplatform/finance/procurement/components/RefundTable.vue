@@ -8,6 +8,8 @@ import { Alert, Button, Input, Table } from 'ant-design-vue';
 
 import { getDirectory } from '#/api/fdmplatform';
 import { getProcurementRefunds } from '#/api/fdmplatform/procurement-finance';
+import AiReviewStatus from '#/views/fdmaicheck/components/AiReviewStatus.vue';
+import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewStatuses';
 
 import { errorText } from '../../../data';
 import { personName } from '../../../directory';
@@ -26,6 +28,9 @@ const props = defineProps<{ contractId?: string; orderId?: string }>();
 const emit = defineEmits<{ openPayment: [id: string] }>();
 
 const rows = ref<ProcurementRefund[]>([]);
+const { statusFor, refresh: refreshReviewStatuses } = useAiReviewStatuses(() =>
+  rows.value.map((row) => ({ docType: 'PAYMENT', docId: row.paymentId })),
+);
 const total = ref(0);
 const pageNo = ref(1);
 const keyword = ref('');
@@ -38,6 +43,7 @@ const error = ref('');
 const columns = [
   { title: '退款日期', key: 'date', width: 110 },
   { title: '原付款单', key: 'payment', width: 170 },
+  { title: '原付款单 AI 审核', key: 'paymentAiReview', width: 170 },
   ...(props.orderId
     ? []
     : [{ title: '采购单 / 供应商', key: 'order', width: 220 }]),
@@ -63,6 +69,7 @@ async function load(reset = false) {
     });
     rows.value = page.list;
     total.value = page.total;
+    void refreshReviewStatuses();
   } catch (error_) {
     error.value = errorText(error_);
   } finally {
@@ -121,7 +128,7 @@ defineExpose({ load });
       :columns="columns"
       :data-source="rows"
       :loading="loading"
-      :scroll="{ x: orderId ? 910 : 1130 }"
+      :scroll="{ x: orderId ? 1080 : 1300 }"
       :pagination="
         orderId && total <= 20
           ? false
@@ -162,6 +169,10 @@ defineExpose({ load });
           </Button>
           <span class="muted">原付 {{ money(record.paymentAmount, record.currency) }}</span>
         </div>
+        <AiReviewStatus
+          v-else-if="column.key === 'paymentAiReview'"
+          :status="statusFor('PAYMENT', record.paymentId)"
+        />
         <div v-else-if="column.key === 'order'" class="cell">
           <span class="mono">{{ record.orderCode ?? '—' }}</span>
           <span class="muted ellipsis">{{ record.supplierName }}</span>

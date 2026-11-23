@@ -3,7 +3,7 @@ import type { FdmgongchangMaterialPlanApi as Api } from '#/api/fdmgongchang/prod
 
 import { computed, ref, watch } from 'vue';
 
-import { Checkbox, message, Select, Spin, Tag } from 'ant-design-vue';
+import { Alert, Button, Checkbox, message, Select, Spin, Tag } from 'ant-design-vue';
 
 import { getMaterialPlan, getRecipeOptions, saveItemMaterial } from '#/api/fdmgongchang/production-order';
 
@@ -22,9 +22,19 @@ const SETTING = 'SETTING';
 const plan = ref<Api.Plan>();
 const recipes = ref<Api.RecipeOption[]>([]);
 const loading = ref(false);
-const saving = ref<number>();
+const loadError = ref(false);
+const saving = ref<'batch' | 'single'>();
+const batchOpen = ref(false);
+const batchItemIds = ref<number[]>([]);
+const batchRecipeCode = ref<string>();
+const batchError = ref('');
 /** 选配方、模具时同规格的明细一起改。 */
 const syncSameSize = ref(true);
+const canEdit = computed(() => props.editable && !loading.value && !loadError.value && !saving.value);
+const batchCandidates = computed(() => (plan.value?.items ?? []).filter((item) => num(item.quantity) > 0));
+const batchItems = computed(() => batchCandidates.value.filter((item) => batchItemIds.value.includes(item.itemId)));
+const allBatchItemsSelected = computed(() => batchItems.value.length > 0 && batchItems.value.length === batchCandidates.value.length);
+let loadSequence = 0;
 
 const recipeOptions = computed(() =>
   recipes.value.map((r) => ({
@@ -41,33 +51,95 @@ const hasSameSize = computed(() => (plan.value?.items ?? []).some((i) => sameSiz
 const showTotals = computed(() => (plan.value?.items.length ?? 0) > 1 && (plan.value?.totals.length ?? 0) > 0);
 
 async function load() {
+  const sequence = ++loadSequence;
   loading.value = true;
+  loadError.value = false;
   try {
     const [p, r] = await Promise.all([
       getMaterialPlan(props.orderId),
       recipes.value.length > 0 ? Promise.resolve(recipes.value) : getRecipeOptions(),
     ]);
+    if (sequence !== loadSequence) return;
     plan.value = p;
     recipes.value = r;
+  } catch {
+    if (sequence === loadSequence) loadError.value = true;
   } finally {
-    loading.value = false;
+    if (sequence === loadSequence) loading.value = false;
   }
 }
 
-watch(() => props.orderId, load, { immediate: true });
+function closeBatch() {
+  batchOpen.value = false;
+  batchItemIds.value = [];
+  batchRecipeCode.value = undefined;
+  batchError.value = '';
+}
+
+watch(() => props.orderId, () => {
+  closeBatch();
+  plan.value = undefined;
+  void load();
+}, { immediate: true });
 
 async function save(item: Api.ItemPlan, recipeCode: null | string | undefined, mouldProfileId: null | number | undefined) {
-  saving.value = item.itemId;
+  if (!canEdit.value) return;
+  const orderId = props.orderId;
+  saving.value = 'single';
   const others = syncSameSize.value ? sameSize(item) : [];
   try {
     // 同规格的明细设成和这条一样的配方、模具
     for (const target of [item, ...others]) {
+      if (props.orderId !== orderId) return;
       await saveItemMaterial({ itemId: target.itemId, mouldProfileId: mouldProfileId ?? null, recipeCode: recipeCode ?? null });
     }
-    if (others.length > 0) message.success(`同规格的 ${others.length} 个产品也设成了一样的配方和板材规格`);
-    await load();
+    if (props.orderId === orderId && others.length > 0) message.success(`同规格的 ${others.length} 个产品也设成了一样的配方和板材规格`);
   } catch {
     // 后端错误已由全局提示展示
+  } finally {
+    if (props.orderId === orderId) await load();
+    saving.value = undefined;
+  }
+}
+
+function selectBatchItem(itemId: number, checked: boolean) {
+  batchItemIds.value = checked
+    ? [...batchItemIds.value, itemId]
+    : batchItemIds.value.filter((id) => id !== itemId);
+}
+
+function selectAllBatchItems(checked: boolean) {
+  batchItemIds.value = checked ? batchCandidates.value.map((item) => item.itemId) : [];
+}
+
+async function applyBatchRecipe() {
+  const recipeCode = batchRecipeCode.value;
+  const items = batchItems.value;
+  if (!canEdit.value || !recipeCode || items.length === 0) return;
+
+  const orderId = props.orderId;
+  const failed: number[] = [];
+  saving.value = 'batch';
+  batchError.value = '';
+  try {
+    for (const item of items) {
+      if (props.orderId !== orderId) return;
+      try {
+        await saveItemMaterial({ itemId: item.itemId, mouldProfileId: item.mouldProfileId ?? null, recipeCode });
+      } catch {
+        failed.push(item.itemId);
+      }
+    }
+    if (props.orderId !== orderId) return;
+    batchItemIds.value = failed;
+    const savedCount = items.length - failed.length;
+    if (failed.length > 0) {
+      batchError.value = `已保存 ${savedCount} 个产品，${failed.length} 个保存失败，已保留勾选，可重试。`;
+    } else {
+      message.success(`已为 ${savedCount} 个产品应用配方`);
+      batchRecipeCode.value = undefined;
+    }
+    await load();
   } finally {
     saving.value = undefined;
   }
@@ -96,17 +168,109 @@ function fmt(v: null | number | string | undefined) {
   return num(v).toLocaleString('zh-CN', { maximumFractionDigits: 3 });
 }
 
-defineExpose({ reload: load });
+defineExpose({ reload: load, saving });
 </script>
 
 <template>
   <section class="flex flex-col gap-2">
     <div class="flex flex-wrap items-center justify-between gap-2">
       <h3 class="m-0 text-sm font-semibold">用料逆推</h3>
-      <Checkbox v-if="editable && hasSameSize" v-model:checked="syncSameSize" class="text-xs">同规格的产品一起改配方和模具</Checkbox>
+      <div class="flex flex-wrap items-center gap-2">
+        <Checkbox
+          v-if="editable && hasSameSize && !batchOpen"
+          v-model:checked="syncSameSize"
+          :disabled="!canEdit"
+          class="text-xs"
+        >
+          同规格的产品一起改配方和模具
+        </Checkbox>
+        <Button
+          v-if="editable && batchCandidates.length > 1 && !batchOpen"
+          :disabled="!canEdit"
+          size="small"
+          @click="batchOpen = true"
+        >
+          批量选配方
+        </Button>
+      </div>
     </div>
     <Spin :spinning="loading">
+      <Alert v-if="loadError" class="mb-3" message="用料逆推加载失败" show-icon type="error">
+        <template #action><Button size="small" @click="load">重新加载</Button></template>
+      </Alert>
       <div v-if="plan" class="flex flex-col gap-3">
+        <section v-if="editable && batchOpen" aria-label="批量选配方" class="space-y-3 rounded-md border border-primary/25 bg-muted/40 p-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <span class="text-sm font-medium">批量选配方 · 已选 {{ batchItems.length }} / {{ batchCandidates.length }} 个产品</span>
+            <Button :disabled="!!saving" size="small" type="text" @click="closeBatch">退出批量选择</Button>
+          </div>
+          <div class="max-h-56 overflow-auto rounded-md border border-border bg-background">
+            <table class="w-full text-left text-xs">
+              <thead class="sticky top-0 z-10 bg-muted text-muted-foreground">
+                <tr>
+                  <th class="w-px whitespace-nowrap px-3 py-2 font-normal" scope="col">
+                    <Checkbox
+                      :checked="allBatchItemsSelected"
+                      :disabled="!canEdit || batchCandidates.length === 0"
+                      :indeterminate="batchItems.length > 0 && !allBatchItemsSelected"
+                      @change="(event) => selectAllBatchItems(event.target.checked)"
+                    >
+                      全选
+                    </Checkbox>
+                  </th>
+                  <th class="px-3 py-2 font-normal" scope="col">产品 / 成品规格</th>
+                  <th class="px-3 py-2 font-normal" scope="col">当前配方</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in batchCandidates" :key="item.itemId" class="border-t border-border">
+                  <td class="px-3 py-2">
+                    <Checkbox
+                      :aria-label="`勾选 ${item.productName}${item.targetSize ? ` ${item.targetSize}cm` : ''}`"
+                      :checked="batchItemIds.includes(item.itemId)"
+                      :disabled="!canEdit"
+                      @change="(event) => selectBatchItem(item.itemId, event.target.checked)"
+                    />
+                  </td>
+                  <td class="px-3 py-2">
+                    <div>{{ item.productName }}</div>
+                    <div class="mt-0.5 text-muted-foreground">
+                      {{ item.targetSize ? `${item.targetSize}cm · ` : '' }}{{ fmt(item.quantity) }} {{ item.unit }}
+                    </div>
+                  </td>
+                  <td class="px-3 py-2">
+                    {{ item.recipeName || item.recipeCode || '未选' }}
+                    <span v-if="item.recipeSuggested" class="text-muted-foreground">（建议）</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="flex flex-wrap items-end gap-2">
+            <label class="flex min-w-48 flex-1 flex-col gap-1 text-xs text-muted-foreground" for="mp-batch-recipe">
+              应用配方
+              <Select
+                id="mp-batch-recipe"
+                v-model:value="batchRecipeCode"
+                :disabled="!canEdit"
+                :options="recipeOptions"
+                allow-clear
+                option-filter-prop="label"
+                placeholder="搜索或选择配方"
+                show-search
+              />
+            </label>
+            <Button
+              :disabled="!canEdit || batchItems.length === 0 || !batchRecipeCode"
+              :loading="saving === 'batch'"
+              type="primary"
+              @click="applyBatchRecipe"
+            >
+              应用到所选产品
+            </Button>
+          </div>
+          <Alert v-if="batchError" :message="batchError" show-icon type="warning" />
+        </section>
         <div v-for="item in plan.items" :key="item.itemId" class="flex flex-col gap-2 rounded-md border border-border p-3">
           <div class="flex flex-wrap items-baseline justify-between gap-2">
             <span class="font-medium">{{ item.productName }}</span>
@@ -126,7 +290,7 @@ defineExpose({ reload: load });
               <Select
                 :id="`mp-recipe-${item.itemId}`"
                 allow-clear
-                :disabled="!editable || saving === item.itemId"
+                :disabled="!canEdit || batchOpen"
                 :options="recipeOptions"
                 placeholder="选配方才能算原料"
                 show-search
@@ -139,7 +303,7 @@ defineExpose({ reload: load });
               板材规格（共 {{ item.candidates.length }} 种能切）
               <Select
                 :id="`mp-board-${item.itemId}`"
-                :disabled="!editable || saving === item.itemId"
+                :disabled="!canEdit || batchOpen"
                 :options="boardOptions(item)"
                 option-filter-prop="label"
                 placeholder="输入模具尺寸搜索，如 780"

@@ -22,22 +22,28 @@ export const STATUS_LABELS: Record<FdmAiCheckApi.FindingStatus, string> = {
 };
 
 /** AI 没有检查时给人看的原因；SUCCEEDED 返回空。 */
-export function aiStatusText(status?: string, docType?: FdmAiCheckApi.DocType) {
-  const ruleFallback = docType === 'PURCHASE_ORDER' ? '' : '，只做了规则检查';
+export function aiStatusText(
+  status?: string,
+  docType?: FdmAiCheckApi.DocType,
+  configuredItemsOnly = docType === 'PURCHASE_ORDER',
+) {
+  const ruleFallback = configuredItemsOnly ? '' : '，只做了规则检查';
   switch (status) {
     case 'FAILED': {
-      return docType === 'PURCHASE_ORDER'
+      return configuredItemsOnly
         ? 'AI 检查未完成'
         : 'AI 检查未完成，只保留了规则检查结果';
     }
     case 'NO_CHECKPOINTS': {
-      return '未启用检查点，未执行采购单检查';
+      return docType === 'PURCHASE_ORDER'
+        ? '未启用检查点，未执行采购单检查'
+        : '未启用检查点，未执行检查';
     }
     case 'NOT_CONFIGURED': {
       return `这家公司还没有放行 AI 单据检查的模型${ruleFallback}`;
     }
     case 'TOO_LARGE': {
-      return docType === 'PURCHASE_ORDER'
+      return configuredItemsOnly
         ? '单据资料超出模型可处理的范围'
         : '单据资料较多，只做了规则检查';
     }

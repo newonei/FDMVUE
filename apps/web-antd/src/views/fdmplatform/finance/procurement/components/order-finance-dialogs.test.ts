@@ -5,7 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import OrderFinance from './OrderFinance.vue';
 
-const mocks = vi.hoisted(() => ({ summary: vi.fn(), push: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  summary: vi.fn(),
+  push: vi.fn(),
+  reviews: vi.fn(),
+}));
+vi.mock('#/api/fdmaicheck', () => ({
+  getAiReviewStatuses: mocks.reviews,
+}));
 vi.mock('#/api/fdmplatform/procurement-finance', () => ({
   getProcurementFinanceSummary: mocks.summary,
 }));
@@ -115,9 +122,13 @@ vi.mock('ant-design-vue', () => {
         return () =>
           h(
             'div',
-            props.dataSource.map((record) =>
-              slots.bodyCell?.({ column: { key: 'name' }, record }),
-            ),
+            props.dataSource.map((row) => {
+              const record = row as { id: string };
+              return h('article', { 'data-finance-row': record.id }, [
+                slots.bodyCell?.({ column: { key: 'name' }, record }),
+                slots.bodyCell?.({ column: { key: 'aiReview' }, record }),
+              ]);
+            }),
           );
       },
     }),
@@ -126,6 +137,7 @@ vi.mock('ant-design-vue', () => {
 let cleanup: (() => void) | undefined;
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.reviews.mockResolvedValue({});
   mocks.summary.mockResolvedValue({
     currency: 'CNY',
     availableRequestAmount: '60',
@@ -177,6 +189,42 @@ function click(host: Element, text: string) {
   button!.click();
 }
 describe('采购单财务卡片弹窗办理', () => {
+  it('按原单据 ID 在采购单内展示付款记录的 AI 审核结果', async () => {
+    mocks.summary.mockResolvedValue({
+      payments: [
+        { id: 'native-1', type: 'PAYMENT', code: 'CGFK-1' },
+        {
+          id: 'legacy-row',
+          standaloneId: 'imported-original',
+          type: 'PAYMENT',
+          code: 'OLD-1',
+        },
+      ],
+      requests: [{ id: 'request-1', type: 'REQUEST', name: '首期请款' }],
+    });
+    mocks.reviews.mockResolvedValue({
+      'native-1': { state: 'COMPLETED', counts: { PASS: 2, UNKNOWN: 2 } },
+      'imported-original': { state: 'NOT_REVIEWED' },
+    });
+    const { host } = await mount();
+
+    await vi.waitFor(() => {
+      expect(mocks.reviews).toHaveBeenCalledWith('PAYMENT', [
+        'imported-original',
+        'native-1',
+      ]);
+      const completed = host.querySelector(
+        '[data-finance-row="native-1"] .ai-review-status',
+      );
+      expect(completed?.textContent).toContain('通过 2');
+      expect(completed?.textContent).toContain('缺资料 2');
+      expect(
+        host.querySelector('[data-finance-row="legacy-row"] .ai-review-status')
+          ?.textContent,
+      ).toContain('未审核');
+    });
+  });
+
   it('点击关联请款、付款留在采购单内，更新自动刷新摘要，新建不会携带旧记录 ID', async () => {
     const { host, changed } = await mount();
     click(host, 'QK-1 · 首期请款');

@@ -25,6 +25,7 @@ import {
   getPurchaseInvoiceDetail,
 } from '#/api/fdmplatform/procurement';
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
+import AiCheckPanel from '#/views/fdmaicheck/components/AiCheckPanel.vue';
 
 import FilePreviewButton from '../../../components/FilePreviewButton.vue';
 import { errorText } from '../../../data';
@@ -57,6 +58,7 @@ const TYPE_NAMES: Record<PurchaseInvoice['invoiceType'], string> = {
 const detail = ref<Detail>();
 const loading = ref(false);
 const error = ref('');
+let sequence = 0;
 
 function money(value: unknown) {
   const amount = new BigNumber(String(value ?? ''));
@@ -67,15 +69,22 @@ const unpaid = computed(
 );
 
 async function load() {
-  if (!props.open || !props.invoiceId) return;
+  const run = ++sequence;
+  const invoiceId = props.invoiceId;
+  detail.value = undefined;
+  if (!props.open || !invoiceId) {
+    loading.value = false;
+    return;
+  }
   loading.value = true;
   error.value = '';
   try {
-    detail.value = await getPurchaseInvoiceDetail(props.invoiceId);
+    const value = await getPurchaseInvoiceDetail(invoiceId);
+    if (run === sequence) detail.value = value;
   } catch (error_) {
-    error.value = errorText(error_);
+    if (run === sequence) error.value = errorText(error_);
   } finally {
-    loading.value = false;
+    if (run === sequence) loading.value = false;
   }
 }
 watch(() => [props.open, props.invoiceId, props.reload], load, {
@@ -108,6 +117,12 @@ async function download() {
     <Alert v-if="error" type="error" :message="error" show-icon />
     <Spin :spinning="loading">
       <div v-if="detail" class="detail">
+        <AiCheckPanel
+          v-if="open"
+          doc-type="PURCHASE_INVOICE"
+          :doc-id="detail.id"
+          default-collapsed
+        />
         <section>
           <h4>发票信息</h4>
           <Descriptions size="small" bordered :column="3">

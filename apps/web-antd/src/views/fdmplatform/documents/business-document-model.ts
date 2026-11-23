@@ -9,13 +9,16 @@ import BigNumber from 'bignumber.js';
 import { rows } from '../data';
 import { currencyOptions } from '../products/model';
 import { needsImportedValue } from './import-completion';
+import { shipmentKind } from './model';
 
 export const nativeTypeLabels: Record<string, string> = {
   PURCHASE_REQUEST: '采购申请',
   PURCHASE_ORDER: '采购单',
+  PURCHASE_RETURN: '采购退货单',
   ARRIVAL: '入库单',
   STOCK_IN: '入库单',
   SHIPMENT: '发货单',
+  SALES_RETURN: '销售退货单',
   STOCK_OUT: '出库单',
   STOCKTAKE: '库存盘点',
   STOCK_BALANCE: '库存余额',
@@ -30,7 +33,9 @@ const kindTypes: Partial<Record<DocumentKind, string[]>> = {
   tasks: ['PURCHASE_REQUEST'],
   orders: ['PURCHASE_ORDER'],
   arrivals: ['ARRIVAL', 'STOCK_IN'],
+  purchaseReturns: ['PURCHASE_RETURN'],
   shipments: ['SHIPMENT', 'STOCK_OUT'],
+  salesReturns: ['SALES_RETURN', 'SHIPMENT'],
   receipts: ['RECEIPT'],
   refunds: ['REFUND'],
   invoices: ['SALES_INVOICE', 'PURCHASE_INVOICE'],
@@ -38,8 +43,15 @@ const kindTypes: Partial<Record<DocumentKind, string[]>> = {
 export function requireBusinessDocumentKind(
   view: BusinessDocument,
   kind?: DocumentKind,
+  expectedType?: string,
 ) {
-  if (kind && !kindTypes[kind]?.includes(view.type))
+  if (
+    (expectedType && view.type !== expectedType) ||
+    (kind && !kindTypes[kind]?.includes(view.type)) ||
+    (kind === 'salesReturns' &&
+      view.type === 'SHIPMENT' &&
+      shipmentKind(view.record) !== 'RETURN')
+  )
     throw new Error('目标单据不属于当前菜单，请从对应业务菜单打开');
   return view;
 }

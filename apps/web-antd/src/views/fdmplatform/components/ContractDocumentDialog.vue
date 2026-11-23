@@ -24,8 +24,14 @@ import {
 
 import { getBusinessPage, getContract } from '#/api/fdmplatform';
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
+import AiReviewStatus from '#/views/fdmaicheck/components/AiReviewStatus.vue';
+import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewStatuses';
 
 import { errorText, label, receiptStatusLabel } from '../data';
+import {
+  contractRecordAiCheckTypes,
+  documentRowAiReviewTarget,
+} from '../documents/ai-check-types';
 import BusinessDocumentDetail from '../documents/BusinessDocumentDetail.vue';
 import DocumentAction from '../documents/DocumentAction.vue';
 import { migrationCell, nativeMoney } from '../documents/migration-display';
@@ -84,6 +90,28 @@ const documentKind = computed<DocumentKind>(() =>
     ? 'requests'
     : procurementDocumentKind(currentKind.value, procurementQueue.value),
 );
+const reviewDocType = computed(() =>
+  currentKind.value === 'customs'
+    ? undefined
+    : contractRecordAiCheckTypes[documentKind.value],
+);
+const reviewTargets = computed(() =>
+  records.value.map((row) =>
+    documentRowAiReviewTarget(row, reviewDocType.value),
+  ),
+);
+const { statusFor } = useAiReviewStatuses(() =>
+  props.open && currentKind.value !== 'customs' ? reviewTargets.value : [],
+);
+function reviewStatus(row: DocumentRow) {
+  const { docType, docId } = documentRowAiReviewTarget(
+    row,
+    reviewDocType.value,
+  );
+  return docType
+    ? statusFor(docType, docId)
+    : { state: 'UNAVAILABLE' as const };
+}
 const definition = computed(() =>
   procurementDocumentDefinition(
     currentKind.value === 'customs' ? 'requests' : currentKind.value,
@@ -107,6 +135,9 @@ const columns = computed(() => [
     const [key, title] = pair.split('|');
     return { key: key!, title: title!, width: 150, ellipsis: true };
   }),
+  ...(reviewDocType.value || reviewTargets.value.some(({ docType }) => docType)
+    ? [{ title: 'AI 审核', key: 'aiReview', width: 180 }]
+    : []),
   { key: 'action', title: '操作', width: 130, fixed: 'right' as const },
 ]);
 const profit = computed(
@@ -488,6 +519,10 @@ onBeforeUnmount(() => {
             >
               {{ recordTitle(record as DocumentRow) }}
             </Button>
+            <AiReviewStatus
+              v-else-if="column.key === 'aiReview'"
+              :status="reviewStatus(record as DocumentRow)"
+            />
             <Space v-else-if="column.key === 'action'" wrap>
               <Button
                 v-if="isIntake"

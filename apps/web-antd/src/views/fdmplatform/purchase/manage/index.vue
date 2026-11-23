@@ -77,8 +77,8 @@ import { getProcurementFinanceSummary } from '#/api/fdmplatform/procurement-fina
 import { getPurchaseReturns, getStockIns } from '#/api/fdmplatform/warehouse';
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 import AiCheckPanel from '#/views/fdmaicheck/components/AiCheckPanel.vue';
-import AiRiskTag from '#/views/fdmaicheck/components/AiRiskTag.vue';
-import { useAiRiskLevels } from '#/views/fdmaicheck/components/useAiRiskLevels';
+import AiReviewStatus from '#/views/fdmaicheck/components/AiReviewStatus.vue';
+import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewStatuses';
 
 import ActionDialog from '../../components/ActionDialog.vue';
 import AttachmentPanel from '../../components/AttachmentPanel.vue';
@@ -102,6 +102,7 @@ import {
   contractTarget,
   detailLocation,
   entityTarget,
+  referenceId,
   relatedDocumentLinks,
   resolveDocumentRow,
   standaloneLocation,
@@ -179,6 +180,7 @@ const purchaseDateSortOrder = computed<'ascend' | 'descend' | null>(() => {
 const orderColumns = computed(() => [
   { title: '操作/状态', key: 'flags', width: 130, locked: true },
   { title: '采购主题 / 供应商', key: 'supplier', width: 280, locked: true },
+  { title: 'AI 审核', key: 'aiReview', width: 170, locked: true },
   { title: '关联合同 / 客户', key: 'contract', width: 200 },
   {
     title: '采购日期',
@@ -221,17 +223,26 @@ const tableChange: NonNullable<TableProps<ProcurementOrderRow>['onChange']> = (
   }
   void loadList();
 };
-/** AI 风险检查的单据编号：关联合同的采购单是行编号，新建的独立采购单是 standaloneId；金智迁入的历史单不检查。 */
-function riskDocId(row: DocumentRow) {
-  if (row.standaloneId)
-    return (row as ProcurementOrderRow).nativeStandalone === true
-      ? row.standaloneId
-      : '';
-  return row.id;
+/** 历史采购单也展示状态；只有现有检查流程支持的单据才查询结果。 */
+function reviewOrderId(row: ProcurementOrderRow) {
+  if (row.record.migration || (row.standaloneId && !row.nativeStandalone))
+    return undefined;
+  return row.standaloneId ?? row.id;
 }
-const { levels: riskLevels } = useAiRiskLevels('PURCHASE_ORDER', () =>
-  records.value.map((row) => riskDocId(row)),
+const { statusFor, refresh: refreshReviewStatuses } = useAiReviewStatuses(() =>
+  active.value && !embedded.value
+    ? records.value.map((row) => ({
+        docType: 'PURCHASE_ORDER',
+        docId: reviewOrderId(row),
+      }))
+    : [],
 );
+function reviewOrderStatus(row: ProcurementOrderRow) {
+  const id = reviewOrderId(row);
+  return id
+    ? statusFor('PURCHASE_ORDER', id)
+    : { state: 'NOT_REVIEWED' as const };
+}
 /**
  * 列表批量操作（金智「选中付款 / 转入库单 / 选中结束」）：只对新系统采购单，金智历史单不可选。
  * 选择只在当前页有效，翻页或筛选后清空。
@@ -483,6 +494,14 @@ const arrivalRows = computed(() =>
   rows(contract.value?.arrivals).filter(
     (entry) => entry.orderId === view.value?.id,
   ),
+);
+const { statusFor: arrivalReviewStatus } = useAiReviewStatuses(() =>
+  active.value && detailId.value
+    ? arrivalRows.value.map((row) => ({
+        docType: 'ARRIVAL',
+        docId: referenceId(row.id),
+      }))
+    : [],
 );
 /** 没有采购入库单的到货（如工厂以前的外采到货 DH…），入库比例算它们，入库单页签单独列出。 */
 const otherArrivals = computed(() =>
@@ -1165,6 +1184,7 @@ async function loadList() {
     if (run === listSequence && active.value) {
       records.value = result.list;
       total.value = result.total;
+      void refreshReviewStatuses();
     }
   } catch (error) {
     if (run === listSequence) listError.value = errorText(error);
@@ -1921,9 +1941,6 @@ watch(financeType, (value, previous) => {
                 <ProcurementStatusBadge
                   :status="String(record.record.status ?? '')"
                 />
-                <AiRiskTag
-                  :level="riskLevels[riskDocId(record as DocumentRow)]"
-                />
               </span>
               <span
                 v-if="
@@ -1948,6 +1965,10 @@ watch(financeType, (value, previous) => {
                 {{ purchaseRowLabels(record as ProcurementOrderRow).supplier }}
               </RelatedLink>
             </div>
+            <AiReviewStatus
+              v-else-if="column.key === 'aiReview'"
+              :status="reviewOrderStatus(record as ProcurementOrderRow)"
+            />
             <div v-else-if="column.key === 'contract'" class="order-cell">
               <template v-if="record.contractId">
                 <RelatedLink :target="contractTarget(record.contractId)">
@@ -2411,12 +2432,13 @@ watch(financeType, (value, previous) => {
                     size="small"
                     row-key="id"
                     :pagination="false"
-                    :scroll="{ x: 620 }"
+                    :scroll="{ x: 790 }"
                     :columns="[
                       { title: '到货批次', key: 'batch' },
                       { title: '产品', key: 'product' },
                       { title: '到货数量', dataIndex: 'quantity' },
                       { title: '合格数量', dataIndex: 'acceptedQuantity' },
+                      { title: 'AI 审核', key: 'aiReview', width: 170 },
                     ]"
                   >
                     <template #emptyText>暂未登记到货</template>
@@ -2434,6 +2456,12 @@ watch(financeType, (value, previous) => {
                           (item) => item.id === record.contractItemId,
                         )?.productName || '产品未注明'
                       }}</span>
+                      <AiReviewStatus
+                        v-else-if="column.key === 'aiReview'"
+                        :status="
+                          arrivalReviewStatus('ARRIVAL', referenceId(record.id))
+                        "
+                      />
                     </template>
                   </Table>
                 </section>

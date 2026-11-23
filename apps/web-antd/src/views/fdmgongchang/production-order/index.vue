@@ -598,7 +598,14 @@ function progressPercent(o: Api.Order) {
         @saved="onBatchRouteSaved"
       />
       <MixBatchModal :key="factory.factoryId.value ?? 'none'" v-model:open="batchMixOpen" :orders="[...selected.values()]" @released="onScheduled" />
-      <OrderDrawer v-model:open="drawerOpen" :mode="tab === 'mine' ? 'mine' : 'factory'" :order-id="drawerId" @changed="onChanged" @copy="copyOrder" />
+      <OrderDrawer
+        v-model:open="drawerOpen"
+        :mode="tab === 'mine' ? 'mine' : 'factory'"
+        :order-id="drawerId"
+        :status-hint="rows.find((row) => row.id === drawerId)?.status"
+        @changed="onChanged"
+        @copy="copyOrder"
+      />
     </div>
   </Page>
 </template>

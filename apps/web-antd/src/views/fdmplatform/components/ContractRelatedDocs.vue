@@ -5,6 +5,14 @@ import { computed } from 'vue';
 
 import { Button, Table, Tag } from 'ant-design-vue';
 
+import AiReviewStatus from '#/views/fdmaicheck/components/AiReviewStatus.vue';
+import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewStatuses';
+
+import {
+  contractRecordAiCheckTypes,
+  documentRowAiReviewTarget,
+  procurementFinanceAiCheckTypes,
+} from '../documents/ai-check-types';
 import { canCancelReceipt } from '../documents/model';
 
 import './compact-tables.css';
@@ -20,6 +28,36 @@ const emit = defineEmits<{
   open: [row: RelatedDocRow];
 }>();
 
+function reviewTarget({ ref }: RelatedDocRow) {
+  switch (ref.source) {
+    case 'business': {
+      return documentRowAiReviewTarget(
+        ref.row,
+        contractRecordAiCheckTypes[ref.kind],
+      );
+    }
+    case 'finance': {
+      return {
+        docType: procurementFinanceAiCheckTypes[ref.record.type],
+        docId: ref.record.standaloneId || ref.record.id,
+      };
+    }
+    case 'stockIn': {
+      return { docType: 'STOCK_IN' as const, docId: ref.stockIn.id };
+    }
+    case 'stockOut': {
+      return { docType: 'STOCK_OUT' as const, docId: ref.stockOut.id };
+    }
+  }
+}
+const reviewTargets = computed(() => props.group.rows.map(reviewTarget));
+const { statusFor } = useAiReviewStatuses(() => reviewTargets.value);
+function reviewStatus(row: RelatedDocRow) {
+  const { docType, docId } = reviewTarget(row);
+  return docType
+    ? statusFor(docType, docId)
+    : { state: 'UNAVAILABLE' as const };
+}
 const columns = computed(() => [
   { key: 'code', title: '单号', width: 180 },
   ...props.group.columns.map((title, index) => ({
@@ -29,6 +67,9 @@ const columns = computed(() => [
     ellipsis: true,
   })),
   { key: 'status', title: '状态', width: 110 },
+  ...(reviewTargets.value.some(({ docType }) => docType)
+    ? [{ key: 'aiReview', title: 'AI 审核', width: 180 }]
+    : []),
   ...(props.group.kind === 'receipts'
     ? [{ key: 'action', title: '操作', width: 110, fixed: 'right' as const }]
     : []),
@@ -104,6 +145,10 @@ const cell = (row: RelatedDocRow, key: string) =>
         >
           撤销登记
         </Button>
+        <AiReviewStatus
+          v-else-if="column.key === 'aiReview'"
+          :status="reviewStatus(record as RelatedDocRow)"
+        />
         <span
           v-else
           class="fdm-cell-line"

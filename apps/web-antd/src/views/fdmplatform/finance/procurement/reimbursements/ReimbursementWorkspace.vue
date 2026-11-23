@@ -22,6 +22,8 @@ import {
 } from 'ant-design-vue';
 
 import { getExpenseContext, getExpensePage } from '#/api/fdmplatform/expense';
+import AiReviewStatus from '#/views/fdmaicheck/components/AiReviewStatus.vue';
+import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewStatuses';
 
 import { useInMergedView } from '../../../components/merged-view';
 import { errorText, expenseCategories } from '../../../data';
@@ -59,6 +61,14 @@ const search = ref('');
 const page = ref(1);
 const pageSize = ref(15);
 const result = ref<{ list: ProcurementFinanceRecord[]; total: number }>();
+const { statusFor, refresh: refreshReviewStatuses } = useAiReviewStatuses(() =>
+  active.value
+    ? (result.value?.list ?? []).map((row) => ({
+        docType: 'REIMBURSEMENT',
+        docId: row.standaloneId ?? row.id,
+      }))
+    : [],
+);
 const loading = ref(false);
 const pageError = ref('');
 const me = ref<ExpenseContext>();
@@ -128,6 +138,7 @@ async function load() {
       return;
     }
     result.value = value;
+    void refreshReviewStatuses();
   } catch (error) {
     if (run === sequence && !disposed) pageError.value = errorText(error);
   } finally {
@@ -348,7 +359,7 @@ onBeforeUnmount(() => {
           :loading="loading"
           row-key="id"
           size="middle"
-          :scroll="{ x: 1130 }"
+          :scroll="{ x: 1300 }"
           :pagination="{
             current: page,
             pageSize,
@@ -363,6 +374,7 @@ onBeforeUnmount(() => {
             { title: '报销金额', key: 'amount', width: 150, align: 'right' },
             { title: '单据状态', key: 'status', width: 105 },
             { title: '付款进度', key: 'payment', width: 165 },
+            { title: 'AI 审核', key: 'aiReview', width: 170 },
             { title: '办理', key: 'action', width: 100, fixed: 'right' },
           ]"
           @change="
@@ -429,6 +441,10 @@ onBeforeUnmount(() => {
                   )
                 }}</small>
             </template>
+            <AiReviewStatus
+              v-else-if="column.key === 'aiReview'"
+              :status="statusFor('REIMBURSEMENT', row.standaloneId ?? row.id)"
+            />
             <Button
               v-else-if="column.key === 'action'"
               type="link"
