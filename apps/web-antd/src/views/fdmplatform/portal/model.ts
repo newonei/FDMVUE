@@ -6,6 +6,8 @@ import type {
   PortalTrend,
 } from '#/api/fdmplatform/portal';
 
+import { money as formatMoney } from '../data';
+
 export interface PortalLink {
   path: string;
   query?: Record<string, string>;
@@ -92,13 +94,13 @@ export function moneyLines(amounts: unknown): string[] {
       ([, value]) => Number.isFinite(Number(value)) && Number(value) !== 0,
     )
     .toSorted(([, a], [, b]) => Math.abs(Number(b)) - Math.abs(Number(a)))
-    .map(([currency, value]) => `${currency} ${formatNumber(value)}`);
+    .map(([currency, value]) => formatMoney(value, currency));
 }
 function money(key: string, emptySub: string) {
   return (metrics: PortalSummary['metrics']): MetricValue => {
     const lines = moneyLines(metrics[key]);
     return {
-      main: lines[0] ?? '0',
+      main: lines[0] ?? '0.00',
       sub: lines.slice(1).join(' · ') || emptySub,
     };
   };
@@ -225,7 +227,7 @@ function salesPortal(department: 'domestic' | 'trade'): PortalDefinition {
       {
         label: '已确认回款',
         value: (m) => ({
-          main: moneyLines(m.confirmedReceipts)[0] ?? '0',
+          main: moneyLines(m.confirmedReceipts)[0] ?? '0.00',
           sub:
             moneyLines(m.pendingReceipts).length > 0
               ? `待确认 ${moneyLines(m.pendingReceipts).join(' · ')}`
@@ -507,7 +509,7 @@ export const portalDefinitions: Record<PortalDepartment, PortalDefinition> = {
       {
         label: '本月开票',
         value: (m) => ({
-          main: moneyLines(m.invoicedThisMonth)[0] ?? '0',
+          main: moneyLines(m.invoicedThisMonth)[0] ?? '0.00',
           sub: `${formatNumber(m.invoicesThisMonth ?? 0, 0)} 张有效发票`,
         }),
       },

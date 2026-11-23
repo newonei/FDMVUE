@@ -8,6 +8,8 @@ import type {
 
 import BigNumber from 'bignumber.js';
 
+import { formatMoneyDecimal } from '#/utils/money';
+
 import { label } from '../data';
 import { formatTemporalField } from '../date-display';
 import { businessRecordTarget, referenceId } from '../documents/navigation';
@@ -103,12 +105,12 @@ export function activityTarget(
 
 export function activityAmount(record: ProductActivityRecord) {
   if (record.amountBasis === 'DOCUMENT_TOTAL_NOT_ALLOCATED')
-    return `整单付款 ${quantityText(record.documentAmount)} ${record.documentCurrency || '（币种未注明）'}，未分摊至产品`;
+    return `整单付款 ${formatMoneyDecimal(record.documentAmount) ?? '—'} ${record.documentCurrency || '（币种未注明）'}，未分摊至产品`;
   return (
     record.amounts
       .map(
         (value) =>
-          `${quantityText(value.amount)} ${value.currency || '（币种未注明）'}`,
+          `${formatMoneyDecimal(value.amount) ?? '—'} ${value.currency || '（币种未注明）'}`,
       )
       .join(' / ') || '—'
   );

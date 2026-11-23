@@ -2,7 +2,7 @@ import type { ProcurementFinanceRecord } from '#/api/fdmplatform/procurement-fin
 
 import BigNumber from 'bignumber.js';
 
-import { currencyScale } from '../model';
+import { money } from '../../../data';
 
 export const reimbursementViews = [
   { key: 'all', label: '全部' },
@@ -42,10 +42,7 @@ function decimal(value: unknown) {
 }
 
 export function expenseMoney(value: unknown, currency?: string) {
-  const number = decimal(value);
-  return number && currency
-    ? `${currency} ${number.toFormat(currencyScale(currency))}`
-    : '—';
+  return currency ? money(value, currency, '—') : '—';
 }
 
 export function expensePayment(record: ProcurementFinanceRecord) {

@@ -301,6 +301,18 @@ describe('采购单文件归档与盖章上传', () => {
     expect(host.textContent).toContain('孤立盖章.pdf');
   });
 
+  it('显示最新未确认稿，盖章件仍关联已确认的版本', async () => {
+    const confirmed = exported('confirmed', 1);
+    const draft = exported('draft', 2, { detailsStatus: 'DRAFT' });
+    const { host, onSigned } = await mount(order([confirmed, draft]));
+    expect(host.querySelector('.version-group')?.textContent).toContain(
+      '下单资料未确认',
+    );
+    expect(host.querySelector('select')).toBeNull();
+    const file = await pick(host);
+    expect(onSigned).toHaveBeenCalledExactlyOnceWith(file, confirmed.id);
+  });
+
   it('选择旧版上传使用其 ID，收到盖章上传结果或新增导出后保留主动选择', async () => {
     const old = exported('old', 1);
     const latest = exported('latest', 2);

@@ -13,6 +13,7 @@ import { z } from '#/adapter/form';
 import { uploadFdmNeixiaoPatternDesignItemAttachment } from '#/api/fdmneixiao/pattern/design-item';
 import { getSimpleUserList } from '#/api/system/user';
 import { getRangePickerDefaultProps } from '#/utils';
+import { formatMoneyDecimal } from '#/utils/money';
 
 export const PATTERN_DESIGN_ITEM_DEFAULTS: Partial<FdmNeixiaoPatternDesignItemApi.PatternDesignItem> =
   {
@@ -110,12 +111,7 @@ function formatDownloaded(value: unknown) {
 
 function formatPrice(value: unknown) {
   if (value === undefined || value === null || value === '') return '';
-  const amount = Number(value);
-  if (!Number.isFinite(amount)) return String(value);
-  return new Intl.NumberFormat('zh-CN', {
-    maximumFractionDigits: 6,
-    minimumFractionDigits: 2,
-  }).format(amount);
+  return formatMoneyDecimal(value) ?? String(value);
 }
 
 function formatItemNoWithTotal(

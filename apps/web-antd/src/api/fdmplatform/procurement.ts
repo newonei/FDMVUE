@@ -118,6 +118,7 @@ export interface ProcurementFile {
   kind?: 'EXPORT' | 'SIGNED';
   exportId?: string;
   detailsRevision?: number;
+  detailsStatus?: 'CONFIRMED' | 'DRAFT';
   detailsVersion?: number;
   createdAt?: number | string;
   orderId: string;

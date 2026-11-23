@@ -27,7 +27,7 @@ import {
 } from '#/api/fdmplatform/procurement';
 import { getProcurementFinance } from '#/api/fdmplatform/procurement-finance';
 
-import { costCategories, errorText, rows } from '../../../data';
+import { costCategories, errorText, money, rows } from '../../../data';
 import OrderPicker from '../../../purchase/manage/components/OrderPicker.vue';
 import {
   allocationDifference,
@@ -526,9 +526,8 @@ defineExpose({ payload });
           "
         >
           添加一期
-</Button><span>采购货款基数：{{ form.currency }}
-          {{
-            orderAmount || '待来源计算'
+</Button><span>采购货款基数：{{
+            money(orderAmount, form.currency, '待来源计算')
           }}；确认时分期总额必须与应付金额一致。</span>
       </Space>
     </Card>

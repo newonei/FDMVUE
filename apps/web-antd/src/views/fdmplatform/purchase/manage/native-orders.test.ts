@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   confirm: vi.fn(),
   finance: vi.fn(),
   deleteOrder: vi.fn(),
+  download: vi.fn(),
+  exportOrder: vi.fn(),
 }));
 vi.mock('#/api/fdmplatform', () => ({
   getAttachments: vi.fn(),
@@ -27,8 +29,8 @@ vi.mock('#/api/fdmplatform/procurement', () => ({
   getProcurementOrders: mocks.page,
   getProcurementOrdersOverview: mocks.overview,
   getProcurementOrder: mocks.detail,
-  downloadProcurementFile: vi.fn(),
-  exportProcurementOrder: vi.fn(),
+  downloadProcurementFile: mocks.download,
+  exportProcurementOrder: mocks.exportOrder,
   procurementOrderAction: mocks.action,
   uploadProcurementSigned: vi.fn(),
   deleteProcurementOrder: mocks.deleteOrder,
@@ -304,8 +306,9 @@ vi.mock('../warehouse/StockInDialog.vue', () => ({
     },
   }),
 }));
-vi.mock('./components/OrderExportMenu.vue', () => ({
-  default: defineComponent({ render: () => null }),
+vi.mock('./model', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./model')>()),
+  downloadBlob: vi.fn(),
 }));
 vi.mock('./components/OrderContract.vue', () => ({
   default: defineComponent({ render: () => null }),
@@ -730,13 +733,55 @@ describe('purchase extras persistence and unsaved navigation', () => {
       allowedActions: ['SAVE_DETAILS', 'SAVE_EXTRAS', 'EDIT_ORDER'],
     }));
     const { host } = await mount(location);
-    expect(host.textContent).toContain('确认下单资料后即可导出');
+    expect(host.textContent).toContain('草稿可以继续编辑');
     click(host, '修改附加资料');
     await settle();
     click(host, '保存资料');
     await settle();
     expect(mocks.action).toHaveBeenCalledTimes(1);
     expect(mocks.action.mock.calls[0]![2].action).toBe('SAVE_EXTRAS');
+  });
+
+  it('saves edited draft details before exporting PDF without confirming the order', async () => {
+    const draft = {
+      ...orderFixture(),
+      order: { ...orderFixture().order, status: 'DRAFT' },
+      details: { version: 1, status: 'DRAFT' },
+      allowedActions: [
+        'SAVE_DETAILS',
+        'SAVE_EXTRAS',
+        'EDIT_ORDER',
+        'EXPORT_CONTRACT',
+      ],
+    };
+    const file = { id: 'file-1', name: '采购单-未确认.pdf' };
+    mocks.detail.mockResolvedValue(draft);
+    mocks.action.mockResolvedValue({
+      ...draft,
+      details: { ...draft.details, version: 2 },
+    });
+    mocks.exportOrder.mockResolvedValue({ ...draft, exports: [file] });
+    mocks.download.mockResolvedValue(new Blob());
+    const { host } = await mount(location);
+    click(host, '修改附加资料');
+    await settle();
+    click(host, '导出未确认稿（PDF）');
+    await settle();
+    expect(mocks.action).toHaveBeenCalledExactlyOnceWith(
+      'contract-1',
+      'order-1',
+      expect.objectContaining({ action: 'SAVE_EXTRAS', expectedVersion: 1 }),
+    );
+    expect(mocks.exportOrder).toHaveBeenCalledExactlyOnceWith(
+      'contract-1',
+      'order-1',
+      expect.objectContaining({ format: 'PDF', expectedVersion: 2 }),
+    );
+    expect(mocks.download).toHaveBeenCalledExactlyOnceWith(
+      'contract-1',
+      'order-1',
+      file.id,
+    );
   });
 
   it('prompts to save unfinished extras before opening the submit editor', async () => {

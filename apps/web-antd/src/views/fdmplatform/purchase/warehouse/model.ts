@@ -8,6 +8,8 @@ import type {
 
 import BigNumber from 'bignumber.js';
 
+import { formatMoneyDecimal } from '#/utils/money';
+
 const plain = (value: BigNumber) => value.toFixed(value.decimalPlaces() ?? 0);
 const decimal = (value: unknown) =>
   new BigNumber(
@@ -21,8 +23,10 @@ export function qty(value: unknown) {
 }
 
 export function money(value: unknown, currency = 'CNY') {
-  const number = decimal(value);
-  return number.isFinite() ? `${currency} ${number.toFormat(2)}` : '—';
+  const amount = formatMoneyDecimal(value);
+  return amount === undefined
+    ? '—'
+    : `${currency ? `${currency} ` : ''}${amount}`;
 }
 
 /** Average cost per unit of a balance, or undefined when unknown or empty. */
@@ -33,7 +37,7 @@ export function averageCost(stock: {
 }) {
   const onHand = decimal(stock.onHand);
   if (!stock.costKnown || !onHand.gt(0)) return undefined;
-  return decimal(stock.costAmount).div(onHand).decimalPlaces(4).toFormat();
+  return formatMoneyDecimal(decimal(stock.costAmount).div(onHand));
 }
 
 /** The default active warehouse, else the only active one. */

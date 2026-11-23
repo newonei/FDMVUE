@@ -129,6 +129,10 @@ describe('采购执行事实与金额展示', () => {
     expect(orderMoney('0', 'USD')).toBe('USD 0.00');
     expect(orderMoney('1234.5', 'CNY')).toBe('CNY 1,234.50');
     expect(orderMoney('1', undefined)).toBe('币种未注明 1.00');
+    expect(orderMoney('0.626415', 'CNY')).toBe('CNY 0.63');
+    expect(orderMoney('331.99995', 'CNY')).toBe('CNY 332.00');
+    expect(orderMoney('1.005', 'JPY')).toBe('JPY 1.01');
+    expect(orderMoney('1.2345', 'KWD')).toBe('KWD 1.23');
   });
   it('付款百分比仅从独立资金事实计算，未知或零应付不生成完成进度', () => {
     expect(orderPaymentProgress({ orderAmount: '100', paidAmount: '25' })).toBe(

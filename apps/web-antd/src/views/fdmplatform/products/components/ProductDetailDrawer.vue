@@ -29,7 +29,7 @@ import {
 import { getProductActivity } from '#/api/fdmplatform/product-activity';
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
-import { errorText, label } from '../../data';
+import { errorText, label, money } from '../../data';
 import { contractReferenceText } from '../../documents/migration-display';
 import RelatedLink from '../../documents/RelatedLink.vue';
 import {
@@ -240,8 +240,8 @@ function amountText(row: ProductActivityRecord) {
   return activityAmount(row);
 }
 function lineValue(value: unknown, field: string) {
-  if (['netQuantity', 'quantity', 'unitPrice'].includes(field))
-    return quantityText(value);
+  if (field === 'unitPrice') return money(value, '', '—');
+  if (['netQuantity', 'quantity'].includes(field)) return quantityText(value);
   return value === null || value === undefined || value === ''
     ? '—'
     : String(value);

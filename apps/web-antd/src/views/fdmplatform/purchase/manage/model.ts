@@ -7,8 +7,8 @@ import type {
 
 import BigNumber from 'bignumber.js';
 
+import { money } from '../../data';
 import { contractReferenceText } from '../../documents/migration-display';
-import { currencyScale } from '../../finance/procurement/model';
 export function purchaseRowLabels(row: BusinessRecord) {
   const record = (row.record ?? row.order ?? row) as Record<string, unknown>;
   const first = (...values: unknown[]) =>
@@ -185,7 +185,7 @@ export function orderMoney(value: unknown, currency: unknown) {
   if (!number) return '待核实';
   const code =
     typeof currency === 'string' && currency.trim() ? currency : undefined;
-  return `${code ?? '币种未注明'} ${number.toFormat(code ? currencyScale(code) : Math.max(2, number.decimalPlaces() ?? 0))}`;
+  return money(number, code ?? '币种未注明');
 }
 
 export function orderArrivalProgress(order: BusinessRecord) {

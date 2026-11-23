@@ -43,6 +43,7 @@ import {
   getStandardQuotationOptions,
   saveSmallMatPolicy,
 } from '#/api/fdmcaiwu/standard-quotation';
+import { formatMoneyDecimal } from '#/utils/money';
 
 import AccessoryMatchList from '../quotation/components/accessory-match-list.vue';
 import {
@@ -734,16 +735,8 @@ function formatDimension(value: unknown) {
 }
 
 function formatMoney(value: unknown) {
-  const numberValue = toNumber(value);
-  if (numberValue === undefined) return '—';
-  return `¥${numberValue.toLocaleString('zh-CN', {
-    maximumFractionDigits: 2,
-    minimumFractionDigits: 2,
-  })}`;
-}
-
-function formatExactMoney(value: unknown) {
-  return hasValue(value) ? `¥${String(value)}` : '—';
+  const amount = formatMoneyDecimal(value);
+  return amount === undefined ? '—' : `¥${amount}`;
 }
 
 function formatAreaSquareMeters(value: unknown) {
@@ -767,12 +760,7 @@ function formatUtilization(value: unknown) {
 }
 
 function formatPriceCell(value: unknown) {
-  const numberValue = toNumber(value);
-  if (numberValue === undefined) return hasValue(value) ? String(value) : '—';
-  return numberValue.toLocaleString('zh-CN', {
-    maximumFractionDigits: 2,
-    minimumFractionDigits: 2,
-  });
+  return formatMoneyDecimal(value) ?? (hasValue(value) ? String(value) : '—');
 }
 
 function formatDateTime(value?: number | string) {
@@ -3013,32 +3001,32 @@ onMounted(async () => {
         <Divider orientation="left">成本与报价</Divider>
         <Descriptions bordered :column="2" size="small">
           <Descriptions.Item label="母垫内部单位成本">
-            {{ formatExactMoney(smallMatResult.detail.motherUnitCostExact) }}
+            {{ formatMoney(smallMatResult.detail.motherUnitCostExact) }}
           </Descriptions.Item>
           <Descriptions.Item label="母垫总成本">
-            {{ formatExactMoney(smallMatResult.detail.motherTotalCostExact) }}
+            {{ formatMoney(smallMatResult.detail.motherTotalCostExact) }}
           </Descriptions.Item>
           <Descriptions.Item label="裁切费">
-            {{ formatExactMoney(smallMatResult.detail.cuttingCostExact) }}
+            {{ formatMoney(smallMatResult.detail.cuttingCostExact) }}
           </Descriptions.Item>
           <Descriptions.Item label="复包装人工费">
-            {{ formatExactMoney(smallMatResult.detail.repackingCostExact) }}
+            {{ formatMoney(smallMatResult.detail.repackingCostExact) }}
           </Descriptions.Item>
           <Descriptions.Item label="订单开单费">
-            {{ formatExactMoney(smallMatResult.detail.orderSetupCostExact) }}
+            {{ formatMoney(smallMatResult.detail.orderSetupCostExact) }}
           </Descriptions.Item>
           <Descriptions.Item label="辅料费用">
-            {{ formatExactMoney(smallMatResult.detail.accessoryCostExact) }}
+            {{ formatMoney(smallMatResult.detail.accessoryCostExact) }}
           </Descriptions.Item>
           <Descriptions.Item label="最终单位成本">
-            {{ formatExactMoney(smallMatResult.detail.finalUnitCostExact) }}
+            {{ formatMoney(smallMatResult.detail.finalUnitCostExact) }}
           </Descriptions.Item>
           <Descriptions.Item label="常规单片报价（不含税）">
-            {{ formatExactMoney(smallMatResult.detail.regularUnitQuoteExact) }}
+            {{ formatMoney(smallMatResult.detail.regularUnitQuoteExact) }}
           </Descriptions.Item>
           <Descriptions.Item label="常规单片报价（含税）">
             {{
-              formatExactMoney(
+              formatMoney(
                 resolveTaxIncludedValue(
                   smallMatResult.detail.regularUnitQuoteExact,
                   smallMatResult.detail.regularUnitQuoteTaxIncludedExact,
@@ -3048,11 +3036,11 @@ onMounted(async () => {
             }}
           </Descriptions.Item>
           <Descriptions.Item label="常规总报价（不含税）">
-            {{ formatExactMoney(smallMatResult.detail.regularTotalQuoteExact) }}
+            {{ formatMoney(smallMatResult.detail.regularTotalQuoteExact) }}
           </Descriptions.Item>
           <Descriptions.Item label="常规总报价（含税）">
             {{
-              formatExactMoney(
+              formatMoney(
                 resolveTaxIncludedValue(
                   smallMatResult.detail.regularTotalQuoteExact,
                   smallMatResult.detail.regularTotalQuoteTaxIncludedExact,
@@ -3062,11 +3050,11 @@ onMounted(async () => {
             }}
           </Descriptions.Item>
           <Descriptions.Item label="超低单片报价（不含税）">
-            {{ formatExactMoney(smallMatResult.detail.ultraLowUnitQuoteExact) }}
+            {{ formatMoney(smallMatResult.detail.ultraLowUnitQuoteExact) }}
           </Descriptions.Item>
           <Descriptions.Item label="超低单片报价（含税）">
             {{
-              formatExactMoney(
+              formatMoney(
                 resolveTaxIncludedValue(
                   smallMatResult.detail.ultraLowUnitQuoteExact,
                   smallMatResult.detail.ultraLowUnitQuoteTaxIncludedExact,
@@ -3077,12 +3065,12 @@ onMounted(async () => {
           </Descriptions.Item>
           <Descriptions.Item label="超低总报价（不含税）">
             {{
-              formatExactMoney(smallMatResult.detail.ultraLowTotalQuoteExact)
+              formatMoney(smallMatResult.detail.ultraLowTotalQuoteExact)
             }}
           </Descriptions.Item>
           <Descriptions.Item label="超低总报价（含税）">
             {{
-              formatExactMoney(
+              formatMoney(
                 resolveTaxIncludedValue(
                   smallMatResult.detail.ultraLowTotalQuoteExact,
                   smallMatResult.detail.ultraLowTotalQuoteTaxIncludedExact,
@@ -3173,28 +3161,28 @@ onMounted(async () => {
             </Descriptions.Item>
             <Descriptions.Item label="面材单片成本">
               {{
-                formatExactMoney(
+                formatMoney(
                   selectedDetail.entry.lamination.materialCostPerPiece,
                 )
               }}
             </Descriptions.Item>
             <Descriptions.Item label="热熔胶单片成本">
               {{
-                formatExactMoney(
+                formatMoney(
                   selectedDetail.entry.lamination.adhesiveCostPerPiece,
                 )
               }}
             </Descriptions.Item>
             <Descriptions.Item label="贴合加工费">
               {{
-                formatExactMoney(
+                formatMoney(
                   selectedDetail.entry.lamination.laminationLaborCostPerPiece,
                 )
               }}
             </Descriptions.Item>
             <Descriptions.Item label="面材订单成本">
               {{
-                formatExactMoney(
+                formatMoney(
                   selectedDetail.entry.lamination.materialOrderCost,
                 )
               }}
@@ -3205,7 +3193,7 @@ onMounted(async () => {
         <Divider orientation="left">成本与报价</Divider>
         <Descriptions bordered :column="2" size="small">
           <Descriptions.Item label="引擎基础成本">
-            {{ formatExactMoney(selectedDetail.entry?.baseUnitCostExact) }}
+            {{ formatMoney(selectedDetail.entry?.baseUnitCostExact) }}
           </Descriptions.Item>
           <Descriptions.Item label="展示基础成本">
             {{
@@ -3216,32 +3204,32 @@ onMounted(async () => {
             }}
           </Descriptions.Item>
           <Descriptions.Item label="复合面层成本">
-            {{ formatExactMoney(selectedDetail.entry?.surfaceCostPerPiece) }}
+            {{ formatMoney(selectedDetail.entry?.surfaceCostPerPiece) }}
           </Descriptions.Item>
           <Descriptions.Item label="胶水成本">
-            {{ formatExactMoney(selectedDetail.entry?.adhesiveCostPerPiece) }}
+            {{ formatMoney(selectedDetail.entry?.adhesiveCostPerPiece) }}
           </Descriptions.Item>
           <Descriptions.Item label="OPP膜">
-            {{ formatExactMoney(selectedDetail.entry?.oppCostPerPiece) }}
+            {{ formatMoney(selectedDetail.entry?.oppCostPerPiece) }}
           </Descriptions.Item>
           <Descriptions.Item label="外箱">
-            {{ formatExactMoney(selectedDetail.entry?.cartonCostPerPiece) }}
+            {{ formatMoney(selectedDetail.entry?.cartonCostPerPiece) }}
           </Descriptions.Item>
           <Descriptions.Item label="绑带">
-            {{ formatExactMoney(selectedDetail.entry?.strapCostPerPiece) }}
+            {{ formatMoney(selectedDetail.entry?.strapCostPerPiece) }}
           </Descriptions.Item>
           <Descriptions.Item label="辅料小计">
-            {{ formatExactMoney(selectedDetail.entry?.auxiliaryCost) }}
+            {{ formatMoney(selectedDetail.entry?.auxiliaryCost) }}
           </Descriptions.Item>
           <Descriptions.Item label="复合附加成本">
             {{
-              formatExactMoney(
+              formatMoney(
                 getAdditionalCost(selectedDetail.entry, selectedDetail),
               )
             }}
           </Descriptions.Item>
           <Descriptions.Item label="总成本">
-            {{ formatExactMoney(selectedDetail.entry?.unitCostExact) }}
+            {{ formatMoney(selectedDetail.entry?.unitCostExact) }}
           </Descriptions.Item>
           <Descriptions.Item label="最终实时报价（不含税）">
             <span class="detail-quote">
@@ -3256,8 +3244,8 @@ onMounted(async () => {
               v-if="hasValue(selectedDetail.entry?.unitQuoteExact)"
               class="exact-value"
             >
-              精确值
-              {{ formatExactMoney(selectedDetail.entry?.unitQuoteExact) }}
+              计算值
+              {{ formatMoney(selectedDetail.entry?.unitQuoteExact) }}
             </span>
           </Descriptions.Item>
           <Descriptions.Item
@@ -3280,9 +3268,9 @@ onMounted(async () => {
               v-if="hasValue(selectedDetail.entry?.unitQuoteExact)"
               class="exact-value"
             >
-              精确值
+              计算值
               {{
-                formatExactMoney(
+                formatMoney(
                   resolveEntryTaxIncluded(
                     selectedDetail.entry,
                     selectedDetail.entry?.unitQuoteExact,

@@ -24,7 +24,7 @@ import {
   newIdempotencyKey,
 } from '#/api/fdmplatform';
 
-import { errorText } from '../../data';
+import { errorText, money } from '../../data';
 import ProductStructureDetails from '../../products/components/ProductStructureDetails.vue';
 import { orderDateError } from '../manage/model';
 import { localDate } from './comparison';
@@ -237,7 +237,14 @@ watch(
             </dd>
             <dt>单价</dt>
             <dd class="num">
-              {{ primary.quote.currency }} {{ primary.quote.unitPrice }} /
+              {{
+                money(
+                  primary.quote.unitPrice,
+                  String(primary.quote.currency ?? ''),
+                  '—',
+                )
+              }}
+              /
               {{ primary.quote.unit }}
               <span class="muted">（{{ terms(primary.quote) }}）</span>
             </dd>
@@ -311,7 +318,13 @@ watch(
                 <b>{{ line.context.title }}</b>
                 <ProductStructureDetails :value="line.context.structure" />
                 <span class="muted">{{ line.quantity }} {{ line.context.unit }} ×
-                  {{ line.quote.currency }} {{ line.quote.unitPrice }}</span>
+                  {{
+                    money(
+                      line.quote.unitPrice,
+                      String(line.quote.currency ?? ''),
+                      '—',
+                    )
+                  }}</span>
               </span>
               <span class="num">{{ formatAmount(lineAmount(line)) }}</span>
             </label>
@@ -329,7 +342,7 @@ watch(
               :message="`选的不是最低价：${cheaper
                 .map(
                   (entry) =>
-                    `${entry.better?.supplierName ?? '其他供应商'} ${entry.better?.currency} ${entry.better?.unitPrice} 更低`,
+                    `${entry.better?.supplierName ?? '其他供应商'} ${money(entry.better?.unitPrice, String(entry.better?.currency ?? ''), '—')} 更低`,
                 )
                 .join('；')}。请写明选择理由。`"
             />

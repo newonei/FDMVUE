@@ -508,8 +508,11 @@ function confirm() {
         >
           不能直接撤回：{{ view.blockReasons.join('；') }}
         </span>
-        <span v-else-if="canEdit" class="muted">
-          确认后可在右上角「导出」生成采购单 PDF / Excel
+        <span
+          v-else-if="canEdit && view.allowedActions.includes('EXPORT_CONTRACT')"
+          class="muted"
+        >
+          可在右上角「导出」生成未确认的 PDF / Excel
         </span>
       </Space>
     </Card>

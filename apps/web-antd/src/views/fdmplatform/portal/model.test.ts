@@ -24,8 +24,8 @@ const target = (
 describe('department portal model', () => {
   it('keeps every currency on its own line, largest first', () => {
     expect(moneyLines({ CNY: '78100', USD: 1010.5 })).toEqual([
-      'CNY 78,100',
-      'USD 1,010.5',
+      'CNY 78,100.00',
+      'USD 1,010.50',
     ]);
     expect(moneyLines(undefined)).toEqual([]);
     expect(moneyLines({ CNY: 0, USD: '0.00' })).toEqual([]);

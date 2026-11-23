@@ -2,6 +2,8 @@ import type { ReceiptConversion } from '#/api/fdmplatform/exchange-rates';
 
 import BigNumber from 'bignumber.js';
 
+import { formatMoneyDecimal } from '#/utils/money';
+
 import { formatTemporalField } from '../../date-display';
 
 export const EARLIEST_RATE_DATE = '1999-01-04';
@@ -102,8 +104,10 @@ export function receiptFxDisplay(
   const dateValue = formatTemporalField(key, value);
   if (dateValue !== undefined) return dateValue;
   if (key === 'exchangeRateSource') return rateSourceLabel(String(value));
-  if (key === 'rmbAmount')
-    return `CNY ${Number(value).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  if (key === 'rmbAmount') {
+    const amount = formatMoneyDecimal(value);
+    return amount === undefined ? '—' : `CNY ${amount}`;
+  }
   return String(value);
 }
 

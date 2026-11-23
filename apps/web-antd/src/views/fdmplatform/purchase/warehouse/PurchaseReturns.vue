@@ -144,7 +144,7 @@ onMounted(async () => {
             </td>
             <td>{{ line.kind === 'ACCEPTED' ? '合格品' : '不合格品' }}</td>
             <td>{{ qty(line.quantity) }} {{ line.unit }}</td>
-            <td>{{ qty(line.unitPrice) }}</td>
+            <td>{{ money(line.unitPrice, '') }}</td>
             <td>{{ money(line.amount, record.currency) }}</td>
           </tr>
         </table>

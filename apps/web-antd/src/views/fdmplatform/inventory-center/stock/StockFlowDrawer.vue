@@ -154,7 +154,7 @@ watch(
           </div>
           <div v-if="single?.lastUnitCost">
             <dt>最近单位成本</dt>
-            <dd class="num">{{ qty(single.lastUnitCost) }}</dd>
+            <dd class="num">{{ money(single.lastUnitCost, '') }}</dd>
           </div>
         </dl>
       </div>

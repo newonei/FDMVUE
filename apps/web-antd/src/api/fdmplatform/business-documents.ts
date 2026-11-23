@@ -15,6 +15,7 @@ export interface MigrationInfo {
   sourceDate?: string;
   sourceAmount?: Decimal | null;
   sourceCurrency?: null | string;
+  sourceCompanyName?: null | string;
   additionalAmount?: Decimal | null;
   reconciliationState?: string;
   missingFields?: string[];

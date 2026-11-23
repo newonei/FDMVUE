@@ -12,7 +12,6 @@ import {
   Modal,
   Select,
 } from 'ant-design-vue';
-import BigNumber from 'bignumber.js';
 
 import { newIdempotencyKey } from '#/api/fdmplatform';
 import { getProcurementSettings } from '#/api/fdmplatform/procurement';
@@ -22,7 +21,7 @@ import {
 } from '#/api/fdmplatform/procurement-finance';
 
 import FilePreviewButton from '../../../components/FilePreviewButton.vue';
-import { errorText } from '../../../data';
+import { errorText, money } from '../../../data';
 import { localDate } from '../../../purchase/quotes/comparison';
 import { payerAccountLabel, paymentMethods } from '../model';
 
@@ -57,12 +56,9 @@ let key = newIdempotencyKey();
 /** 本次办理中已上传回单后的单据版本 */
 let version: number | undefined;
 
-const amountText = computed(() => {
-  const value = new BigNumber(String(props.record?.amount ?? ''));
-  return value.isFinite()
-    ? `${props.record?.currency ?? ''} ${value.toFormat(2)}`.trim()
-    : '—';
-});
+const amountText = computed(() =>
+  money(props.record?.amount, props.record?.currency, '—'),
+);
 
 watch(
   () => [props.open, props.record?.id],

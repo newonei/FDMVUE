@@ -30,7 +30,17 @@ export interface ProcurementFinanceRecord extends BusinessRecord {
   status: string;
   allowedActions: string[];
   contractId: string;
+  contractCode?: string;
+  contractInternalOrderNo?: string;
   orderId: string;
+  orderCode?: string;
+  orderSubject?: null | string;
+  supplierId?: null | string;
+  supplierName?: null | string;
+  ownerName?: null | string;
+  responsibleName?: null | string;
+  /** 财务确认后计入采购单或付款发票的净额，已扣除后续退款。 */
+  settledAmount?: Decimal;
   /** 发票付款：挂的付款发票及其摘要（sourceType=PURCHASE_INVOICE） */
   invoiceId?: string;
   invoice?: {

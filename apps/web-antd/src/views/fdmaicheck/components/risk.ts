@@ -22,19 +22,27 @@ export const STATUS_LABELS: Record<FdmAiCheckApi.FindingStatus, string> = {
 };
 
 /** AI 没有检查时给人看的原因；SUCCEEDED 返回空。 */
-export function aiStatusText(status?: string) {
+export function aiStatusText(status?: string, docType?: FdmAiCheckApi.DocType) {
+  const ruleFallback = docType === 'PURCHASE_ORDER' ? '' : '，只做了规则检查';
   switch (status) {
     case 'FAILED': {
-      return 'AI 检查未完成，只保留了规则检查结果';
+      return docType === 'PURCHASE_ORDER'
+        ? 'AI 检查未完成'
+        : 'AI 检查未完成，只保留了规则检查结果';
+    }
+    case 'NO_CHECKPOINTS': {
+      return '未启用检查点，未执行采购单检查';
     }
     case 'NOT_CONFIGURED': {
-      return '这家公司还没有放行 AI 单据检查的模型，只做了规则检查';
+      return `这家公司还没有放行 AI 单据检查的模型${ruleFallback}`;
     }
     case 'TOO_LARGE': {
-      return '单据资料较多，只做了规则检查';
+      return docType === 'PURCHASE_ORDER'
+        ? '单据资料超出模型可处理的范围'
+        : '单据资料较多，只做了规则检查';
     }
     case 'UNAVAILABLE': {
-      return 'AI 服务暂不可用，只做了规则检查';
+      return `AI 服务暂不可用${ruleFallback}`;
     }
     default: {
       return '';
@@ -64,7 +72,9 @@ export function needsReason(status: FdmAiCheckApi.FindingStatus) {
 }
 
 /** 这次检查读了哪些附件：读全的一句带过，没读全的逐个写原因，负责人才知道哪些还得自己看。 */
-export function attachmentSummary(attachments?: FdmAiCheckApi.AttachmentNote[]) {
+export function attachmentSummary(
+  attachments?: FdmAiCheckApi.AttachmentNote[],
+) {
   const list = attachments ?? [];
   const read = list.filter((a) => a.status === 'READ');
   const others = list.filter((a) => a.status !== 'READ');

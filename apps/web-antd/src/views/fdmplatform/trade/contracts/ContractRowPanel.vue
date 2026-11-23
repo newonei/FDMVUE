@@ -9,7 +9,7 @@ import { Button, Tag } from 'ant-design-vue';
 import { getContract } from '#/api/fdmplatform';
 
 import { contractItemPipeline } from '../../components/contract-progress';
-import { errorText } from '../../data';
+import { errorText, money } from '../../data';
 import { personLabel } from '../../directory';
 import { amountText, plain } from './model';
 
@@ -24,7 +24,7 @@ const receipts = computed(() =>
   (contract.value?.finance?.receipts ?? [])
     .filter((receipt) => receipt.kind === 'PAYMENT' || !receipt.kind)
     .slice(-4)
-    .reverse(),
+    .toReversed(),
 );
 const statusLabels: Record<string, string> = {
   CONFIRMED: '已确认',
@@ -55,7 +55,7 @@ onMounted(async () => {
               item.skuName
             }}</span>
             <span class="num">{{ plain(item.quantity) }} {{ item.unit }} ×
-              {{ item.unitPrice ?? '待定价' }}</span>
+              {{ money(item.unitPrice, '', '待定价') }}</span>
           </div>
           <div class="line-sub">
             <span>申请 {{ item.requestedQuantity ?? '待核对' }} · 已下单

@@ -809,6 +809,21 @@ async function saveCurrentDetails() {
   const pending = orderDetails.value?.pendingSave();
   if (pending) await command(pending.action, pending.payload);
 }
+async function exportCurrentOrder(format: 'PDF' | 'XLSX') {
+  const current = view.value;
+  if (
+    !current?.allowedActions.includes('EXPORT_CONTRACT') ||
+    childOpen.value ||
+    saving.value
+  )
+    return;
+  if (detailsDirty.value) {
+    const pending = orderDetails.value?.pendingSave();
+    if (!pending || !(await command(pending.action, pending.payload))) return;
+  }
+  if (view.value?.id === current.id)
+    await command('EXPORT_CONTRACT', { format });
+}
 function deleteCurrentOrder() {
   const current = view.value;
   if (
@@ -902,7 +917,7 @@ function stockInSaved(value: StockIn) {
 }
 /**
  * 采购单下属单据各自独立（模板、入库、付款没有先后），这里只汇总各自进度。
- * 采购单模板：下单资料确认后可导出 PDF / Excel，盖章件为选填附件。
+ * 采购单模板：下单资料可导出 PDF / Excel，盖章件为选填附件。
  */
 const templateState = computed(() => {
   if (!view.value) return undefined;
@@ -911,7 +926,12 @@ const templateState = computed(() => {
     (file) => file.kind === 'SIGNED',
   ).length;
   if (view.value.details.status !== 'CONFIRMED')
-    return { label: '下单资料未确认', sub: '确认后可在右上角导出' };
+    return {
+      label: '下单资料未确认',
+      sub: view.value.allowedActions.includes('EXPORT_CONTRACT')
+        ? '右上角「导出」可下载未确认稿'
+        : undefined,
+    };
   if (words === 0) return { label: '可导出', sub: '右上角「导出」PDF / Excel' };
   return {
     label: `已生成 ${words} 版`,
@@ -1297,6 +1317,7 @@ async function command(
   operationKey = key(action),
 ) {
   if (!view.value || saving.value) return false;
+  const unconfirmedExport = view.value.details.status !== 'CONFIRMED';
   saving.value = true;
   pageError.value = '';
   try {
@@ -1345,7 +1366,9 @@ async function command(
     else if (action === 'SAVE_DETAILS') successMessage = '草稿已保存';
     else if (action === 'SAVE_EXTRAS') successMessage = '采购单附加资料已保存';
     else if (action === 'EXPORT_CONTRACT')
-      successMessage = '采购单已导出，导出记录在「附件」页签';
+      successMessage = unconfirmedExport
+        ? '采购单未确认稿已导出，导出记录在「附件」页签'
+        : '采购单已导出，导出记录在「附件」页签';
     message.success(successMessage);
     void loadList();
     return true;
@@ -2132,18 +2155,18 @@ watch(financeType, (value, previous) => {
           />
           <OrderExportMenu
             :ready="view.allowedActions.includes('EXPORT_CONTRACT')"
+            :unconfirmed="view.details.status !== 'CONFIRMED'"
             :saving="saving"
             :disabled="childOpen"
-            @export="(format) => command('EXPORT_CONTRACT', { format })"
+            @export="exportCurrentOrder"
             @files="tab = 'attachments'"
             @not-ready="
               () => {
                 message.warning(
-                  view?.details.status === 'CONFIRMED'
-                    ? '文件存储未配置，暂时不能导出'
-                    : '请先在「详情」确认下单资料，再导出采购单',
+                  view?.storageEnabled
+                    ? '当前采购单暂时不能导出'
+                    : '文件存储未配置，暂时不能导出',
                 );
-                if (view?.details.status !== 'CONFIRMED') tab = 'details';
               }
             "
           />
@@ -2257,7 +2280,7 @@ watch(financeType, (value, previous) => {
           v-else-if="view && active && String(view.order.status) === 'DRAFT'"
           type="warning"
           show-icon
-          message="草稿可以继续编辑。确认下单资料后即可导出，核对完成后点「编辑 / 提交审核」。"
+          message="草稿可以继续编辑。核对完成后，点「编辑 / 提交审核」。"
         />
         <Alert
           v-if="detailLoading && !view"

@@ -297,10 +297,10 @@ describe('supplier page', () => {
       expect.objectContaining({ sort: 'RECENT_12', order: 'DESC', pageNo: 1 }),
     );
     expect(host.textContent).toContain('254 家');
-    expect(host.textContent).toContain('¥5,828.3 万');
+    expect(host.textContent).toContain('¥5,828.31 万');
     expect(host.textContent).toContain('44.8%');
     expect(host.textContent).toContain('常用105');
-    expect(host.textContent).toContain('CNY 266.7 万');
+    expect(host.textContent).toContain('CNY 266.74 万');
     expect(host.textContent).toContain('比上年同期 +33%');
     expect(host.textContent).toContain('发泡剂(ADC)');
     expect(host.textContent).toContain('1 个月前下单');

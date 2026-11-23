@@ -268,7 +268,7 @@ onMounted(async () => {
           qty(quantity(record as StockOut))
         }}</span>
         <span v-else-if="column.key === 'sales'" class="num">{{
-          qty(outSalesAmount(record as StockOut))
+          money(outSalesAmount(record as StockOut), '')
         }}</span>
         <span v-else-if="column.key === 'cost'" class="num">{{
           money(record.costAmount)
@@ -294,7 +294,7 @@ onMounted(async () => {
             {{ qty(pageSum(rows, quantity)) }}
           </Table.Summary.Cell>
           <Table.Summary.Cell :index="10" align="right">
-            {{ qty(pageSum(rows, outSalesAmount)) }}
+            {{ money(pageSum(rows, outSalesAmount), '') }}
           </Table.Summary.Cell>
           <Table.Summary.Cell :index="11" align="right">
             {{ money(pageSum(rows, (row) => row.costAmount)) }}

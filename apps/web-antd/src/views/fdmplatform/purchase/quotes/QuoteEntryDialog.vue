@@ -28,7 +28,7 @@ import { contractActionWithAttachments } from '#/api/fdmplatform/submissions';
 
 import CreationAttachments from '../../components/CreationAttachments.vue';
 import RemoteMasterSelect from '../../components/RemoteMasterSelect.vue';
-import { errorText } from '../../data';
+import { errorText, money } from '../../data';
 import ContractPicker from '../../documents/ContractPicker.vue';
 import ProductStructureDetails from '../../products/components/ProductStructureDetails.vue';
 import { latestTaskQuotes, localDate } from './comparison';
@@ -95,7 +95,7 @@ const evidenceOptions = computed(() =>
 const revisionOptions = computed(() =>
   existingQuotes.value.map((quote) => ({
     value: String(quote.id),
-    label: `${quote.supplierName ?? '供应商'} · ${quote.currency ?? ''} ${quote.unitPrice ?? ''} · 版本 ${quote.version ?? 1}`,
+    label: `${quote.supplierName ?? '供应商'} · ${money(quote.unitPrice, String(quote.currency ?? ''), '—')} · 版本 ${quote.version ?? 1}`,
   })),
 );
 const subtotal = computed(() => {
@@ -576,7 +576,7 @@ watch(
             <template v-if="context?.requiredDate">
               · 需求交期 {{ context.requiredDate }}</template>
           </span>
-          <b class="big">{{ form.currency }} {{ form.unitPrice || '—' }}</b>
+          <b class="big">{{ money(form.unitPrice, form.currency, '—') }}</b>
           <span v-if="subtotal" class="hint">× {{ context?.plannable }} {{ context?.unit }} =
             {{ form.currency }} {{ subtotal }}</span>
           <dl>
@@ -584,7 +584,7 @@ watch(
             <dd>
               <template v-if="others.length">
                 {{ others[0]!.supplierName }} {{ others[0]!.currency }}
-                {{ others[0]!.unitPrice
+                {{ money(others[0]!.unitPrice, '', '—')
                 }}<span v-if="others.length > 1">
                   等 {{ others.length }} 份</span>
               </template>

@@ -33,6 +33,7 @@ import {
   getAccessoryPricePage,
   updateAccessoryPrice,
 } from '#/api/fdmcaiwu/accessory-price';
+import { formatMoneyDecimal } from '#/utils/money';
 
 defineOptions({ name: 'FdmcaiwuAccessoryPrice' });
 
@@ -142,12 +143,11 @@ const columns: TableColumnsType<AccessoryPrice> = [
   { fixed: 'right', key: 'action', title: '操作', width: 130 },
 ];
 
-function formatNumber(value: unknown, minimumFractionDigits = 0) {
+function formatNumber(value: unknown) {
   const numberValue = Number(value);
   if (!Number.isFinite(numberValue)) return '—';
   return numberValue.toLocaleString('zh-CN', {
     maximumFractionDigits: 4,
-    minimumFractionDigits,
     useGrouping: false,
   });
 }
@@ -497,7 +497,7 @@ onMounted(loadData);
               ].includes(String(column.key))
             "
           >
-            {{ formatNumber(getRecordValue(record, column.key), 2) }}
+            {{ formatMoneyDecimal(getRecordValue(record, column.key), false) ?? '—' }}
           </template>
           <template v-else-if="column.key === 'enabled'">
             <Tag :color="record.enabled ? 'success' : 'default'">

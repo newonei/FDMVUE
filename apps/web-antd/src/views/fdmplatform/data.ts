@@ -4,6 +4,8 @@ import type { MasterType } from '#/api/fdmplatform/masters';
 import BigNumber from 'bignumber.js';
 import dayjs from 'dayjs';
 
+import { formatMoneyDecimal } from '#/utils/money';
+
 import { hasReceiptFx } from './finance/exchange-rates/model';
 import {
   requestExcessHint,
@@ -232,12 +234,11 @@ export function receiptStatusLabel(value: unknown): string {
 export function rows(value: unknown): BusinessRecord[] {
   return Array.isArray(value) ? (value as BusinessRecord[]) : [];
 }
-export function money(value: unknown, currency = '') {
-  if (value === undefined || value === null || value === '') return '未提供';
-  const number = Number(value);
-  return Number.isFinite(number)
-    ? `${currency ? `${currency} ` : ''}${number.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`
-    : '未提供';
+export function money(value: unknown, currency = '', missing = '未提供') {
+  const amount = formatMoneyDecimal(value);
+  return amount === undefined
+    ? missing
+    : `${currency ? `${currency} ` : ''}${amount}`;
 }
 export function options(
   items: BusinessRecord[],

@@ -215,7 +215,7 @@ watch(open, async (value) => {
                 <td v-if="stockIn.kind !== 'OTHER'">
                   {{ line.batchNo ?? '' }}
                 </td>
-                <td class="num">{{ qty(line.unitPrice) }}</td>
+                <td class="num">{{ money(line.unitPrice, '') }}</td>
                 <td class="num">{{ money(line.amount, stockIn.currency) }}</td>
               </tr>
             </tbody>
@@ -269,12 +269,12 @@ watch(open, async (value) => {
                 <td>{{ line.unit }}</td>
                 <td class="num">{{ qty(line.quantity) }}</td>
                 <td v-if="stockOut.kind !== 'OTHER'" class="num">
-                  {{ qty(line.salesUnitPrice) }}
+                  {{ money(line.salesUnitPrice, '') }}
                 </td>
                 <td v-if="stockOut.kind !== 'OTHER'" class="num">
-                  {{ qty(amountOf(line.salesUnitPrice, line.quantity)) }}
+                  {{ money(amountOf(line.salesUnitPrice, line.quantity), '') }}
                 </td>
-                <td class="num">{{ qty(line.unitCost) }}</td>
+                <td class="num">{{ money(line.unitCost, '') }}</td>
                 <td class="num">{{ money(line.costAmount) }}</td>
               </tr>
             </tbody>
@@ -286,7 +286,7 @@ watch(open, async (value) => {
                 </td>
                 <td v-if="stockOut.kind !== 'OTHER'"></td>
                 <td v-if="stockOut.kind !== 'OTHER'" class="num">
-                  {{ qty(outSalesAmount(stockOut)) }}
+                  {{ money(outSalesAmount(stockOut), '') }}
                 </td>
                 <td></td>
                 <td class="num">{{ money(stockOut.costAmount) }}</td>

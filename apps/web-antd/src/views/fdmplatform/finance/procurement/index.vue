@@ -25,6 +25,7 @@ import {
   TableSummaryRow,
   Tag,
 } from 'ant-design-vue';
+import BigNumber from 'bignumber.js';
 
 import {
   getProcurementFinancePage,
@@ -32,7 +33,7 @@ import {
 } from '#/api/fdmplatform/procurement-finance';
 
 import { useInMergedView } from '../../components/merged-view';
-import { rows as businessRows, errorText } from '../../data';
+import { rows as businessRows, errorText, money } from '../../data';
 import BusinessDocumentDetail from '../../documents/BusinessDocumentDetail.vue';
 import { withoutDetailQuery } from '../../documents/navigation';
 import { useOwnedRoute } from '../../documents/useOwnedRoute';
@@ -236,12 +237,7 @@ const columns = computed(() =>
       ],
 );
 function moneyText(record: ProcurementFinanceRecord) {
-  if (record.amount === null || record.amount === undefined) return '未注明';
-  const amount = Number(record.amount).toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-  return record.currency ? `${record.currency} ${amount}` : amount;
+  return money(record.amount, record.currency, '未注明');
 }
 function payerText(record: ProcurementFinanceRecord) {
   if (isPayment.value)
@@ -254,18 +250,16 @@ function payerText(record: ProcurementFinanceRecord) {
 }
 /** 本页合计（金智列表底部），按币种分开 */
 const pageTotal = computed(() => {
-  const totals = new Map<string, number>();
+  const totals = new Map<string, BigNumber>();
   for (const row of rows.value) {
-    const value = Number(row.amount);
-    if (!Number.isFinite(value)) continue;
+    const value = new BigNumber(String(row.amount ?? ''));
+    if (!value.isFinite()) continue;
     const currency = row.currency || '';
-    totals.set(currency, (totals.get(currency) ?? 0) + value);
+    totals.set(currency, value.plus(totals.get(currency) ?? 0));
   }
   return (
     [...totals.entries()]
-      .map(([currency, value]) =>
-        `${currency} ${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`.trim(),
-      )
+      .map(([currency, value]) => money(value, currency))
       .join(' / ') || '—'
   );
 });

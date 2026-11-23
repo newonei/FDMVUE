@@ -252,7 +252,7 @@ describe('费用报销真实列表和付款事实', () => {
     expect(expenseMoney(undefined, 'CNY')).toBe('—');
     expect(expenseMoney('0', 'CNY')).toBe('CNY 0.00');
     expect(expenseMoney('0.1', 'CNY')).toBe('CNY 0.10');
-    expect(expenseMoney('2500', 'JPY')).toBe('JPY 2,500');
+    expect(expenseMoney('2500', 'JPY')).toBe('JPY 2,500.00');
     expect(expensePayment({ ...entry(), summary: {} }).label).toBe(
       '付款资料待核实',
     );

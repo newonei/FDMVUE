@@ -1,5 +1,7 @@
 import type { FdmcaiwuQuotationApi } from '#/api/fdmcaiwu/quotation';
 
+import { formatMoneyDecimal } from '#/utils/money';
+
 export const DEFAULT_QUOTATION_TAX_RATE = 0.08;
 
 export const RESULT_COST_FIELDS: Array<{
@@ -95,17 +97,7 @@ export function formatLayoutOrientation(value?: string): string {
 
 export function formatMoney(value: unknown): string {
   if (!hasValue(value)) return '—';
-  const numberValue = Number(value);
-  if (!Number.isFinite(numberValue)) return `¥${String(value)}`;
-  return `¥${numberValue.toLocaleString('zh-CN', {
-    maximumFractionDigits: 2,
-    minimumFractionDigits: 2,
-  })}`;
-}
-
-export function formatExactMoney(value: unknown): string {
-  if (!hasValue(value)) return '—';
-  return `¥${String(value)}`;
+  return `¥${formatMoneyDecimal(value) ?? String(value)}`;
 }
 
 export function formatDecimal(value: unknown, unit = ''): string {

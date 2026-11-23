@@ -52,7 +52,7 @@ import { filePreviewKind } from '../components/file-preview';
 import LineTable from '../components/LineTable.vue';
 import RecordTable from '../components/RecordTable.vue';
 import RenameFileDialog from '../components/RenameFileDialog.vue';
-import { errorText, label, rows } from '../data';
+import { errorText, label, money, rows } from '../data';
 import { downloadBlob } from '../purchase/manage/model';
 import {
   businessDocumentActionDefinition,
@@ -547,7 +547,7 @@ async function submit(
                 }}
               </Descriptions.Item>
               <Descriptions.Item label="金额">
-                {{ view.amount ?? record?.amount ?? '未注明' }}
+                {{ money(view.amount ?? record?.amount, '', '未注明') }}
                 {{ view.currency || record?.currency || '（币种待补齐）' }}
               </Descriptions.Item>
               <Descriptions.Item label="关联合同">

@@ -46,6 +46,16 @@ describe('aI 风险检查显示', () => {
     expect(needsReason('IGNORED')).toBe(true);
     expect(needsReason('RESOLVED')).toBe(false);
   });
+
+  it('describes purchase checks without implying a system rule fallback', () => {
+    expect(aiStatusText('NO_CHECKPOINTS', 'PURCHASE_ORDER')).toBe(
+      '未启用检查点，未执行采购单检查',
+    );
+    expect(aiStatusText('NOT_CONFIGURED', 'PURCHASE_ORDER')).toBe(
+      '这家公司还没有放行 AI 单据检查的模型',
+    );
+    expect(aiStatusText('NOT_REQUIRED', 'PURCHASE_ORDER')).toBe('');
+  });
 });
 
 describe('attachmentSummary', () => {

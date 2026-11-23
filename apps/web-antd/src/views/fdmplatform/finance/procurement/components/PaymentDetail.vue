@@ -7,10 +7,8 @@ import { Alert, Button, Steps, Tag } from 'ant-design-vue';
 import BigNumber from 'bignumber.js';
 
 import { rows } from '../../../data';
-import { contractReferenceText } from '../../../documents/migration-display';
-import { contractTarget, documentTarget } from '../../../documents/navigation';
-import RelatedLink from '../../../documents/RelatedLink.vue';
 import { invoiceStates, paymentStatus } from '../model';
+import PaymentFields from './PaymentFields.vue';
 
 /**
  * 采购付款记录详情：采购登记 → 财务审核 → 已付款。
@@ -91,29 +89,6 @@ const invoice = computed(() =>
     ? invoiceStates[String(props.record.invoiceState)]
     : undefined,
 );
-const items = computed(() => {
-  const record = props.record;
-  const rmb =
-    record.exchange && record.currency !== 'CNY'
-      ? `${money(record.rmbAmount, 'CNY')}（${record.exchange.rateDate} 汇率 ${record.exchange.rateToCny}）`
-      : undefined;
-  return [
-    { label: '收款方', value: record.payeeName },
-    { label: '收款账户', value: record.payeeAccount, wide: true },
-    {
-      label: reviewed.value ? '付款日期' : '计划付款日期',
-      value: record.paidAt,
-    },
-    { label: '付款分类', value: record.paymentMethod },
-    { label: '付款公司', value: record.payerSnapshot?.name },
-    { label: '付款账户', value: record.payerAccount },
-    ...(rmb ? [{ label: '人民币金额', value: rmb, wide: true }] : []),
-    ...(record.batchNo
-      ? [{ label: '集中付款批号', value: record.batchNo }]
-      : []),
-    { label: '备注', value: record.remark, wide: true },
-  ];
-});
 </script>
 
 <template>
@@ -242,56 +217,7 @@ const items = computed(() => {
       </Button>
     </div>
 
-    <dl class="grid">
-      <div>
-        <dt>{{ record.invoiceId ? '来源（付款发票）' : '采购单' }}</dt>
-        <dd v-if="record.invoiceId">
-          {{ record.invoice?.code ?? record.invoice?.invoiceNo ?? '付款发票' }}
-          · {{ record.invoice?.orderCount ?? 1 }} 个采购单
-          <Button type="link" size="small" @click="emit('sources')">
-            查看来源
-          </Button>
-        </dd>
-        <dd v-else>
-          <RelatedLink
-            :target="
-              documentTarget('orders', record.contractId, record.orderId)
-            "
-          >
-            {{ record.orderCode ?? '查看采购单' }}
-          </RelatedLink>
-        </dd>
-      </div>
-      <div v-if="!record.invoiceId">
-        <dt>关联合同</dt>
-        <dd>
-          <RelatedLink :target="contractTarget(record.contractId)">
-            {{
-              contractReferenceText(
-                record.contractCode,
-                record.contractName,
-                record.contractId,
-              )
-            }}
-          </RelatedLink>
-        </dd>
-      </div>
-      <div v-for="item in items" :key="item.label" :class="{ wide: item.wide }">
-        <dt>{{ item.label }}</dt>
-        <dd>{{ item.value || '—' }}</dd>
-      </div>
-      <div v-if="invoice">
-        <dt>收票</dt>
-        <dd>
-          {{ invoice.label }}
-          <template
-            v-if="record.invoicedAmount && invoice.label !== '无需发票'"
-          >
-            · 已收 {{ money(record.invoicedAmount) }}
-          </template>
-        </dd>
-      </div>
-    </dl>
+    <PaymentFields :record="record" @sources="emit('sources')" />
   </div>
 </template>
 
@@ -351,50 +277,5 @@ const items = computed(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-}
-
-.grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px 20px;
-  padding: 14px 16px;
-  margin: 0;
-  border: 1px solid hsl(var(--border));
-  border-radius: 10px;
-}
-
-.grid > div {
-  min-width: 0;
-}
-
-.grid .wide {
-  grid-column: span 2;
-}
-
-.grid dt {
-  margin-bottom: 2px;
-  font-size: 12px;
-  color: hsl(var(--muted-foreground));
-}
-
-.grid dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
-@media (max-width: 900px) {
-  .grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 560px) {
-  .grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .grid .wide {
-    grid-column: auto;
-  }
 }
 </style>

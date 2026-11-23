@@ -262,13 +262,13 @@ function decimal(value: unknown) {
   return amount.isFinite() ? amount : undefined;
 }
 
-/** 满一万显示为「万」保留一位小数；有币种时加币种代码，不猜测未注明的币种 */
+/** 金额保留两位小数，满一万按「万」展示。 */
 export function moneyShort(value: unknown, currency?: null | string) {
   const amount = decimal(value);
   if (!amount) return '—';
   const text = amount.abs().isGreaterThanOrEqualTo(10_000)
-    ? `${amount.dividedBy(10_000).toFormat(1, BigNumber.ROUND_HALF_UP)} 万`
-    : amount.decimalPlaces(2, BigNumber.ROUND_HALF_UP).toFormat();
+    ? `${amount.dividedBy(10_000).toFormat(2, BigNumber.ROUND_HALF_UP)} 万`
+    : amount.toFormat(2, BigNumber.ROUND_HALF_UP);
   return currency ? `${currency} ${text}` : text;
 }
 

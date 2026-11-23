@@ -57,7 +57,6 @@ import {
   formatCompactDecimal,
   formatDecimal,
   formatDensityType,
-  formatExactMoney,
   formatLayoutOrientation,
   formatMaterialUnitCost,
   formatMoney,
@@ -1082,7 +1081,6 @@ const costRows = computed(() =>
   RESULT_COST_FIELDS.filter((item) => hasValue(result.value?.[item.field])).map(
     (item) => ({
       displayAmount: formatMoney(result.value?.[item.field]),
-      exactAmount: formatExactMoney(result.value?.[item.field]),
       key: item.field,
       name: item.name,
     }),
@@ -1093,16 +1091,9 @@ const costColumns = [
   { dataIndex: 'name', key: 'name', title: '成本项' },
   {
     align: 'right' as const,
-    dataIndex: 'exactAmount',
-    key: 'exactAmount',
-    title: '精确金额',
-    width: 190,
-  },
-  {
-    align: 'right' as const,
     dataIndex: 'displayAmount',
     key: 'displayAmount',
-    title: '展示金额',
+    title: '金额',
     width: 150,
   },
 ];
@@ -1112,7 +1103,9 @@ const calculationStepRows = computed(() =>
     ...item,
     key: item.code || String(index),
     order: index + 1,
-    valueText: formatDecimal(item.value),
+    valueText: /^元(?:\/|$)/.test(item.unit ?? '')
+      ? formatMoney(item.value)
+      : formatDecimal(item.value),
   })),
 );
 
@@ -1124,7 +1117,7 @@ const calculationStepColumns = [
     align: 'right' as const,
     dataIndex: 'valueText',
     key: 'valueText',
-    title: '精确结果',
+    title: '计算结果',
     width: 200,
   },
   { dataIndex: 'unit', key: 'unit', title: '单位', width: 90 },
@@ -1931,7 +1924,6 @@ onBeforeUnmount(() => {
                   <div class="summary-value">
                     {{ formatMoney(summaryValues.unitCost.display) }}
                   </div>
-                  <div class="summary-caption">精确值收纳在计算依据</div>
                 </div>
               </div>
 
@@ -2136,31 +2128,31 @@ onBeforeUnmount(() => {
                       </DescriptionsItem>
                       <DescriptionsItem label="面材单片成本">
                         {{
-                          formatExactMoney(
+                          formatMoney(
                             result.lamination.materialCostPerPiece,
                           )
                         }}
                       </DescriptionsItem>
                       <DescriptionsItem label="面材订单成本">
                         {{
-                          formatExactMoney(result.lamination.materialOrderCost)
+                          formatMoney(result.lamination.materialOrderCost)
                         }}
                       </DescriptionsItem>
                       <DescriptionsItem label="热熔胶单片成本">
                         {{
-                          formatExactMoney(
+                          formatMoney(
                             result.lamination.adhesiveCostPerPiece,
                           )
                         }}
                       </DescriptionsItem>
                       <DescriptionsItem label="热熔胶订单成本">
                         {{
-                          formatExactMoney(result.lamination.adhesiveOrderCost)
+                          formatMoney(result.lamination.adhesiveOrderCost)
                         }}
                       </DescriptionsItem>
                       <DescriptionsItem label="复合加工单片">
                         {{
-                          formatExactMoney(
+                          formatMoney(
                             result.lamination.laminationLaborCostPerPiece,
                           )
                         }}
@@ -2226,9 +2218,6 @@ onBeforeUnmount(() => {
                     <div class="tab-section-heading">
                       <div>
                         <div class="tab-section-title">单位成本构成</div>
-                        <div class="tab-section-subtitle">
-                          展示金额用于日常报价，精确金额用于核算复核
-                        </div>
                       </div>
                       <Tag>{{ costRows.length }} 项</Tag>
                     </div>
@@ -2357,27 +2346,27 @@ onBeforeUnmount(() => {
                     日常报价无需展开以下内容；需要核算、追溯或排查时再按项查看。
                   </div>
                   <Collapse class="audit-collapse">
-                    <Collapse.Panel key="exact" header="精确金额">
+                    <Collapse.Panel key="exact" header="报价计算金额">
                       <Descriptions bordered :column="1" size="small">
-                        <DescriptionsItem label="单位成本精确值">
-                          {{ formatExactMoney(summaryValues.unitCost.exact) }}
+                        <DescriptionsItem label="计算单位成本">
+                          {{ formatMoney(summaryValues.unitCost.exact) }}
                         </DescriptionsItem>
-                        <DescriptionsItem label="不含税单位报价精确值">
-                          {{ formatExactMoney(summaryValues.unitQuote.exact) }}
+                        <DescriptionsItem label="计算单位报价（不含税）">
+                          {{ formatMoney(summaryValues.unitQuote.exact) }}
                         </DescriptionsItem>
-                        <DescriptionsItem label="含税单位报价精确值">
+                        <DescriptionsItem label="计算单位报价（含税）">
                           {{
-                            formatExactMoney(
+                            formatMoney(
                               summaryValues.unitQuote.taxIncludedExact,
                             )
                           }}
                         </DescriptionsItem>
-                        <DescriptionsItem label="不含税报价总额精确值">
-                          {{ formatExactMoney(summaryValues.totalQuote.exact) }}
+                        <DescriptionsItem label="计算报价总额（不含税）">
+                          {{ formatMoney(summaryValues.totalQuote.exact) }}
                         </DescriptionsItem>
-                        <DescriptionsItem label="含税报价总额精确值">
+                        <DescriptionsItem label="计算报价总额（含税）">
                           {{
-                            formatExactMoney(
+                            formatMoney(
                               summaryValues.totalQuote.taxIncludedExact,
                             )
                           }}

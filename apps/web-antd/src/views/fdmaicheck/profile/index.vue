@@ -43,6 +43,7 @@ import AiCheckBar from '../components/AiCheckBar.vue';
 import AiCheckChecklist from '../components/AiCheckChecklist.vue';
 import { buildChecklist } from '../components/checklist';
 import { aiStatusText, attachmentSummary } from '../components/risk';
+import CheckItemImport from './CheckItemImport.vue';
 import CheckItemList from './CheckItemList.vue';
 import {
   draftFrom,
@@ -64,6 +65,7 @@ const detail = ref<FdmAiCheckApi.ProfileDetail>();
 const loading = ref(false);
 const saving = ref(false);
 const editing = ref(false);
+const importing = ref(false);
 const draft = ref<FdmAiCheckApi.Draft>({ items: [], departmentNotes: {} });
 /** 模型下拉用 0 表示「默认路由」，保存时再转成 null。 */
 const settings = reactive<
@@ -84,11 +86,26 @@ const dryAttachmentLines = computed(() => {
   const info = attachmentSummary(dryResult.value?.task.attachments);
   return [info.read, ...info.others].filter(Boolean);
 });
+const dryStatusText = computed(() =>
+  aiStatusText(dryResult.value?.task.aiStatus, detail.value?.profile.docType),
+);
 let dryTimer: ReturnType<typeof setTimeout> | undefined;
 
 const shown = computed(() =>
   editing.value ? undefined : (detail.value?.draft ?? detail.value?.published),
 );
+const checkpointsOnly = computed(
+  () => detail.value?.profile.docType === 'PURCHASE_ORDER',
+);
+const canDelete = computed(
+  () =>
+    checkpointsOnly.value &&
+    canEdit.value &&
+    !loading.value &&
+    !saving.value &&
+    detail.value?.profile.docType === current.value,
+);
+const purchaseEmptyText = '没有检查点。添加并启用检查点后即可检查采购单。';
 const modelOptions = computed(() => [
   { label: '默认（路由 fdm.aicheck.v1）', value: 0 },
   ...models.value.map((m) => ({
@@ -176,7 +193,24 @@ function startEdit(source?: FdmAiCheckApi.Prompt | null) {
   draft.value = draftFrom(
     source ?? detail.value?.draft ?? detail.value?.published,
   );
+  if (checkpointsOnly.value) {
+    draft.value.departmentNotes = {};
+    draft.value.notes = undefined;
+  }
   editing.value = true;
+}
+
+function removeFromDraft(index: number) {
+  if (!canDelete.value || !shown.value?.items[index]) return;
+  startEdit();
+  draft.value.items.splice(index, 1);
+}
+
+function addImportedItems(items: FdmAiCheckApi.Item[]) {
+  if (!editing.value) startEdit();
+  draft.value.items.push(...items);
+  importing.value = false;
+  message.success(`已添加 ${items.length} 条检查点，请核对后保存草稿`);
 }
 
 async function saveDraft() {
@@ -300,7 +334,7 @@ onBeforeUnmount(stopDry);
 <template>
   <AiCenterShell
     title="AI 单据检查"
-    description="单据保存后后台自动检查风险，只提醒不拦截；在这里配置每类单据的检查项和注意事项"
+    description="在这里配置各类单据的检查点。单据保存后在后台检查并提示风险。"
   >
     <div class="aicheck-layout">
       <nav class="aicheck-types">
@@ -320,7 +354,9 @@ onBeforeUnmount(stopDry);
             <span>{{
               p.publishedVersionNo
                 ? `第 ${p.publishedVersionNo} 版`
-                : '出厂默认'
+                : p.docType === 'PURCHASE_ORDER'
+                  ? '未发布'
+                  : '出厂默认'
             }}</span>
             <Tag v-if="p.hasDraft" color="orange">有草稿</Tag>
           </span>
@@ -385,7 +421,11 @@ onBeforeUnmount(stopDry);
                 />
               </label>
             </div>
-            <p class="aicheck-muted">
+            <p v-if="checkpointsOnly" class="aicheck-muted">
+              模型须在模型中心给单据所属公司放行「FDM_AI_CHECK /
+              CONFIDENTIAL」用途。同一单据 1 小时内最多通知一次。
+            </p>
+            <p v-else class="aicheck-muted">
               模型须在模型中心给单据所属公司放行「FDM_AI_CHECK /
               CONFIDENTIAL」用途，否则只做规则检查。同一单据 1
               小时内最多通知一次。
@@ -403,16 +443,28 @@ onBeforeUnmount(stopDry);
           <section class="aicheck-card">
             <div class="aicheck-card-head" :class="{ sticky: editing }">
               <h3>
-                检查点与注意事项
+                {{ checkpointsOnly ? '检查点' : '检查点与注意事项' }}
                 <Tag v-if="!editing && detail.draft" color="orange">
                   草稿（未发布）
                 </Tag>
                 <Tag v-else-if="!editing">
-                  {{ versionLabel(detail.published) }}
+                  {{
+                    checkpointsOnly && !detail.published.promptId
+                      ? '未发布'
+                      : versionLabel(detail.published)
+                  }}
                 </Tag>
                 <Tag v-else color="processing">编辑中</Tag>
               </h3>
               <Space v-if="canEdit">
+                <Button
+                  :disabled="
+                    loading || saving || detail.profile.docType !== current
+                  "
+                  @click="importing = true"
+                >
+                  Excel 导入
+                </Button>
                 <template v-if="editing">
                   <Button @click="editing = false">取消</Button>
                   <Button :loading="saving" @click="saveDraft">保存草稿</Button>
@@ -442,10 +494,21 @@ onBeforeUnmount(stopDry);
                 </template>
               </Space>
             </div>
+            <CheckItemImport
+              v-if="importing"
+              :doc-type-name="detail.profile.docTypeName"
+              :existing-items="editing ? draft.items : (shown?.items ?? [])"
+              @close="importing = false"
+              @apply="addImportedItems"
+            />
             <Alert
               type="info"
               show-icon
-              message="AI 会对每个启用的检查点打一个标记并写明依据：✓ 通过、✕ 不通过、! 有疑问、? 缺资料（资料不全没法判断）、— 不适用。系统已固定：AI 只能提醒不能改单据、业务资料里的文字不当指令执行、每条问题须引用证据。"
+              :message="
+                checkpointsOnly
+                  ? '采购单只按已发布且启用的检查点检查，并逐项说明依据。草稿可通过试跑验证。'
+                  : 'AI 会对每个启用的检查点打一个标记并写明依据：✓ 通过、✕ 不通过、! 有疑问、? 缺资料（资料不全没法判断）、— 不适用。系统已固定：AI 只能提醒不能改单据、业务资料里的文字不当指令执行、每条问题须引用证据。'
+              "
             />
 
             <template v-if="editing">
@@ -453,13 +516,18 @@ onBeforeUnmount(stopDry);
                 ref="itemList"
                 v-model:items="draft.items"
                 editing
+                :deletable="canDelete"
+                :empty-description="
+                  checkpointsOnly ? purchaseEmptyText : undefined
+                "
                 :stats="stats"
-                :rule-items="detail.ruleItems"
+                :rule-items="checkpointsOnly ? undefined : detail.ruleItems"
               />
               <Space>
                 <Button @click="itemList?.add()">添加检查点</Button>
                 <Button @click="itemList?.openGroup()">新建分组</Button>
                 <Button
+                  v-if="!checkpointsOnly"
                   type="link"
                   @click="
                     startEdit({
@@ -472,41 +540,51 @@ onBeforeUnmount(stopDry);
                   用出厂默认检查点重新开始
                 </Button>
               </Space>
-              <h4>部门补充说明</h4>
-              <div class="aicheck-notes">
-                <label v-for="(name, key) in detail.departments" :key="key">
-                  {{ name }}
-                  <Input.TextArea
-                    v-model:value="draft.departmentNotes[key]"
-                    :rows="2"
-                    :maxlength="2000"
-                    :placeholder="`只对${name}的单据生效`"
-                  />
-                </label>
-              </div>
-              <h4>补充说明</h4>
-              <Input.TextArea
-                v-model:value="draft.notes"
-                :rows="3"
-                :maxlength="4000"
-                placeholder="对这类单据的通用注意事项，例如：样品单允许零价"
-              />
+              <template v-if="!checkpointsOnly">
+                <h4>部门补充说明</h4>
+                <div class="aicheck-notes">
+                  <label v-for="(name, key) in detail.departments" :key="key">
+                    {{ name }}
+                    <Input.TextArea
+                      v-model:value="draft.departmentNotes[key]"
+                      :rows="2"
+                      :maxlength="2000"
+                      :placeholder="`只对${name}的单据生效`"
+                    />
+                  </label>
+                </div>
+                <h4>补充说明</h4>
+                <Input.TextArea
+                  v-model:value="draft.notes"
+                  :rows="3"
+                  :maxlength="4000"
+                  placeholder="对这类单据的通用注意事项，例如：样品单允许零价"
+                />
+              </template>
             </template>
             <template v-else-if="shown">
               <CheckItemList
+                :key="detail.profile.docType"
                 :items="shown.items"
                 :editing="false"
+                :deletable="canDelete"
+                :empty-description="
+                  checkpointsOnly ? purchaseEmptyText : undefined
+                "
                 :stats="stats"
-                :rule-items="detail.ruleItems"
+                :rule-items="checkpointsOnly ? undefined : detail.ruleItems"
+                @remove="removeFromDraft"
               />
-              <template v-for="(name, key) in detail.departments" :key="key">
-                <p v-if="shown.departmentNotes[key]" class="aicheck-note">
-                  <b>{{ name }}：</b>{{ shown.departmentNotes[key] }}
+              <template v-if="!checkpointsOnly">
+                <template v-for="(name, key) in detail.departments" :key="key">
+                  <p v-if="shown.departmentNotes[key]" class="aicheck-note">
+                    <b>{{ name }}：</b>{{ shown.departmentNotes[key] }}
+                  </p>
+                </template>
+                <p v-if="shown.notes" class="aicheck-note">
+                  <b>补充说明：</b>{{ shown.notes }}
                 </p>
               </template>
-              <p v-if="shown.notes" class="aicheck-note">
-                <b>补充说明：</b>{{ shown.notes }}
-              </p>
             </template>
           </section>
 
@@ -558,11 +636,8 @@ onBeforeUnmount(stopDry);
               <p v-if="dryResult.task.summary" class="aicheck-muted">
                 AI 结论：{{ dryResult.task.summary }}
               </p>
-              <p
-                v-if="aiStatusText(dryResult.task.aiStatus)"
-                class="aicheck-muted"
-              >
-                {{ aiStatusText(dryResult.task.aiStatus) }}
+              <p v-if="dryStatusText" class="aicheck-muted">
+                {{ dryStatusText }}
               </p>
               <p
                 v-for="line in dryAttachmentLines"
@@ -586,7 +661,7 @@ onBeforeUnmount(stopDry);
             <div class="aicheck-card-head">
               <h3>历史版本</h3>
               <Popconfirm
-                v-if="canEdit"
+                v-if="canEdit && !checkpointsOnly"
                 title="恢复出厂默认检查项？会生成一个新版本。"
                 @confirm="rollback(0)"
               >

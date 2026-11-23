@@ -93,7 +93,7 @@ const tasks = computed(() => summary.value?.tasks ?? []);
 const department = computed(() => summary.value?.purchasing ?? undefined);
 function money(key: string) {
   const lines = moneyLines(summary.value?.metrics[key]);
-  return { main: lines[0] ?? '0', sub: lines.slice(1).join(' · ') };
+  return { main: lines[0] ?? '0.00', sub: lines.slice(1).join(' · ') };
 }
 const monthCards = computed(() => [
   {

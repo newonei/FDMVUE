@@ -34,6 +34,7 @@ import {
   getLaminationMaterialPage,
   updateLaminationMaterial,
 } from '#/api/fdmcaiwu/lamination-material';
+import { formatMoneyDecimal } from '#/utils/money';
 
 import {
   formatQuotationTaxRate,
@@ -199,11 +200,11 @@ function valueOf(record: Material | Record<string, unknown>, key: unknown) {
   return (record as Record<string, unknown>)[String(key)];
 }
 
-function formatNumber(value: unknown, digits = 3) {
+function formatNumber(value: unknown) {
   const numberValue = Number(value);
   if (!Number.isFinite(numberValue)) return '—';
   return numberValue.toLocaleString('zh-CN', {
-    maximumFractionDigits: digits,
+    maximumFractionDigits: 3,
     useGrouping: false,
   });
 }
@@ -798,20 +799,20 @@ onMounted(() => {
               ].includes(String(column.key))
             "
           >
-            {{ formatNumber(valueOf(record, column.key), 4) }}
+            {{ formatMoneyDecimal(valueOf(record, column.key), false) ?? '—' }}
           </template>
           <template
             v-else-if="column.key === 'unitPriceTaxIncludedPerLinearMeter'"
           >
             {{
-              formatNumber(
+              formatMoneyDecimal(
                 materialTaxIncludedPrice(
                   record,
                   'unitPricePerLinearMeter',
                   'unitPriceTaxIncludedPerLinearMeter',
                 ),
-                4,
-              )
+                false,
+              ) ?? '—'
             }}
           </template>
           <template
@@ -820,28 +821,28 @@ onMounted(() => {
             "
           >
             {{
-              formatNumber(
+              formatMoneyDecimal(
                 materialTaxIncludedPrice(
                   record,
                   'adhesiveUnitPricePerSquareMeter',
                   'adhesiveUnitPriceTaxIncludedPerSquareMeter',
                 ),
-                4,
-              )
+                false,
+              ) ?? '—'
             }}
           </template>
           <template
             v-else-if="column.key === 'laminationLaborCostTaxIncludedPerPiece'"
           >
             {{
-              formatNumber(
+              formatMoneyDecimal(
                 materialTaxIncludedPrice(
                   record,
                   'laminationLaborCostPerPiece',
                   'laminationLaborCostTaxIncludedPerPiece',
                 ),
-                4,
-              )
+                false,
+              ) ?? '—'
             }}
           </template>
           <template v-else-if="column.key === 'gap'">

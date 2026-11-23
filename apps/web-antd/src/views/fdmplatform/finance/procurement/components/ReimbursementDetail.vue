@@ -9,17 +9,19 @@ import { computed } from 'vue';
 import { formatDate } from '@vben/utils';
 
 import { Alert, Button, Descriptions, Space, Tag } from 'ant-design-vue';
-import BigNumber from 'bignumber.js';
 
 import { downloadProcurementFinanceFile } from '#/api/fdmplatform/procurement-finance';
 
 import FilePreviewButton from '../../../components/FilePreviewButton.vue';
-import { expenseCategoryLabel, rows } from '../../../data';
+import {
+  expenseCategoryLabel,
+  money as formatMoney,
+  rows,
+} from '../../../data';
 import { contractReferenceText } from '../../../documents/migration-display';
 import { contractTarget, documentTarget } from '../../../documents/navigation';
 import RelatedLink from '../../../documents/RelatedLink.vue';
 import {
-  currencyScale,
   DINGTALK_STAGE,
   dingTalkApprovalMessage,
   expenseActionNames,
@@ -121,10 +123,7 @@ const flowMessage = computed(() => {
   return '当前单据按实际付款及成本归集记录展示。';
 });
 function money(value: unknown) {
-  if (value === null || value === undefined || value === '') return '待核实';
-  const amount = new BigNumber(String(value));
-  if (!amount.isFinite()) return '待核实';
-  return `${props.record.currency || '币种未注明'} ${amount.toFormat(currencyScale(props.record.currency))}`;
+  return formatMoney(value, props.record.currency || '币种未注明', '待核实');
 }
 const expenseLabel = expenseCategoryLabel;
 function factName(value: unknown) {

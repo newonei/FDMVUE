@@ -7,12 +7,10 @@ import type {
 import { computed, onMounted, ref } from 'vue';
 
 import { Alert, DatePicker, Empty, Spin } from 'ant-design-vue';
-import BigNumber from 'bignumber.js';
 
 import { getExpenseSummary } from '#/api/fdmplatform/expense';
 
-import { errorText, expenseCategoryLabel } from '../../../data';
-import { currencyScale } from '../model';
+import { errorText, expenseCategoryLabel, money } from '../../../data';
 
 /** 已通过审核的报销汇总。按费用发生日期算，外币不折算，按币种分开显示。 */
 const range = ref<[string, string] | undefined>();
@@ -65,7 +63,7 @@ const groups = computed(() =>
     : [],
 );
 function amount(row: ExpenseSummaryRow) {
-  return `${row.currency} ${new BigNumber(String(row.amount)).toFormat(currencyScale(row.currency))}`;
+  return money(row.amount, row.currency, '—');
 }
 </script>
 

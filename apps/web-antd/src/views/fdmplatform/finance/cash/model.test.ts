@@ -12,7 +12,7 @@ import {
 
 describe('finance cash presentation', () => {
   it('formats RMB totals and keeps unlabeled currencies apart', () => {
-    expect(rmb('1234567')).toBe('¥123.5 万');
+    expect(rmb('1234567')).toBe('¥123.46 万');
     expect(rmb(undefined)).toBe('—');
     const mix = currencyMix({
       count: 3,
@@ -23,7 +23,7 @@ describe('finance cash presentation', () => {
         { currency: 'EUR', total: '10', recent12: '0' },
       ],
     });
-    expect(mix.text).toBe('USD 12.0 万 · 未注明币种 500');
+    expect(mix.text).toBe('USD 12.00 万 · 未注明币种 500.00');
     expect(mix.more).toBe(1);
   });
 

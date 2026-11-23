@@ -71,7 +71,12 @@ const expanded = computed(() =>
   defaultExpanded(list.value, expandChoice.value),
 );
 const storageKey = computed(() => `fdmaicheck.expanded.${props.docType}`);
-const notice = computed(() => aiStatusText(result.value?.latest?.aiStatus));
+const notice = computed(() =>
+  aiStatusText(result.value?.latest?.aiStatus, props.docType),
+);
+const noCheckpoints = computed(
+  () => props.docType === 'PURCHASE_ORDER' && result.value?.items?.length === 0,
+);
 const attachmentInfo = computed(() =>
   attachmentSummary(result.value?.latest?.attachments),
 );
@@ -217,7 +222,9 @@ defineExpose({ reload: () => load(true) });
       @select="expandChoice = '1'"
     >
       <span v-if="result?.running" class="ai-check-running">检查中…</span>
-      <span v-else-if="!result?.latest && !loading" class="ai-check-muted">单据保存后会自动检查</span>
+      <span v-else-if="!result?.latest && !loading" class="ai-check-muted">
+        {{ noCheckpoints ? '未启用检查点' : '单据保存后会自动检查' }}
+      </span>
       <span v-if="checkedAt">{{ checkedAt }}</span>
       <Tooltip title="按单据当前内容重新检查">
         <Button

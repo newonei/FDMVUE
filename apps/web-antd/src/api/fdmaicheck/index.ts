@@ -28,7 +28,7 @@ export namespace FdmAiCheckApi {
     id: number;
     triggerType: string;
     status: string;
-    /** SUCCEEDED / FAILED / NOT_CONFIGURED / TOO_LARGE / UNAVAILABLE */
+    /** SUCCEEDED / FAILED / NOT_CONFIGURED / TOO_LARGE / UNAVAILABLE / NO_CHECKPOINTS / NOT_REQUIRED */
     aiStatus?: string;
     riskLevel?: Severity;
     summary?: string;
@@ -94,7 +94,7 @@ export namespace FdmAiCheckApi {
     latest?: Task;
     lastError?: string;
     findings: Finding[];
-    /** 当前配置的检查点（系统规则 + 启用的 AI 检查点），没检查过也照样列出 */
+    /** 当前启用的检查点，没检查过也照样列出。支持系统规则的单据同时列出系统规则。 */
     items?: CheckPoint[];
   }
 
@@ -122,6 +122,11 @@ export namespace FdmAiCheckApi {
     /** 什么情况只提醒 */
     warnWhen?: string;
     group?: string;
+  }
+
+  export interface ItemImportPreview {
+    maxItems: number;
+    rows: { error?: null | string; item?: Item | null; rowNumber: number }[];
   }
 
   export interface Prompt {
@@ -266,6 +271,18 @@ export function updateAiCheckSettings(
 
 export function saveAiCheckDraft(docType: string, draft: FdmAiCheckApi.Draft) {
   return requestClient.put<number>(`${base}/profile/draft`, { docType, draft });
+}
+
+export function downloadAiCheckItemTemplate() {
+  return requestClient.download(`${base}/profile/items/import-template`);
+}
+
+export function previewAiCheckItemImport(file: File) {
+  return requestClient.upload<FdmAiCheckApi.ItemImportPreview>(
+    `${base}/profile/items/import-preview`,
+    { file },
+    { silent: true },
+  );
 }
 
 export function discardAiCheckDraft(docType: string) {

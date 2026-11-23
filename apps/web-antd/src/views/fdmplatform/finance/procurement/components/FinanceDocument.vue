@@ -48,7 +48,7 @@ import DocumentApprovalPanel from '../../../components/DocumentApprovalPanel.vue
 import { filePreviewKind } from '../../../components/file-preview';
 import FilePreviewButton from '../../../components/FilePreviewButton.vue';
 import RecordTable from '../../../components/RecordTable.vue';
-import { errorText, field, rows, selectField } from '../../../data';
+import { errorText, field, money, rows, selectField } from '../../../data';
 import { needsImportedValue } from '../../../documents/import-completion';
 import { contractReferenceText } from '../../../documents/migration-display';
 import MigrationSource from '../../../documents/MigrationSource.vue';
@@ -72,6 +72,7 @@ import {
 import FinanceForm from './FinanceForm.vue';
 import InvoiceSourcesDialog from './InvoiceSourcesDialog.vue';
 import PaymentDetail from './PaymentDetail.vue';
+import PaymentFields from './PaymentFields.vue';
 import PaymentRecordDialog from './PaymentRecordDialog.vue';
 import PaymentReviewDialog from './PaymentReviewDialog.vue';
 import ReimbursementDetail from './ReimbursementDetail.vue';
@@ -825,10 +826,22 @@ async function relatedUpdated() {
         >
           <Descriptions.Item label="名称">{{ record.name }}</Descriptions.Item><Descriptions.Item label="状态">
             <Tag>{{ financeRecordStatus(record) }}</Tag>
-</Descriptions.Item><Descriptions.Item label="单据金额">
-            {{ record.currency || '币种未注明' }}
-            {{ record.amount ?? '金额未注明' }}
-</Descriptions.Item><Descriptions.Item label="关联合同">
+          </Descriptions.Item>
+          <Descriptions.Item
+            :label="type === 'PAYMENT' ? '付款金额' : '单据金额'"
+          >
+            {{
+              money(
+                record.amount,
+                record.currency || '币种未注明',
+                '金额未注明',
+              )
+            }}
+          </Descriptions.Item>
+          <Descriptions.Item
+            v-if="type !== 'PAYMENT' || editable"
+            label="关联合同"
+          >
             <RelatedLink :target="contractTarget(record.contractId)">
               {{
                 contractReferenceText(
@@ -838,7 +851,11 @@ async function relatedUpdated() {
                 )
               }}
             </RelatedLink>
-</Descriptions.Item><Descriptions.Item v-if="record.invoiceId" label="来源（付款发票）">
+          </Descriptions.Item>
+          <Descriptions.Item
+            v-if="record.invoiceId && (type !== 'PAYMENT' || editable)"
+            label="来源（付款发票）"
+          >
             {{
               record.invoice?.code ?? record.invoice?.invoiceNo ?? '付款发票'
             }}
@@ -850,7 +867,11 @@ async function relatedUpdated() {
                   : '查看来源'
               }}
             </Button>
-</Descriptions.Item><Descriptions.Item v-else label="关联采购单">
+          </Descriptions.Item>
+          <Descriptions.Item
+            v-else-if="type !== 'PAYMENT' || editable"
+            label="关联采购单"
+          >
             <RelatedLink
               :target="
                 documentTarget('orders', record.contractId, record.orderId)
@@ -1017,7 +1038,12 @@ async function relatedUpdated() {
               />
             </Card>
           </div>
-          <Descriptions :column="2" bordered size="small">
+          <PaymentFields
+            v-if="type === 'PAYMENT'"
+            :record="record"
+            @sources="sourcesOpen = true"
+          />
+          <Descriptions v-else :column="2" bordered size="small">
             <Descriptions.Item label="付款主体">
               {{
                 record.payerSnapshot?.name ?? record.payerEntityId ?? '—'

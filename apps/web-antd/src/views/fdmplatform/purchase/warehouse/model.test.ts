@@ -153,7 +153,7 @@ describe('销售出库', () => {
     );
     expect(
       averageCost({ costAmount: '570', costKnown: true, onHand: '38' }),
-    ).toBe('15');
+    ).toBe('15.00');
     expect(
       averageCost({ costAmount: '0', costKnown: false, onHand: '38' }),
     ).toBeUndefined();

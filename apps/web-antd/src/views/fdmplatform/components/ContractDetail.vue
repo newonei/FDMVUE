@@ -57,7 +57,7 @@ import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 import AiCheckPanel from '#/views/fdmaicheck/components/AiCheckPanel.vue';
 
 import { productCategoryLabel } from '../contract-categories';
-import { errorText, label, receiptStatusLabel, rows } from '../data';
+import { errorText, label, money, receiptStatusLabel, rows } from '../data';
 import { formatTemporalField } from '../date-display';
 import { departmentLabel, personLabel, personName } from '../directory';
 import BusinessDocumentDetail from '../documents/BusinessDocumentDetail.vue';
@@ -1073,7 +1073,7 @@ async function download(file: { id: string; name: string }) {
                 Number(item.quantity).toLocaleString('en-US')
               }}</span>
               <span v-else-if="column.key === 'unitPrice'">{{
-                item.unitPrice ?? '待定价'
+                money(item.unitPrice, '', '待定价')
               }}</span>
               <span v-else-if="column.key === 'lineAmount'">{{
                 item.lineAmount

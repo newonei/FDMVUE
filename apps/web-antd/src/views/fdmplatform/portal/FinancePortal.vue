@@ -194,7 +194,7 @@ const periodCards = computed(() => {
 });
 const metric = (key: string) => {
   const lines = moneyLines(summary.value?.metrics[key]);
-  return { main: lines[0] ?? '0', sub: lines.slice(1).join(' · ') };
+  return { main: lines[0] ?? '0.00', sub: lines.slice(1).join(' · ') };
 };
 const workCards = computed(() => [
   {

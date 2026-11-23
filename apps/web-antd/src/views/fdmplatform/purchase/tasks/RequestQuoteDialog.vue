@@ -26,7 +26,7 @@ import { contractActionWithAttachments } from '#/api/fdmplatform/submissions';
 
 import CreationAttachments from '../../components/CreationAttachments.vue';
 import RemoteMasterSelect from '../../components/RemoteMasterSelect.vue';
-import { errorText } from '../../data';
+import { errorText, money } from '../../data';
 import ProductStructureDetails from '../../products/components/ProductStructureDetails.vue';
 import { localDate } from '../quotes/comparison';
 import {
@@ -399,7 +399,13 @@ watch(
                 <td>{{ row.requiredDate ?? '—' }}</td>
                 <td>
                   <template v-if="row.best">
-                    {{ row.best.currency }} {{ row.best.unitPrice }}
+                    {{
+                      money(
+                        row.best.unitPrice,
+                        String(row.best.currency ?? ''),
+                        '—',
+                      )
+                    }}
                     <span class="hint">{{ row.best.supplierName }}</span>
                   </template>
                   <span v-else class="hint">暂无</span>

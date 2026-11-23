@@ -34,10 +34,13 @@ import {
  * 分组和检查点用同一个箭头：朝右是收起，朝下是展开。
  */
 const props = defineProps<{
+  deletable?: boolean;
   editing: boolean;
+  emptyDescription?: string;
   ruleItems?: FdmAiCheckApi.RuleItem[];
   stats: Record<string, FdmAiCheckApi.ItemStats>;
 }>();
+const emit = defineEmits<{ remove: [index: number] }>();
 const items = defineModel<FdmAiCheckApi.Item[]>('items', { required: true });
 
 const openIndex = ref<number>();
@@ -143,15 +146,19 @@ function confirmGroup() {
 }
 
 function remove(index: number) {
-  items.value.splice(index, 1);
-  openIndex.value = undefined;
+  if (props.editing) {
+    items.value.splice(index, 1);
+    openIndex.value = undefined;
+  } else {
+    emit('remove', index);
+  }
 }
 
 defineExpose({ add, openGroup });
 </script>
 
 <template>
-  <div class="cl">
+  <div class="cl" :class="{ 'cl-deletable': deletable }">
     <div class="cl-row cl-head">
       <span class="cl-head-name">
         检查点
@@ -174,6 +181,7 @@ defineExpose({ add, openGroup });
       <span>不通过时</span>
       <span class="cl-stat-col">近 30 天</span>
       <span>启用</span>
+      <span v-if="deletable">操作</span>
     </div>
     <template v-for="group in groups" :key="group.name">
       <div class="cl-group">
@@ -268,6 +276,17 @@ defineExpose({ add, openGroup });
                 :disabled="!editing"
               />
             </span>
+            <span v-if="deletable" @click.stop @keydown.stop>
+              <Popconfirm
+                :title="`删除「${item.name || '未命名检查点'}」？`"
+                description="保存并发布后生效"
+                ok-text="删除"
+                cancel-text="取消"
+                @confirm="remove(index)"
+              >
+                <Button size="small" danger type="link">删除</Button>
+              </Popconfirm>
+            </span>
           </div>
           <div v-if="openIndex === index" class="cl-editor">
             <template v-if="editing">
@@ -329,7 +348,7 @@ defineExpose({ add, openGroup });
                   />
                 </label>
               </div>
-              <div class="cl-editor-foot">
+              <div v-if="!deletable" class="cl-editor-foot">
                 <Popconfirm title="删除这个检查点？" @confirm="remove(index)">
                   <Button size="small" danger type="link">删除</Button>
                 </Popconfirm>
@@ -370,7 +389,7 @@ defineExpose({ add, openGroup });
     <Empty
       v-if="items.length === 0"
       class="cl-empty"
-      description="没有检查点，AI 只按通用要求检查"
+      :description="emptyDescription ?? '没有检查点，AI 只按通用要求检查'"
     />
     <template v-if="ruleItems?.length">
       <div class="cl-group">
@@ -448,14 +467,20 @@ defineExpose({ add, openGroup });
 }
 
 .cl-row {
+  --cl-columns: minmax(0, 1fr) 80px 140px 44px;
+
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 80px 140px 44px;
+  grid-template-columns: var(--cl-columns);
   gap: 10px;
   align-items: center;
   padding: 7px 12px;
   font-size: 13px;
   cursor: pointer;
   border-top: 1px solid var(--ant-color-border-secondary, #f0f0f0);
+}
+
+.cl-deletable .cl-row {
+  grid-template-columns: var(--cl-columns) 54px;
 }
 
 .cl-row:hover,
@@ -725,7 +750,7 @@ defineExpose({ add, openGroup });
 
 @media (max-width: 900px) {
   .cl-row {
-    grid-template-columns: minmax(0, 1fr) 70px 44px;
+    --cl-columns: minmax(0, 1fr) 70px 44px;
   }
 
   .cl-stat-col {

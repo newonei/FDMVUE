@@ -41,6 +41,7 @@ import {
   getRecipePage,
   updateRecipe,
 } from '#/api/fdmcaiwu/recipe';
+import { formatMoneyDecimal } from '#/utils/money';
 
 defineOptions({ name: 'FdmcaiwuRecipe' });
 
@@ -199,20 +200,14 @@ function formatWeight(value: unknown) {
   return formatted === '—' ? formatted : `${formatted} kg`;
 }
 
-function formatMoney(value: unknown, maximumFractionDigits = 4) {
-  const formatted = formatDecimal(value, {
-    maximumFractionDigits,
-    minimumFractionDigits: 2,
-  });
-  return formatted === '—' ? formatted : `¥${formatted}`;
+function formatMoney(value: unknown) {
+  const amount = formatMoneyDecimal(value);
+  return amount === undefined ? '—' : `¥${amount}`;
 }
 
-function formatUnitCost(value: unknown, exact = false) {
-  const formatted = formatDecimal(value, {
-    maximumFractionDigits: exact ? 8 : 2,
-    minimumFractionDigits: 2,
-  });
-  return formatted === '—' ? formatted : `${formatted} 元/kg`;
+function formatUnitCost(value: unknown) {
+  const amount = formatMoneyDecimal(value);
+  return amount === undefined ? '—' : `${amount} 元/kg`;
 }
 
 function formatCategory(value?: null | string) {
@@ -866,7 +861,7 @@ function handleDelete(row: FdmcaiwuRecipeApi.Recipe) {
                 />
               </template>
               <template v-else-if="column.key === 'lineCostYuan'">
-                {{ formatMoney(getLineCost(record), 6) }}
+                {{ formatMoney(getLineCost(record)) }}
               </template>
               <template v-else-if="column.key === 'action'">
                 <Space :size="0">
@@ -919,10 +914,10 @@ function handleDelete(row: FdmcaiwuRecipeApi.Recipe) {
               {{ formatWeight(previewBatchWeight) }}
             </DescriptionsItem>
             <DescriptionsItem label="批次成本">
-              {{ formatMoney(previewBatchCost, 6) }}
+              {{ formatMoney(previewBatchCost) }}
             </DescriptionsItem>
             <DescriptionsItem label="原始公斤成本">
-              {{ formatUnitCost(previewRawUnitCost, true) }}
+              {{ formatUnitCost(previewRawUnitCost) }}
             </DescriptionsItem>
             <DescriptionsItem label="计价公斤成本">
               <strong class="effective-cost">
@@ -974,18 +969,10 @@ function handleDelete(row: FdmcaiwuRecipeApi.Recipe) {
           {{ formatWeight(row.batchWeightKg) }}
         </template>
         <template #batchCost="{ row }">
-          <span :title="formatMoney(row.batchCostYuan, 6)">{{
-            formatMoney(row.batchCostYuan, 2)
-          }}</span>
+          {{ formatMoney(row.batchCostYuan) }}
         </template>
         <template #rawUnitCost="{ row }">
-          <span :title="formatUnitCost(row.rawUnitCostPerKg, true)">{{
-            formatDecimal(row.rawUnitCostPerKg, {
-              maximumFractionDigits: 4,
-              minimumFractionDigits: 2,
-            })
-          }}
-            元/kg</span>
+          {{ formatUnitCost(row.rawUnitCostPerKg) }}
         </template>
         <template #effectiveUnitCost="{ row }">
           <strong :class="{ 'effective-cost': row.costAvailable }">

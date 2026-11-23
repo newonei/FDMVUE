@@ -13,7 +13,7 @@ import { Alert, Button, Empty, Input, Pagination, Spin } from 'ant-design-vue';
 
 import { getBusinessPage, getContract } from '#/api/fdmplatform';
 
-import { errorText } from '../../data';
+import { errorText, money } from '../../data';
 import BusinessDocumentDetail from '../../documents/BusinessDocumentDetail.vue';
 import DocumentAction from '../../documents/DocumentAction.vue';
 import { queryContractId } from '../../documents/model';
@@ -437,7 +437,7 @@ onBeforeUnmount(() => {
                     class="record-customer procurement-muted"
                     >{{ row.customerName }}</span>
                   <span class="record-price procurement-number">{{ row.record.currency || '币种待补齐' }}
-                    {{ row.record.unitPrice ?? '单价待补齐'
+                    {{ money(row.record.unitPrice, '', '单价待补齐')
                     }}<span class="procurement-muted">
                       / {{ row.record.unit || '单位待补齐' }}</span></span>
                   <span class="record-state"><ProcurementStatusBadge

@@ -160,7 +160,7 @@ describe('purchase portal', () => {
   });
   it('shows department purchasing with 金智 history, top suppliers and due risk', async () => {
     const { host, router } = await mount();
-    expect(host.textContent).toContain('¥5,828.3 万');
+    expect(host.textContent).toContain('¥5,828.31 万');
     expect(host.textContent).toContain('254 家供应商');
     expect(host.textContent).toContain('四联创业集团');
     expect(host.textContent).toContain('甲 等 2 项');

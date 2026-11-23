@@ -35,7 +35,7 @@ import {
   getProcurementOrders,
 } from '#/api/fdmplatform/procurement';
 
-import { errorText } from '../../../data';
+import { errorText, money } from '../../../data';
 import { purchaseRowLabels } from '../model';
 import {
   additionalLineAmount,
@@ -632,18 +632,24 @@ defineExpose({
                     }}</span>
                   <span>单价
                     {{
-                      record.additional
-                        ? record.additional.unitPrice
-                        : (record.unitPrice ?? '—')
+                      money(
+                        record.additional?.unitPrice ?? record.unitPrice,
+                        '',
+                        '—',
+                      )
                     }}</span>
                   <strong>{{ view.order.currency ?? 'CNY' }}
                     {{
-                      record.additional
-                        ? additionalLineAmount(
-                            record.additional,
-                            String(view.order.currency ?? 'CNY'),
-                          )
-                        : priceAmount(record)
+                      money(
+                        record.additional
+                          ? additionalLineAmount(
+                              record.additional,
+                              String(view.order.currency ?? 'CNY'),
+                            )
+                          : priceAmount(record),
+                        '',
+                        '—',
+                      )
                     }}</strong>
                 </div>
               </div>
@@ -908,7 +914,7 @@ defineExpose({
           <span v-if="totals.boxes > 0">产品合计箱数：{{ totals.boxes
             }}{{ totals.complete ? '' : '（部分行未填装箱数）' }}</span>
           <strong>额外项目合计：{{ view.order.currency ?? 'CNY' }}
-            {{ additionalTotal }}（保存后更新账款）</strong>
+            {{ money(additionalTotal) }}（保存后更新账款）</strong>
         </div>
       </Collapse.Panel>
 

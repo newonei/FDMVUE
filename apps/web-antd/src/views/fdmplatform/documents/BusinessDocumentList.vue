@@ -8,7 +8,7 @@ import { Alert, Button, Input, Space, Table, Tag } from 'ant-design-vue';
 
 import { getBusinessPage } from '#/api/fdmplatform';
 
-import { errorText, label } from '../data';
+import { errorText, label, money } from '../data';
 import BusinessDocumentDetail from './BusinessDocumentDetail.vue';
 import { withoutDetailQuery } from './navigation';
 import { useOwnedRoute } from './useOwnedRoute';
@@ -133,7 +133,7 @@ function close() {
 </Button><Tag v-else-if="column.key === 'status'">
           {{ label(record.record.status) }}
 </Tag><span v-else-if="column.key === 'quantity'">{{ record.record.quantity ?? '未注明' }}
-          {{ record.record.unit || '' }}</span><span v-else-if="column.key === 'amount'">{{ record.record.amount ?? '未注明' }}
+          {{ record.record.unit || '' }}</span><span v-else-if="column.key === 'amount'">{{ money(record.record.amount, '', '未注明') }}
           {{ record.record.currency || '（币种未注明）' }}</span><span v-else-if="column.key === 'date'">{{
           record.migration?.sourceDate ||
           record.record.occurredAt ||

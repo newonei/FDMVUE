@@ -27,6 +27,7 @@ import {
   getRawMaterialPage,
   updateRawMaterial,
 } from '#/api/fdmcaiwu/raw-material';
+import { formatMoneyDecimal } from '#/utils/money';
 
 defineOptions({ name: 'FdmcaiwuRawMaterial' });
 
@@ -90,12 +91,8 @@ function formatCategory(value?: string) {
 
 function formatUnitPrice(value: unknown) {
   if (value === undefined || value === null || value === '') return '—';
-  const numberValue = Number(value);
-  if (!Number.isFinite(numberValue)) return String(value);
-  return `${numberValue.toLocaleString('zh-CN', {
-    maximumFractionDigits: 4,
-    minimumFractionDigits: 2,
-  })} 元/kg`;
+  const amount = formatMoneyDecimal(value);
+  return amount === undefined ? String(value) : `${amount} 元/kg`;
 }
 
 /** 完整来源（版本 · 单元格）只放悬停提示 */

@@ -3,6 +3,7 @@ import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { FdmdataExpressReconDetailApi } from '#/api/fdmdata/expressrecondetail';
 
 import { getRangePickerDefaultProps } from '#/utils';
+import { formatMoneyDecimal } from '#/utils/money';
 
 import { EXPRESS_RECON_STATUS_OPTIONS } from '../expressreconbatch/data';
 
@@ -110,8 +111,7 @@ export function useGridFormSchema(): VbenFormSchema[] {
 function formatAmount({ cellValue }: { cellValue: unknown }) {
   if (cellValue === null || cellValue === undefined || cellValue === '')
     return '';
-  const n = Number(cellValue);
-  return Number.isFinite(n) ? n.toFixed(2) : String(cellValue);
+  return formatMoneyDecimal(cellValue, false) ?? String(cellValue);
 }
 
 function formatWeight({ cellValue }: { cellValue: unknown }) {

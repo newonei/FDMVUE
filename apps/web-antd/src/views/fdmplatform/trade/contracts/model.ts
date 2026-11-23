@@ -13,6 +13,7 @@ import type {
 
 import BigNumber from 'bignumber.js';
 
+import { money } from '../../data';
 import { contractInternalOrderNo } from '../../sales-channel';
 
 /** 流程条：按办理顺序排列；CHECK 只在有数量时出现 */
@@ -68,15 +69,9 @@ function decimal(value: unknown) {
   return number.isFinite() ? number : undefined;
 }
 
-/** CNY 3,000.00；没有币种写“币种未注明” */
+/** CNY 3,000.00 */
 export function amountText(value: unknown, currency?: null | string) {
-  const number = decimal(value);
-  if (!number) return '—';
-  const text = number.toNumber().toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-  return currency ? `${currency} ${text}` : text;
+  return money(value, currency ?? '', '—');
 }
 
 /** 整数千分位，用于卡片和行内摘要 */

@@ -60,7 +60,7 @@ import {
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { customsCategories, customsLabel, customsStatuses } from '../customs';
-import { errorText } from '../data';
+import { errorText, money } from '../data';
 import { formatTemporalField } from '../date-display';
 import { personLabel } from '../directory';
 import LinkedRecordTable from '../documents/LinkedRecordTable.vue';
@@ -1225,7 +1225,9 @@ onBeforeUnmount(() => {
               :scroll="{ x: 760 }"
             >
               <template #bodyCell="{ column, record }">
-                <span v-if="column.key === 'amount'">{{ record.cost?.amount }} {{ record.cost?.currency }}</span>
+                <span v-if="column.key === 'amount'">{{
+                  money(record.cost?.amount, record.cost?.currency, '—')
+                }}</span>
                 <span v-else-if="column.key === 'item'">{{
                   selected.lines.find(
                     (line) =>

@@ -164,7 +164,9 @@ onMounted(async () => {
               <span class="muted">{{ line.specification }}</span>
             </td>
             <td>{{ qty(line.quantity) }} {{ line.unit }}</td>
-            <td>{{ line.costKnown ? qty(line.unitCost) : '成本未知' }}</td>
+            <td>
+              {{ line.costKnown ? money(line.unitCost, '') : '成本未知' }}
+            </td>
             <td>
               {{
                 line.costKnown

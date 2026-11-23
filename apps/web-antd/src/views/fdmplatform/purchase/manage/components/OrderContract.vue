@@ -33,12 +33,16 @@ const historyOpen = ref(false);
 const groups = computed(() =>
   procurementFileGroups(props.view.exports, props.view.files),
 );
-const latest = computed(() => groups.value.versions[0]);
+const signableVersions = computed(() =>
+  groups.value.versions.filter(
+    ({ export: file }) => file.detailsStatus !== 'DRAFT',
+  ),
+);
 const visibleVersions = computed(() =>
   historyOpen.value ? groups.value.versions : groups.value.versions.slice(0, 1),
 );
 const selectedVersion = computed(() =>
-  groups.value.versions.find((item) => item.export.id === exportId.value),
+  signableVersions.value.find((item) => item.export.id === exportId.value),
 );
 const kindLabels: Record<string, string> = {
   docx: 'Word',
@@ -57,7 +61,7 @@ function deleteBlocked(file: ProcurementFile) {
 watch(
   () => [
     props.view.id,
-    groups.value.versions.map((item) => item.export.id).join(','),
+    signableVersions.value.map((item) => item.export.id).join(','),
   ],
   (_value, previous) => {
     if (
@@ -65,7 +69,7 @@ watch(
       !selectedVersion.value ||
       exportId.value === previous?.[1]?.split(',')[0]
     )
-      exportId.value = latest.value?.export.id;
+      exportId.value = signableVersions.value[0]?.export.id;
     pageError.value = '';
   },
   { immediate: true },
@@ -97,7 +101,7 @@ function upload(event: Event) {
   input.value = '';
   if (
     !file ||
-    !exportId.value ||
+    !selectedVersion.value ||
     props.saving ||
     !props.view.storageEnabled ||
     !props.view.allowedActions.includes('UPLOAD_SIGNED')
@@ -106,7 +110,7 @@ function upload(event: Event) {
   pageError.value = submissionFilesError([file]);
   if (!pageError.value && file.size > 20 * 1024 * 1024)
     pageError.value = '供应商盖章件不能超过 20 MB';
-  if (!pageError.value) emit('signed', file, exportId.value);
+  if (!pageError.value) emit('signed', file, selectedVersion.value.export.id);
 }
 </script>
 
@@ -121,7 +125,7 @@ function upload(event: Event) {
         v-if="view.allowedActions.includes('UPLOAD_SIGNED')"
         class="signed-upload"
       >
-        <label v-if="groups.versions.length > 1" class="version-picker">
+        <label v-if="signableVersions.length > 1" class="version-picker">
           <span>盖章件对应</span>
           <Select
             v-model:value="exportId"
@@ -129,7 +133,7 @@ function upload(event: Event) {
             aria-label="盖章件对应的采购单版本"
             :disabled="saving"
             :options="
-              groups.versions.map(({ export: file }, index) => ({
+              signableVersions.map(({ export: file }, index) => ({
                 value: file.id,
                 label: `V${file.revision ?? '—'} · ${format(file)}${index === 0 ? '（最新）' : ''}`,
               }))
@@ -144,7 +148,7 @@ function upload(event: Event) {
             !view.storageEnabled
               ? '文件存储未配置'
               : !exportId
-                ? '请先导出采购单'
+                ? '请先导出已确认的采购单'
                 : '选择盖章件后直接上传，单个文件不超过 20 MB'
           "
           @click="fileInput?.click()"
@@ -175,10 +179,7 @@ function upload(event: Event) {
       class="empty-files"
     >
       <strong>还没有采购单文件</strong>
-      <p>
-        确认下单资料后，点击右上角「导出」生成 PDF 或
-        Excel，再上传对应的供应商盖章件。
-      </p>
+      <p>点击右上角「导出」生成 PDF 或 Excel。盖章件可关联已确认的导出稿。</p>
     </div>
     <div
       v-for="(version, index) in visibleVersions"
@@ -189,11 +190,17 @@ function upload(event: Event) {
         <Space :size="6" wrap>
           <strong>导出 V{{ version.export.revision ?? '—' }}</strong>
           <Tag v-if="index === 0" color="blue">最新导出</Tag>
+          <Tag v-if="version.export.detailsStatus === 'DRAFT'" color="orange">
+            下单资料未确认
+          </Tag>
           <span class="muted">
             下单资料第 {{ version.export.detailsRevision ?? '—' }} 版
           </span>
         </Space>
-        <Tag :color="version.signed.length ? 'success' : 'default'">
+        <Tag
+          v-if="version.export.detailsStatus !== 'DRAFT'"
+          :color="version.signed.length ? 'success' : 'default'"
+        >
           {{
             version.signed.length
               ? `已回传盖章件 ${version.signed.length} 份`

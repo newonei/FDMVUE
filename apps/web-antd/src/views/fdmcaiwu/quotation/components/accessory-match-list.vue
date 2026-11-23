@@ -5,7 +5,7 @@ import { computed } from 'vue';
 
 import { Tag } from 'ant-design-vue';
 
-import { formatCompactDecimal, formatExactMoney, hasValue } from '../data';
+import { formatCompactDecimal, formatMoney, hasValue } from '../data';
 
 const props = withDefaults(
   defineProps<{
@@ -129,7 +129,7 @@ function sourceText(item: FdmcaiwuQuotationApi.AccessoryMatch) {
           class="accessory-match-meta"
         >
           <span v-if="hasValue(item.costPerPiece)">
-            单片成本 {{ formatExactMoney(item.costPerPiece) }}
+            单片成本 {{ formatMoney(item.costPerPiece) }}
           </span>
           <span v-if="item.accessoryPriceId">
             价格记录 #{{ item.accessoryPriceId }}

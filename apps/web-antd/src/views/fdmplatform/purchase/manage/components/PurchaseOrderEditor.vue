@@ -42,7 +42,7 @@ import {
 import { getProducts } from '#/api/fdmplatform/products';
 
 import RemoteMasterSelect from '../../../components/RemoteMasterSelect.vue';
-import { errorText, rows as records } from '../../../data';
+import { errorText, money, rows as records } from '../../../data';
 import { navigationRoute } from '../../../documents/navigation';
 import ProductStructureDetails from '../../../products/components/ProductStructureDetails.vue';
 import { productStructure } from '../../../products/structure';
@@ -1120,7 +1120,7 @@ async function save(submit = false) {
           整单折扣 {{ header.discountRate || 100 }}% − 优惠抹零 ¥{{
             header.roundOff || 0
           }}
-          + 附加费用 ¥{{ header.additionalAmount || 0 }}
+          + 附加费用 ¥{{ money(header.additionalAmount || 0) }}
         </p>
       </section>
     </div>

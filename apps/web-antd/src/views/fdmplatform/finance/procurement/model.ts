@@ -517,10 +517,15 @@ export function procurementLineAmount(
   line: Record<string, unknown>,
   currency = 'CNY',
 ) {
-  const amount = new BigNumber(String(line.quantity ?? 0))
+  return procurementLineValue(line).toFixed(
+    currencyScale(currency),
+    BigNumber.ROUND_HALF_UP,
+  );
+}
+export function procurementLineValue(line: Record<string, unknown>) {
+  return new BigNumber(String(line.quantity ?? 0))
     .minus(String(line.cancelledQuantity ?? 0))
     .multipliedBy(String(line.unitPrice ?? 0));
-  return amount.toFixed(currencyScale(currency), BigNumber.ROUND_HALF_UP);
 }
 export function procurementOrderAmount(
   lines: Record<string, unknown>[],

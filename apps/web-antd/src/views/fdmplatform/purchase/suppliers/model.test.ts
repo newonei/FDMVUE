@@ -31,7 +31,7 @@ describe('supplier model', () => {
     ).toBe('是上年同期的 27 倍');
   });
   it('formats department totals in RMB', () => {
-    expect(rmb(58_283_078)).toBe('¥5,828.3 万');
+    expect(rmb(58_283_078)).toBe('¥5,828.31 万');
     expect(rmb(undefined)).toBe('—');
   });
   it('exports an Excel-readable CSV with quoted cells', () => {

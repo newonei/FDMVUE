@@ -34,6 +34,7 @@ import {
   getFdmAiInvocationPage,
   getFdmAiModels,
 } from '#/api/fdmai';
+import { formatMoneyDecimal } from '#/utils/money';
 
 import AiCenterShell from '../shared/AiCenterShell.vue';
 
@@ -222,8 +223,8 @@ function businessText(record: unknown) {
 }
 
 function money(value?: FdmAiApi.NumericValue, currency = 'CNY') {
-  if (value === undefined || value === null || value === '') return '-';
-  return `${currency} ${Number(value).toFixed(6)}`;
+  const amount = formatMoneyDecimal(value, false);
+  return amount === undefined ? '-' : `${currency} ${amount}`;
 }
 
 function safeJson(value: unknown) {

@@ -6,8 +6,8 @@ import type { ProcurementOrderView } from '#/api/fdmplatform/procurement';
 import { computed } from 'vue';
 
 import LineTable from '../../../components/LineTable.vue';
-import { rows } from '../../../data';
-import { procurementLineAmount } from '../../../finance/procurement/model';
+import { money, rows } from '../../../data';
+import { procurementLineValue } from '../../../finance/procurement/model';
 import {
   colorModeText,
   constructionText,
@@ -102,7 +102,8 @@ const productLines = computed(() =>
       printing: pick('printing'),
       packaging: pick('packaging'),
       unit: pick('unit'),
-      amount: procurementLineAmount(line, String(props.view.order.currency)),
+      unitPrice: money(line.unitPrice, '', '—'),
+      amount: money(procurementLineValue(line), '', '—'),
       arrivalDate:
         props.view.details.lineDates?.[line.id] ||
         props.view.lineDeliveryDates?.[line.id] ||

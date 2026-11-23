@@ -125,10 +125,10 @@ describe('客户档案', () => {
 
 describe('客户经营统计展示', () => {
   it('金额满一万显示为万，有币种时带币种，空值显示破折号', () => {
-    expect(moneyShort(54_191_936)).toBe('5,419.2 万');
-    expect(moneyShort('80130', 'CNY')).toBe('CNY 8.0 万');
+    expect(moneyShort(54_191_936)).toBe('5,419.19 万');
+    expect(moneyShort('80130', 'CNY')).toBe('CNY 8.01 万');
     expect(moneyShort(3540.456)).toBe('3,540.46');
-    expect(moneyShort(0)).toBe('0');
+    expect(moneyShort(0)).toBe('0.00');
     expect(moneyShort(null)).toBe('—');
     expect(moneyShort('abc')).toBe('—');
   });
