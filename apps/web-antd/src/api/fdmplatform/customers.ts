@@ -382,3 +382,74 @@ export function getCustomerActivity(
     { params, timeout: 60_000 },
   );
 }
+
+export type CustomerFollowUpMethod =
+  | 'ALIBABA'
+  | 'EMAIL'
+  | 'EXHIBITION'
+  | 'OTHER'
+  | 'PHONE'
+  | 'VIDEO'
+  | 'VISIT'
+  | 'WANGWANG'
+  | 'WECHAT'
+  | 'WHATSAPP';
+
+export type CustomerFollowUpOutcome =
+  | 'AGREED'
+  | 'NO_CONTACT'
+  | 'PAUSED'
+  | 'WAITING_CUSTOMER'
+  | 'WAITING_US';
+
+export type CustomerFollowUpTopic =
+  | 'DELIVERY'
+  | 'ORDER'
+  | 'OTHER'
+  | 'PAYMENT'
+  | 'QUOTATION'
+  | 'REQUIREMENTS'
+  | 'SAMPLE';
+
+export interface CustomerFollowUpDetails {
+  communicationMethod: CustomerFollowUpMethod;
+  contactName?: string;
+  expectedQuantity?: string;
+  nextAction?: string;
+  nextDate?: string;
+  occurredAt: string;
+  outcome: CustomerFollowUpOutcome;
+  productSpec?: string;
+  relatedDocumentId?: string;
+  summary: string;
+  targetPrice?: string;
+  topic?: CustomerFollowUpTopic;
+  tradeTerms?: string;
+}
+
+export interface CustomerFollowUp extends CustomerFollowUpDetails {
+  authorName: string;
+  createTime: string;
+  id: number | string;
+  relatedDocumentNo?: string;
+}
+
+export function getCustomerFollowUps(
+  customerId: string,
+  params: { pageNo: number; pageSize: number },
+) {
+  return requestClient.get<PageResult<CustomerFollowUp>>(
+    `${base}/${encodeURIComponent(customerId)}/follow-ups`,
+    { params },
+  );
+}
+
+export function addCustomerFollowUp(
+  customerId: string,
+  data: CustomerFollowUpDetails & { idempotencyKey: string },
+) {
+  return requestClient.post<CustomerFollowUp['id']>(
+    `${base}/${encodeURIComponent(customerId)}/follow-ups`,
+    data,
+  );
+}

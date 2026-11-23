@@ -54,8 +54,8 @@ export function createJob() {
     process: undefined as Api.Process | undefined,
     /** 不按排单开工时，这批是做哪张工厂订单（明细编号），记进订单的工序进度。 */
     productionItem: undefined as undefined | { allowPlainEmboss?: boolean; id: number; label: string; layerRule?: string; orderNo: string; targetThickness?: null | number | string },
-    /** 发泡按配方领料时选的配方和锅数，开单时一起提交。 */
-    recipe: undefined as undefined | { batches: number; code: string },
+    /** 发泡配方及已知计划锅数，开工时记录。 */
+    recipe: undefined as undefined | { batches?: number; code: string },
     result: { action: 'issue' as 'issue' | 'report' | 'supplement', amount: 0, good: 0, unit: '' },
     returns: {} as Record<number, null | number>,
     sourceStage: '',

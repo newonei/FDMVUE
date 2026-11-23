@@ -1,4 +1,6 @@
 /* eslint-disable vue/one-component-per-file -- UI adapters exercise the real purchase editor. */
+import type { PropType } from 'vue';
+
 import { createApp, defineComponent, h, nextTick } from 'vue';
 import { createMemoryHistory, createRouter } from 'vue-router';
 
@@ -16,7 +18,10 @@ const mocks = vi.hoisted(() => ({
 vi.mock('#/api/fdmplatform', () => ({
   newIdempotencyKey: () => 'auxiliary-key',
   getDirectory: async () => ({
-    companies: [{ companyId: 1, companyName: '公司' }],
+    companies: [
+      { companyId: 1, companyName: '原公司' },
+      { companyId: 2, companyName: '新公司' },
+    ],
   }),
   getContract: mocks.contract,
 }));
@@ -66,6 +71,10 @@ vi.mock('ant-design-vue', () => {
     props: {
       value: { type: [String, Number], default: '' },
       disabled: Boolean,
+      options: {
+        type: Array as PropType<{ value: number | string }[]>,
+        default: () => [],
+      },
     },
     emits: ['update:value'],
     setup: (props, ctx) => () =>
@@ -73,8 +82,13 @@ vi.mock('ant-design-vue', () => {
         ...ctx.attrs,
         value: props.value ?? '',
         disabled: props.disabled,
-        onInput: (event: Event) =>
-          ctx.emit('update:value', (event.target as HTMLInputElement).value),
+        onInput: (event: Event) => {
+          const value = (event.target as HTMLInputElement).value;
+          const option = props.options.find(
+            (item) => String(item.value) === value,
+          );
+          ctx.emit('update:value', option?.value ?? value);
+        },
       }),
   });
   return {
@@ -709,11 +723,17 @@ describe('采购开单先保存草稿', () => {
     [false, '保存草稿', 'draft'],
     [true, '提交审核', 'submitted'],
   ] as const)(
-    '编辑草稿 submit=%s 使用明确操作',
+    '编辑草稿更换所属公司，submit=%s 使用明确操作',
     async (submit, label, mode) => {
       const { host, saved } = await mount({
         editOf: { contractId: '', orderId: 'source-order' },
       });
+      const company = host.querySelector<HTMLInputElement>(
+        '#purchase-order-entry-company',
+      )!;
+      expect(company.disabled).toBe(false);
+      expect(company.value).toBe('1');
+      await fill(company, '2');
       button(host, label).click();
       await settle();
       expect(mocks.create).not.toHaveBeenCalled();
@@ -721,6 +741,7 @@ describe('采购开单先保存草稿', () => {
         '',
         'source-order',
         expect.objectContaining({
+          companyId: 2,
           purchaseDate: expect.any(String),
           deliveryDate: null,
           lines: [expect.objectContaining({ arrivalDate: undefined })],

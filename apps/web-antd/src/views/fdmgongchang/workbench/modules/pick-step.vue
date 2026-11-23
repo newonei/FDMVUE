@@ -3,13 +3,13 @@ import type { FdmgongchangStageStockApi as StockApi } from '#/api/fdmgongchang/s
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
-import { Alert, Empty, Input, InputNumber, message, Select, Spin } from 'ant-design-vue';
+import { Alert, Empty, Input, InputNumber, message, Spin } from 'ant-design-vue';
 
-import { getWorkbenchRecipePlan, getWorkbenchStock, prepareWorkbenchTaskStock } from '#/api/fdmgongchang/workbench';
+import { getWorkbenchStock, prepareWorkbenchTaskStock } from '#/api/fdmgongchang/workbench';
 
 import { dimensionTextInMm } from '../../shared/dimensions';
 import { quantityPrecision } from '../../shared/quantity';
-import { attrSummary, formatQty, makeLabels, recipePicks, toNumber } from '../../stage-stock/model';
+import { attrSummary, formatQty, makeLabels, toNumber } from '../../stage-stock/model';
 import { slicePlanThicknessError, stageOf, useJob } from '../use-job';
 import IssueShortages from './issue-shortages.vue';
 import PlannedInputs from './planned-inputs.vue';
@@ -18,7 +18,6 @@ import StepHeader from './step-header.vue';
 /**
  * 第 1 步 领材料：左边是上道库存，点一行选上，数量就在这一行里填；右边「本次领料」逐行列出
  * 领哪种料、哪个批次、领多少，一眼对得上。贴合要领两种片材：第一种是正面，第二种是反面。
- * 发泡可以按配方领：选配方和锅数，自动带出每种原料要领多少；补领时按单上的配方补齐还差的。
  */
 const props = defineProps<{ embedded?: boolean }>();
 const emit = defineEmits<{ back: []; next: [] }>();
@@ -113,13 +112,12 @@ function toggle(stock: StockApi.Stock) {
     job.picks = job.picks.filter((p) => p !== existing);
     return;
   }
-  // 默认不填数量，免得忘了改；按配方带出的会自动填
+  // 默认不填数量，免得忘了改。
   if (laminate.value) {
     if (job.picks.length >= 2) job.picks = job.picks.slice(1);
     const side = job.picks.some((p) => p.side === 'FRONT') ? 'BACK' : 'FRONT';
     job.picks = [...job.picks, { qty: 0, side, stock }];
   } else {
-    // 一次可以领多种料（发泡一个配方要好几种原料）
     job.picks = [...job.picks, { qty: 0, stock }];
   }
 }
@@ -135,60 +133,7 @@ function toggleSide(stock: StockApi.Stock, side: StockApi.LaminationSide) {
     : [...job.picks.filter((pick) => pick.side !== side), { qty: 0, side, stock }];
 }
 
-/** 右边清单里某种原料本次一共领多少。 */
-const pickedOf = (code: string) =>
-  job.picks.filter((p) => p.stock.item?.rawMaterialCode === code).reduce((t, p) => t + (p.qty || 0), 0);
 const pickTotal = computed(() => job.picks.reduce((t, p) => t + (p.qty || 0), 0));
-
-// ===== 按配方领（发泡） =====
-const mixFromRaw = computed(() => job.process?.code === 'MIX' && job.sourceStage === 'RAW');
-const recipeOptions = computed(() =>
-  (job.options?.recipes ?? []).filter((r) => r.enabled).map((r) => ({ label: `${r.name}（${r.code}）`, value: r.code })),
-);
-const orderRecipe = computed(() => (job.supplement ? job.order?.recipeCode : undefined));
-// 只有一个配方时直接选上
-const recipeCode = ref<string | undefined>(
-  job.recipe?.code ?? (recipeOptions.value.length === 1 ? recipeOptions.value[0]!.value : undefined),
-);
-const batches = ref<null | number>(job.recipe?.batches ?? 1);
-const plannedBatches = computed(() => toNumber(job.task?.output?.recipeBatches ?? job.prepare?.task.output?.recipeBatches));
-const recipeLoading = ref(false);
-/** 配方每种原料：配方要多少、库存缺多少；本次领多少按右边清单实时算。 */
-const recipeLines = ref<StockApi.RecipePlanLine[]>([]);
-/** 按配方每种原料一共要领多少（原材料编码 → kg），显示在对应的库存行上。 */
-const recipeNeeds = ref<Record<string, number>>({});
-
-async function applyRecipe() {
-  if (!job.supplement && (!recipeCode.value || !(batches.value && batches.value > 0))) {
-    message.warning('先选配方，再填几锅');
-    return;
-  }
-  recipeLoading.value = true;
-  try {
-    const plan = await getWorkbenchRecipePlan(
-      job.supplement && job.order
-        ? { orderId: job.order.id }
-        : { batches: batches.value!, recipeCode: recipeCode.value },
-    );
-    job.picks = recipePicks(plan).map((l) => ({
-      qty: l.quantity,
-      stock: stocks.value.find((s) => s.id === l.stock.id) ?? (l.stock as StockApi.Stock),
-    }));
-    recipeNeeds.value = Object.fromEntries(
-      plan.lines.map((l) => [l.rawMaterialCode, toNumber(l.remaining) ?? toNumber(l.required) ?? 0]),
-    );
-    recipeLines.value = plan.lines;
-    if (!job.supplement) job.recipe = { batches: batches.value!, code: recipeCode.value! };
-    if (job.picks.length === 0) message.info(job.supplement ? '按配方已经领够了' : '原料库存里没有这个配方的料');
-  } finally {
-    recipeLoading.value = false;
-  }
-}
-
-// 换了配方或锅数，等重新带出后再记到单上
-watch([recipeCode, batches], () => {
-  if (!job.supplement) job.recipe = undefined;
-});
 
 function next() {
   if (planThicknessError.value) {
@@ -252,71 +197,6 @@ function next() {
           <span class="text-xs text-muted-foreground">仅在历史任务未出现所需物料时使用“按任务规格准备领料”补齐。实际数量可修改，点击“确认领料”后才扣库存。</span>
           <span v-if="prepareStockError" role="alert" class="text-destructive">按任务规格准备领料失败，已选批次和填写数量已保留，请重试。</span>
         </section>
-        <section v-if="mixFromRaw && (!job.supplement || orderRecipe)" class="flex flex-col gap-2 rounded-lg border border-primary/40 bg-card p-3">
-          <span class="text-sm font-bold">{{ job.supplement ? '按配方补齐' : '按配方领（一次领齐所有原料）' }}</span>
-          <div v-if="!job.supplement" class="flex flex-wrap items-center gap-2">
-            <Select
-              id="recipe-code"
-              v-model:value="recipeCode"
-              :options="recipeOptions"
-              class="min-w-[14rem] flex-1"
-              option-filter-prop="label"
-              placeholder="选配方，可输入名称搜索"
-              show-search
-            />
-            <label for="recipe-batches" class="flex items-center gap-2 text-xs text-muted-foreground">
-              本次实际锅数
-              <InputNumber
-                id="recipe-batches"
-                :min="0"
-                :value="batches ?? undefined"
-                :precision="1"
-                :step="1"
-                addon-after="锅"
-                class="w-32"
-                @update:value="(v) => (batches = v === null || v === undefined || v === '' ? null : Number(v))"
-              />
-            </label>
-          </div>
-          <span v-else class="text-xs text-muted-foreground">这张单是按配方领的，点下面按配方算出还差哪些料</span>
-          <span v-if="!job.supplement" class="text-xs text-muted-foreground">
-            {{ plannedBatches && plannedBatches > 0 ? `任务预计 ${formatQty(plannedBatches)} 锅，已按计划预填，请核对本次实际锅数。` : '任务未填写预计锅数，暂按 1 锅预填，请核对本次实际锅数。' }}
-          </span>
-          <button
-            :disabled="recipeLoading"
-            class="h-9 self-start rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground"
-            type="button"
-            @click="applyRecipe"
-          >
-            {{ recipeLoading ? '正在算…' : job.supplement ? '按配方补齐还差的' : '按配方带出要领的料' }}
-          </button>
-          <table v-if="recipeLines.length > 0" class="w-full text-sm">
-            <thead>
-              <tr class="text-left text-xs text-muted-foreground">
-                <th class="py-1 font-normal">原料</th>
-                <th class="py-1 text-right font-normal">{{ job.supplement ? '还差' : '配方要' }}</th>
-                <th class="py-1 text-right font-normal">本次领</th>
-                <th class="py-1 text-right font-normal">库存缺</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="l in recipeLines" :key="l.rawMaterialCode" class="border-t border-border">
-                <td class="py-1 pr-2 font-semibold">{{ l.rawMaterialName || l.rawMaterialCode }}</td>
-                <td class="py-1 text-right tabular-nums">{{ formatQty(l.remaining ?? l.required) }} kg</td>
-                <td class="py-1 text-right tabular-nums" :class="pickedOf(l.rawMaterialCode) > 0 ? 'font-semibold text-primary' : 'text-muted-foreground'">
-                  {{ formatQty(pickedOf(l.rawMaterialCode)) }} kg
-                </td>
-                <td class="py-1 text-right tabular-nums" :class="Number(l.shortage) > 0 ? 'font-semibold text-destructive' : 'text-muted-foreground'">
-                  {{ Number(l.shortage) > 0 ? `${formatQty(l.shortage)} kg` : '—' }}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-          <p v-if="recipeLines.some((l) => Number(l.shortage) > 0)" class="m-0 text-xs text-destructive">
-            标红的是账面缺料。请按实际领取数量登记，库存可暂时为负，并补录对应原材料入库。
-          </p>
-        </section>
-
         <div v-if="!job.supplement && sourceStages.length > 1" class="flex flex-wrap items-center gap-1.5 text-sm">
           <span class="text-muted-foreground">从哪领：</span>
           <button
@@ -376,7 +256,6 @@ function next() {
                     </span>
                     <span class="text-xs text-muted-foreground">
                       {{ source?.label }} · 批次 {{ s.batchNo }} · {{ s.location }} · 账面 {{ formatQty(s.quantity) }} {{ unit }}
-                      <template v-if="s.item?.rawMaterialCode && recipeNeeds[s.item.rawMaterialCode] !== undefined"> · 配方要 {{ formatQty(recipeNeeds[s.item.rawMaterialCode]) }} {{ unit }}</template>
                     </span>
                   </span>
                 </button>

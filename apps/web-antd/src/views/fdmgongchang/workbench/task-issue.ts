@@ -11,16 +11,17 @@ export function applyIssuePlan(job: Job, prepare: Api.TaskPrepare) {
   job.sourceStage = prepare.sourceStage && sourceStages.includes(prepare.sourceStage)
     ? prepare.sourceStage
     : sourceStages[0] ?? '';
+  if (job.process?.code === 'MIX') {
+    const code = prepare.outputAttrs?.recipeCode || prepare.task.output?.attrs?.recipeCode || task.output?.attrs?.recipeCode;
+    const batches = toNumber(prepare.task.output?.recipeBatches ?? task.output?.recipeBatches);
+    job.recipe = code ? { batches: batches && batches > 0 ? batches : undefined, code } : undefined;
+    return;
+  }
   job.picks = prepare.picks.map(({ quantity, side, stock }) => ({
     qty: Math.max(0, toNumber(quantity) ?? 0),
     side,
     stock,
   }));
-  const recipeCode = prepare.outputAttrs?.recipeCode ?? task.output?.attrs?.recipeCode;
-  const batches = toNumber(task.output?.recipeBatches ?? prepare.task.output?.recipeBatches);
-  if (job.process?.code === 'MIX' && recipeCode) {
-    job.recipe = { batches: batches && batches > 0 ? batches : 1, code: recipeCode };
-  }
   const qty = toNumber(task.quantity) ?? 0;
   job.auxPicks = prepare.aux.filter((a) => a.stocks.length > 0).map((a) => ({
     name: a.productName ?? a.productCode ?? '',

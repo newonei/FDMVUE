@@ -126,6 +126,11 @@ const pageIds = computed(() => section.value === 'pending'
 const checkedOnPage = computed(() => pageIds.value.filter((id) => selected.value.includes(id)).length);
 const selectedTasks = computed(() => pendingTasks.value.filter((task) => selected.value.includes(task.id)));
 const selectedOrders = computed(() => inProgress.value.filter((order) => selected.value.includes(order.id)));
+const batchAction = computed(() => {
+  if (section.value !== 'pending') return '批量报工';
+  const tasks = selectedTasks.value.length > 0 ? selectedTasks.value : pendingTasks.value;
+  return tasks.length > 0 && tasks.every((task) => task.process === 'MIX') ? '批量开工' : '批量领料';
+});
 
 function selectRows(ids: number[], checked: boolean) {
   const next = checked
@@ -209,7 +214,7 @@ watch([section, keyword, page], () => { job.homeView = { section: section.value,
         <div class="flex flex-wrap gap-2">
           <Button v-if="selected.length" @click="selected = []">取消勾选</Button>
           <Button type="primary" :disabled="!selected.length" @click="batchMode = section === 'pending' ? 'issue' : 'report'">
-            {{ section === 'pending' ? '批量领料' : '批量报工' }}
+            {{ batchAction }}
           </Button>
         </div>
       </div>
@@ -237,7 +242,7 @@ watch([section, keyword, page], () => { job.homeView = { section: section.value,
               </span>
             </div>
             <button class="min-h-11 shrink-0 rounded-md bg-primary px-3 text-base font-semibold text-primary-foreground" type="button" @click="emit('startTask', task, processOf(task.process)!)">
-              领料开工
+              {{ task.process === 'MIX' ? '发泡开工' : '领料开工' }}
             </button>
           </div>
         </li>

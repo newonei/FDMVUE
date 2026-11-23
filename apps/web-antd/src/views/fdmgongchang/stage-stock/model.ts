@@ -303,7 +303,7 @@ function inputColor(line: InputLine) {
 
 /**
  * 按领料生成默认产出行：
- * - 发泡：一行，材质默认 TPE，颜色、配方、尺寸由人填写，批次保存时生成；
+ * - 发泡：按配方和产出规格生成一行，材质默认 TPE，批次保存时生成；
  * - 开片：按实际领料的材质、配方、颜色、长宽厚分组，每组一行，填写目标单层厚度；
  * - 贴合：正面片材的颜色作正面色、反面片材的颜色作反面色，厚度相加；
  * - 立切：按领料编码分组，沿用材质、配方、颜色和厚度，仅裁长宽；
@@ -313,10 +313,9 @@ export function deriveOutputs(
   process: string,
   inputs: InputLine[],
   defaultMaterial = 'TPE',
-  /** 发泡按配方领料时，产出板材的配方版本默认用这个配方。 */
+  /** 发泡产出板材默认沿用这张工序单的配方版本。 */
   recipeCode?: null | string,
 ): OutputDraft[] {
-  if (inputs.length === 0) return [];
   if (process === 'MIX') {
     return [
       draft(
@@ -327,6 +326,7 @@ export function deriveOutputs(
       ),
     ];
   }
+  if (inputs.length === 0) return [];
   if (process === 'SLICE') {
     const groups = new Map<
       string,

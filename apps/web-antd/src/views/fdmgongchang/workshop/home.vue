@@ -367,8 +367,9 @@ v-model:expanded-row-keys="expandedOrderKeys" class="workshop-order-table" :colu
             <div class="flex items-center justify-between"><strong>{{ order.orderNo }} · 本车间全部任务</strong><span class="text-xs text-muted-foreground">未领料任务可派工或代报；已领料任务由原负责人继续</span></div>
             <p v-if="props.process === 'MIX' && summaryFields(order as WorkshopOrder).some((field) => field.label === '克重' && field.value === '未填写')" class="m-0 text-xs text-orange-600">克重未填写，请在采购单生产要求中补全。</p>
             <Table
-class="workshop-task-table" :columns="taskColumns" :data-source="order.tasks" :row-selection="selection(order as WorkshopOrder)"
-              :custom-row="(task: ScheduleApi.Task) => ({ class: 'workshop-task-row', 'data-task-id': task.id })" row-key="id" :pagination="false" :scroll="{ x: props.process === 'LAMINATE' ? 1600 : 1355 }" bordered size="small"
+              class="workshop-task-table" :columns="taskColumns" :data-source="order.tasks" :row-selection="selection(order as WorkshopOrder)"
+              :custom-row="(task: WorkshopOrder['tasks'][number]) => ({ class: 'workshop-task-row', 'data-task-id': task.id, 'data-progress-color': task.progress.color })"
+              row-key="id" :pagination="false" :scroll="{ x: props.process === 'LAMINATE' ? 1600 : 1355 }" bordered size="small"
 >
               <template #bodyCell="{ column, record: task }">
                 <template v-if="column.key === 'task'">
@@ -486,6 +487,24 @@ class="workshop-task-table" :columns="taskColumns" :data-source="order.tasks" :r
 .workshop-task-table :deep(.ant-table-tbody > tr.workshop-task-row > td) {
   padding: 4px 6px;
   vertical-align: top;
+}
+
+.workshop-task-table :deep(.workshop-task-row[data-progress-color='green']) {
+  --workshop-task-accent: hsl(var(--success));
+}
+
+.workshop-task-table :deep(.workshop-task-row[data-progress-color='gold']) {
+  --workshop-task-accent: hsl(var(--warning));
+}
+
+.workshop-task-table :deep(.ant-table-tbody > .workshop-task-row[data-progress-color] > td) {
+  background-color: color-mix(in srgb, var(--workshop-task-accent) 14%, hsl(var(--background)));
+}
+
+.workshop-task-table :deep(.ant-table-tbody > .workshop-task-row[data-progress-color]:hover > td),
+.workshop-task-table :deep(.ant-table-tbody > .workshop-task-row[data-progress-color] > .ant-table-cell-row-hover),
+.workshop-task-table :deep(.ant-table-tbody > .workshop-task-row[data-progress-color].ant-table-row-selected > td) {
+  background-color: color-mix(in srgb, var(--workshop-task-accent) 22%, hsl(var(--background)));
 }
 
 .workshop-task-table :deep(.ant-table) {

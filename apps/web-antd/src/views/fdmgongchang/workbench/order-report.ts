@@ -37,9 +37,9 @@ export async function loadOrderDraft(
   if (taskId && !prepare && (!supplement || !task)) prepare = await prepareWorkbenchTask(taskId);
   task ??= prepare?.task;
   const recipe = process.code === 'MIX' && order.recipeCode
-    ? { code: order.recipeCode, batches: toNumber(order.recipeBatches) ?? 1 }
+    ? { code: order.recipeCode, batches: toNumber(order.recipeBatches) }
     : undefined;
-  const inputs: InputLine[] = supplement ? [] : (order.inputs ?? []).filter((line) => line.stage !== 'AUX').map((line) => ({
+  const inputs: InputLine[] = supplement || process.code === 'MIX' ? [] : (order.inputs ?? []).filter((line) => line.stage !== 'AUX').map((line) => ({
     quantity: Math.max(0, (toNumber(line.quantity) ?? 0) - (toNumber(line.returnedQuantity) ?? 0)),
     side: line.laminationSide ?? undefined,
     stock: {

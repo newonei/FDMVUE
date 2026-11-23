@@ -348,7 +348,7 @@ export function createdOrdersText(
     ? `已按供应商拆成 ${orders.length} 张采购单：${orders.map((order) => order.code).join('、')}`
     : `${single} ${value.code}`;
 }
-/** 修改撤回为草稿的采购单（不拆单、不换合同和公司）；submit 时同时提交，恢复为已下单。 */
+/** 保存采购草稿的表头和明细，submit 时同时提交审核。 */
 export function updateProcurementOrder(
   contractId: string,
   orderId: string,

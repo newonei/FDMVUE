@@ -844,11 +844,11 @@ async function save(submit = false) {
         <label class="field">
           <span><em v-if="!header.contractId">*</em>所属公司</span>
           <Select
+            id="purchase-order-entry-company"
             v-model:value="header.companyId"
             show-search
             option-filter-prop="label"
             :options="companyOptions"
-            :disabled="!!editOf"
             placeholder="关联合同时默认合同公司"
           />
         </label>

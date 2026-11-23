@@ -42,6 +42,7 @@ import {
   dateRangeError,
   quantityText,
 } from '../../products/activity-model';
+import CustomerFollowUpPanel from './CustomerFollowUpPanel.vue';
 import {
   customerActivityTypes,
   customerFields,
@@ -70,7 +71,10 @@ const view = ref<CustomerActivityView>();
 const loading = ref(false);
 const panelError = ref('');
 const fullscreen = ref(false);
-const tab = ref<'DETAIL' | CustomerActivityType>('ALL');
+const tab = ref<'DETAIL' | 'FOLLOW_UP' | CustomerActivityType>('ALL');
+const followUpPanel = ref<InstanceType<typeof CustomerFollowUpPanel>>();
+const followUpVisited = ref(false);
+const followUpCount = ref<number>();
 const display = ref<'list' | 'timeline'>('timeline');
 const keyword = ref('');
 const fromDate = ref('');
@@ -79,7 +83,9 @@ const pageNo = ref(1);
 const pageSize = ref(20);
 let sequence = 0;
 
-const isActivity = computed(() => tab.value !== 'DETAIL');
+const isActivity = computed(
+  () => tab.value !== 'DETAIL' && tab.value !== 'FOLLOW_UP',
+);
 const count = computed(() =>
   Object.values(view.value?.counts ?? {}).reduce(
     (sum, value) => sum + (value ?? 0),
@@ -103,6 +109,13 @@ const typeTabs = computed(() =>
 const tabs = computed(() => [
   { key: 'ALL', tab: `全部单据 (${count.value})` },
   { key: 'DETAIL', tab: '客户资料' },
+  {
+    key: 'FOLLOW_UP',
+    tab:
+      followUpCount.value === undefined
+        ? '跟进记录'
+        : `跟进记录 (${followUpCount.value})`,
+  },
   ...typeTabs.value,
 ]);
 const missing = computed(() =>
@@ -128,6 +141,8 @@ watch(
   () => [props.open, props.customer?.id],
   () => {
     sequence++;
+    followUpVisited.value = false;
+    followUpCount.value = undefined;
     if (!props.open || !props.customer) return;
     view.value = undefined;
     tab.value = props.initialTab ?? 'ALL';
@@ -178,7 +193,12 @@ async function load(reset = false) {
 }
 function changeTab(key: number | string) {
   tab.value = key as typeof tab.value;
-  if (isActivity.value) void load(true);
+  if (tab.value === 'FOLLOW_UP') followUpVisited.value = true;
+  else if (isActivity.value) void load(true);
+}
+function refresh() {
+  if (tab.value === 'FOLLOW_UP') void followUpPanel.value?.refresh();
+  else void load();
 }
 function showType(type: CustomerActivityType) {
   keyword.value = '';
@@ -267,7 +287,9 @@ function close() {
         <Button :danger="customer.active" @click="emit('toggle', customer)">
           {{ customer.active ? '停用' : '启用' }}
         </Button>
-        <Button :loading="loading" @click="load()">刷新</Button>
+        <Button :loading="tab !== 'FOLLOW_UP' && loading" @click="refresh">
+          刷新
+        </Button>
         <Button @click="fullscreen = !fullscreen">
           {{ fullscreen ? '退出全屏' : '展开全屏' }}
         </Button>
@@ -349,6 +371,15 @@ function close() {
             <TabPane v-for="item in tabs" :key="item.key" :tab="item.tab" />
           </Tabs>
 
+          <CustomerFollowUpPanel
+            v-if="open && followUpVisited"
+            v-show="tab === 'FOLLOW_UP'"
+            :key="customer.id"
+            ref="followUpPanel"
+            :active="tab === 'FOLLOW_UP'"
+            :customer="customer"
+            @count="followUpCount = $event"
+          />
           <Descriptions
             v-if="tab === 'DETAIL'"
             bordered
@@ -404,7 +435,7 @@ function close() {
               {{ customer.remark || '—' }}
             </Descriptions.Item>
           </Descriptions>
-          <template v-else>
+          <template v-else-if="isActivity">
             <div class="activity-tools">
               <Radio.Group
                 v-model:value="display"

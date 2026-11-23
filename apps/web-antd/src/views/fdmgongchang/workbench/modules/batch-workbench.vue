@@ -44,7 +44,12 @@ const submitError = ref('');
 const editing = ref<number>();
 const sheets = ref<string[]>([]);
 const issue = computed(() => props.mode === 'issue');
-const action = computed(() => issue.value ? '批量领料' : '批量报工');
+const includesFoaming = computed(() => issue.value && props.tasks.some((task) => task.process === 'MIX'));
+const includesStockIssue = computed(() => issue.value && props.tasks.some((task) => task.process !== 'MIX'));
+const action = computed(() => {
+  if (!issue.value) return '批量报工';
+  return includesStockIssue.value ? '批量领料' : '批量开工';
+});
 const labels = computed(() => makeLabels(home.options));
 const shortages = computed(() => issueShortages({
   ...home,
@@ -98,6 +103,7 @@ async function load() {
 onMounted(load);
 
 function issueProblem(job: Job) {
+  if (job.process?.code === 'MIX') return;
   if (!job.sourceStage || job.picks.length === 0 || job.picks.some((pick) => !(pick.qty > 0))) {
     return '请选择实际领料批次并填写领取数量';
   }
@@ -155,7 +161,10 @@ async function submit() {
         }
       }
       if (issue.value) {
-        const rows = jobs.value.map((job) => ({ ...issuePayload(job), issueSheetUrls: [...sheets.value] }));
+        const rows = jobs.value.map((job) => ({
+          ...issuePayload(job),
+          issueSheetUrls: job.process?.code === 'MIX' ? [] : [...sheets.value],
+        }));
         sendBatch = () => issueMyWorkbenchBatch(rows);
       } else {
         const rows = await Promise.all(jobs.value.map(reportRow));
@@ -163,7 +172,7 @@ async function submit() {
       }
     }
     const ids = await sendBatch();
-    message.success(issue.value ? `已为 ${ids.length} 项任务领料开工` : `已为 ${ids.length} 张工序单登记产出`);
+    message.success(issue.value ? `已为 ${ids.length} 项任务开工` : `已为 ${ids.length} 张工序单登记产出`);
     emit('saved');
   } catch (error) {
     const { code, msg } = businessError(error);
@@ -198,9 +207,11 @@ async function submit() {
       </div>
       <p v-else-if="loading && !jobs.length" class="my-3">正在读取所选项目</p>
       <fieldset v-else :disabled="submitting || retrying" class="m-0 flex max-h-[65vh] min-w-0 flex-col gap-3 overflow-y-auto border-0 p-0">
-        <p class="m-0 text-sm text-muted-foreground">
-          {{ issue ? '核对每项任务实际领取的批次和数量，确认后统一开工。' : `核对各单实际产量。计件按规格匹配，记在${home.my?.userName || '本人'}名下。多人计件请在单笔报工登记。` }}
-        </p>
+        <div class="text-sm text-muted-foreground">
+          <p v-if="includesStockIssue" class="m-0">核对需领料任务实际领取的批次和数量，确认后统一开工。</p>
+          <p v-if="includesFoaming" class="m-0">发泡用量按配方估算，实际原料出入库由仓库另行登记。</p>
+          <p v-if="!issue" class="m-0">核对各单实际产量。计件按规格匹配，记在{{ home.my?.userName || '本人' }}名下。多人计件请在单笔报工登记。</p>
+        </div>
         <Alert v-if="submitError" :message="submitError" role="alert" show-icon type="error" />
         <Alert v-if="issue && shortages.length" show-icon type="warning" message="合计用量超过账面库存，请核对实际领料">
           <template #description>
@@ -217,12 +228,19 @@ async function submit() {
               <b class="text-base">{{ job.process?.label }}</b>
               <span class="ml-2 text-muted-foreground">{{ labelOf(job) }}</span>
             </div>
-            <Button v-if="issue && editing === job.task?.id" @click="editing = undefined">收起领料明细</Button>
-            <Button v-else-if="issue" :disabled="editing !== undefined || retrying" @click="editing = job.task?.id">调整领料</Button>
+            <template v-if="issue && job.process?.code !== 'MIX'">
+              <Button v-if="editing === job.task?.id" @click="editing = undefined">收起领料明细</Button>
+              <Button v-else :disabled="editing !== undefined || retrying" @click="editing = job.task?.id">调整领料</Button>
+            </template>
           </div>
           <template v-if="issue && editing !== job.task?.id">
             <p v-if="job.prepare?.target" class="m-0 text-sm">{{ job.prepare.target }}</p>
-            <p v-if="!job.picks.length" class="m-0 text-warning">请先选实际领料批次</p>
+            <template v-if="job.process?.code === 'MIX'">
+              <p v-if="job.recipe" class="m-0 text-sm text-muted-foreground">
+                配方 {{ labels.recipe(job.recipe.code) }}<template v-if="job.recipe.batches"> · 预计 {{ formatQty(job.recipe.batches) }} 锅</template>
+              </p>
+            </template>
+            <p v-else-if="!job.picks.length" class="m-0 text-warning">请先选实际领料批次</p>
             <ul v-else class="mb-0 list-disc pl-5">
               <li v-for="pick in job.picks" :key="`${pick.stock.id}:${pick.side ?? ''}`">
                 <template v-if="pick.side">{{ pick.side === 'FRONT' ? '正面' : '反面' }} · </template>
@@ -235,7 +253,7 @@ async function submit() {
           </template>
           <BatchWorkbenchRow v-else :job="job" :mode="mode" @confirmed="editing = undefined" />
         </section>
-        <section v-if="issue && !retrying" class="flex flex-col gap-1">
+        <section v-if="includesStockIssue && !retrying" class="flex flex-col gap-1">
           <span class="text-sm font-semibold">本批共用领料凭证（选填）</span>
           <ImageUpload v-model:value="sheets" :max-number="9" :max-size="10" :show-description="false" directory="fdmgongchang/issue-sheet" multiple />
         </section>

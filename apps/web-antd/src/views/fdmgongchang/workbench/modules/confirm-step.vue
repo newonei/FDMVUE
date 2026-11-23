@@ -3,6 +3,8 @@ import type { FdmgongchangProductionOrderApi as OrderApi } from '#/api/fdmgongch
 
 import { computed, onMounted, ref } from 'vue';
 
+import { InputNumber, Select } from 'ant-design-vue';
+
 import { getWorkbenchProductionOrders } from '#/api/fdmgongchang/workbench';
 import ImageUpload from '#/components/upload/image-upload.vue';
 
@@ -21,6 +23,12 @@ const source = computed(() => stageOf(job, job.sourceStage));
 const total = computed(() => job.picks.reduce((t, p) => t + (p.qty || 0), 0));
 
 const independent = computed(() => !job.supplement && !job.task);
+const foaming = computed(() => job.process?.code === 'MIX');
+const independentFoaming = computed(() => foaming.value && independent.value);
+const recipes = computed(() => (job.options?.recipes ?? []).filter((recipe) => recipe.enabled)
+  .map((recipe) => ({ label: `${recipe.name}（${recipe.code}）`, value: recipe.code })));
+const recipeCode = ref(job.recipe?.code ?? (recipes.value.length === 1 ? recipes.value[0]?.value : undefined));
+const recipeBatches = ref(job.recipe?.batches);
 // 手动开包装单时，成品入库需要订单明细来确定商品。
 const packaging = computed(() => independent.value && job.process?.code === 'PACK');
 const openOrders = ref<OrderApi.Order[]>([]);
@@ -70,25 +78,54 @@ const orderText = computed(() => {
 });
 const cannotIssue = computed(() => props.submitting
   || (late.value && !job.supplementRemark.trim())
+  || (independentFoaming.value && (!recipeCode.value || !recipeBatches.value || recipeBatches.value <= 0 || recipeBatches.value > 9999))
   || (packaging.value && !orderChoices.value.some((choice) => choice.id === job.productionItem?.id)));
+
+function confirm(reportNow = false) {
+  if (cannotIssue.value) return;
+  if (independentFoaming.value) {
+    job.recipe = { batches: recipeBatches.value!, code: recipeCode.value! };
+  }
+  if (reportNow) emit('reportNow');
+  else emit('issueOnly');
+}
 </script>
 
 <template>
   <div class="mx-auto flex min-h-full w-full max-w-[720px] flex-col">
     <StepHeader
-      :current="2"
-      :subtitle="job.supplement ? `${late ? '补登到' : '补到'} ${job.order?.orderNo ?? ''}，看一眼，对了就点确认` : '看一眼，对了就点确认'"
-      :title="`${job.process?.label} · 第 2 步 ${late ? '确认补登' : job.supplement ? '确认补领' : '确认领料'}`"
-      :total="2"
+      :current="foaming ? undefined : 2"
+      :subtitle="foaming ? undefined : job.supplement ? `${late ? '补登到' : '补到'} ${job.order?.orderNo ?? ''}，看一眼，对了就点确认` : '看一眼，对了就点确认'"
+      :title="foaming ? '发泡 · 确认开工' : `${job.process?.label} · 第 2 步 ${late ? '确认补登' : job.supplement ? '确认补领' : '确认领料'}`"
+      :total="foaming ? undefined : 2"
       @back="emit('back')"
     />
     <main class="flex flex-1 flex-col gap-3 p-4">
       <section class="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
-        <h3 class="m-0 flex items-baseline justify-between text-sm font-bold">
+        <div v-if="independentFoaming" class="flex flex-wrap items-end gap-3 text-sm">
+          <label for="recipe-code" class="flex min-w-48 flex-1 flex-col gap-1">
+            发泡配方
+            <Select id="recipe-code" v-model:value="recipeCode" :options="recipes" option-filter-prop="label" placeholder="选择配方" show-search />
+          </label>
+          <label for="recipe-batches" class="flex flex-col gap-1">
+            预计锅数
+            <InputNumber
+              id="recipe-batches" :value="recipeBatches" :min="0.1" :max="9999" :precision="1"
+              addon-after="锅" class="w-32" @update:value="(value) => (recipeBatches = toNumber(value))"
+            />
+          </label>
+        </div>
+        <template v-else-if="foaming">
+          <p v-if="job.prepare?.target" class="m-0 text-sm">{{ job.prepare.target }}</p>
+          <p v-if="job.recipe" class="m-0 text-sm">
+            配方 {{ labels.recipe(job.recipe.code) }}<template v-if="job.recipe.batches"> · 预计 {{ formatQty(job.recipe.batches) }} 锅</template>
+          </p>
+        </template>
+        <h3 v-else class="m-0 flex items-baseline justify-between text-sm font-bold">
           从{{ source?.label }}领走
           <span class="text-xs font-normal text-muted-foreground">{{ job.picks.length }} 批次 · 共 {{ formatQty(total) }} {{ source?.unit }}</span>
         </h3>
-        <table class="w-full text-sm">
+        <table v-if="!foaming" class="w-full text-sm">
           <thead>
             <tr class="text-left text-xs text-muted-foreground">
               <th class="py-1 font-normal">材料</th>
@@ -116,12 +153,12 @@ const cannotIssue = computed(() => props.submitting
           <div class="flex flex-col"><span class="text-muted-foreground">做的人</span><b class="text-sm">{{ job.my?.userName }}{{ job.my?.team ? `（${job.my.team}）` : '' }}</b></div>
         </div>
       </section>
-      <IssueShortages />
+      <IssueShortages v-if="!foaming" />
       <p v-if="independent && !packaging" class="m-0 rounded-md bg-primary/5 p-3 text-sm">
         <template v-if="job.process?.code === 'SLICE'">本次为独立开片，所有板材登记在同一张工序单。产出按实际领料的颜色、长宽和填写的单层厚度分别入库，不计入已下发任务或订单进度。</template>
         <template v-else>本次为独立{{ job.process?.label }}，产出入库，不计入已下发任务或订单进度。</template>
       </p>
-      <section v-if="job.task && !job.supplement" class="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
+      <section v-if="job.task && !job.supplement && !foaming" class="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
         <span class="text-sm font-bold">本次领料凭证<span class="ml-1 font-normal text-muted-foreground">（选填）</span></span>
         <ImageUpload v-model:value="job.sheets" :max-number="9" :max-size="10" :show-description="false" directory="fdmgongchang/issue-sheet" multiple />
         <span class="text-xs text-muted-foreground">可拍照留存实际领取批次和数量，后续报工沿用已上传的凭证。</span>
@@ -171,7 +208,10 @@ const cannotIssue = computed(() => props.submitting
           placeholder="也可以自己写"
         />
       </section>
-      <p v-if="late" class="m-0 text-xs leading-relaxed text-muted-foreground">
+      <p v-if="foaming" class="m-0 text-xs leading-relaxed text-muted-foreground">
+        用量按配方估算，实际原料出入库由仓库另行登记。
+      </p>
+      <p v-else-if="late" class="m-0 text-xs leading-relaxed text-muted-foreground">
         这张单已经完工。补登的料从{{ source?.label }}库存扣掉，算进这张单的领料，会记下是你补登的和原因。
       </p>
       <p v-else-if="job.supplement" class="m-0 text-xs leading-relaxed text-muted-foreground">
@@ -186,12 +226,12 @@ const cannotIssue = computed(() => props.submitting
         :disabled="cannotIssue"
         class="h-10 rounded-md bg-primary text-sm font-semibold text-primary-foreground disabled:opacity-50"
         type="button"
-        @click="emit('issueOnly')"
+        @click="confirm()"
       >
-        {{ late ? '确认补登' : job.supplement ? '确认补领，接着干活' : '确认领料，去干活' }}
+        {{ foaming ? '确认开工' : late ? '确认补登' : job.supplement ? '确认补领，接着干活' : '确认领料，去干活' }}
       </button>
-      <button v-if="independent" :disabled="cannotIssue" class="h-10 rounded-md bg-primary/10 text-sm font-semibold text-primary disabled:opacity-50" type="button" @click="emit('reportNow')">
-        已经做完了，领料同时报数量
+      <button v-if="independent" :disabled="cannotIssue" class="h-10 rounded-md bg-primary/10 text-sm font-semibold text-primary disabled:opacity-50" type="button" @click="confirm(true)">
+        {{ foaming ? '已经做完了，直接报工' : '已经做完了，领料同时报数量' }}
       </button>
     </footer>
   </div>

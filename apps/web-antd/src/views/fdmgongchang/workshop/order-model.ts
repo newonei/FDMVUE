@@ -17,29 +17,31 @@ export interface WorkshopOrder {
 interface WorkshopTaskProgress {
   group: 'closed' | 'completed' | 'handled' | 'pending';
   label: string;
-  color: string;
+  color?: 'gold' | 'green';
   shortage?: number;
 }
 
 export function workshopTaskProgress(task: Api.Task): WorkshopTaskProgress {
-  if (task.status === 'CLOSED') return { group: 'closed', label: '已关闭', color: 'default' };
+  if (task.status === 'CLOSED') return { group: 'closed', label: '已关闭' };
   const good = toNumber(task.actualQuantity);
   if (task.status === 'DONE') {
     const planned = toNumber(task.quantity);
     if (planned === undefined || planned <= 0 || good === undefined) {
-      return { group: 'pending', label: '已报工 · 数量待核对', color: 'orange' };
+      return { group: 'pending', label: '已报工 · 数量待核对', color: 'gold' };
     }
     if (good >= planned) return { group: 'completed', label: '已完成', color: 'green' };
     return {
       group: task.shortageHandledAt ? 'handled' : 'pending',
       label: '已报工 · 未达计划',
-      color: 'orange',
+      color: 'gold',
       shortage: roundQty(planned - good),
     };
   }
-  if (task.activeOrderId) return { group: 'pending', label: '已领料 · 在做', color: 'blue' };
+  if (task.activeOrderId) return { group: 'pending', label: '已领料 · 在做', color: 'gold' };
   const reported = (good ?? 0) + (toNumber(task.defectQuantity) ?? 0) > 0;
-  return { group: 'pending', label: reported ? '部分报工' : '待报工', color: 'blue' };
+  return reported
+    ? { group: 'pending', label: '部分报工', color: 'gold' }
+    : { group: 'pending', label: '待报工' };
 }
 
 export interface FocusField { label: string; value: string; side?: 'BACK' | 'FRONT' }

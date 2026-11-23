@@ -50,6 +50,7 @@ const errors = ref<string[]>([]);
 
 /** 计划量自动带入；理论开片量仍作领料与规格的核对参考。 */
 const slicing = computed(() => job.process?.code === 'SLICE');
+const tracksMaterials = computed(() => job.process?.code !== 'MIX');
 const planThicknessError = computed(() => slicePlanThicknessError(job));
 
 const inputColors = computed(
@@ -120,7 +121,7 @@ function next() {
           全部做完，结束本次任务
         </label>
 
-        <section v-if="!job.createFinish && job.finish && job.order" class="flex flex-col gap-1.5 rounded-lg border border-border bg-card p-3">
+        <section v-if="tracksMaterials && !job.createFinish && job.finish && job.order" class="flex flex-col gap-1.5 rounded-lg border border-border bg-card p-3">
           <span class="text-sm font-bold">有没用完的料？填退回多少（没有就不用填）</span>
           <div
             v-for="input in (job.order.inputs ?? []).filter((i) => i.stage !== 'AUX')"
@@ -160,7 +161,7 @@ function next() {
         <button class="min-h-12 w-full rounded-md bg-primary text-base font-semibold text-primary-foreground" type="submit">
           {{ job.prepare || job.finish || job.createFinish || goodTotal(job) > 0 ? '下一步：核对本次报工' : '提交本次产出' }}
         </button>
-        <button v-if="orderActions" class="min-h-11 rounded-md border border-border text-base font-semibold" type="button" @click="emit('supplement')">补领材料</button>
+        <button v-if="tracksMaterials && orderActions" class="min-h-11 rounded-md border border-border text-base font-semibold" type="button" @click="emit('supplement')">补领材料</button>
       </footer>
     </form>
   </div>

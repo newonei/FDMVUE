@@ -155,7 +155,7 @@ function reset(process: Api.Process, task?: FdmgongchangScheduleApi.Task) {
 
 function startActual(process: Api.Process) {
   reset(process);
-  job.step = 'pick';
+  job.step = process.code === 'MIX' ? 'confirm' : 'pick';
 }
 
 /**
@@ -178,7 +178,7 @@ async function startTask(
       return;
     }
     applyIssuePlan(job, prepare);
-    job.step = 'pick';
+    job.step = process.code === 'MIX' ? 'confirm' : 'pick';
   } finally {
     loading.value = false;
   }
@@ -268,7 +268,7 @@ async function openOrder(id: number, supplement: boolean) {
 }
 
 async function continueOrder(order: Api.Order, supplement = false) {
-  if (loading.value) return;
+  if (loading.value || (supplement && order.process === 'MIX')) return;
   loading.value = true;
   try {
     job.task = undefined;
@@ -294,7 +294,7 @@ function reportFromList(draft: OrderDraft, details = false) {
 }
 
 function supplementFromReport() {
-  if (!job.order) return;
+  if (!job.order || job.process?.code === 'MIX') return;
   const { order, prepare, process, recipe, task } = job;
   reset(process!, task);
   Object.assign(job, { order, prepare, recipe, sourceStage: order.sourceStage, supplement: true });
@@ -408,8 +408,7 @@ async function reportTask(duplicateAction?: 'APPEND'): Promise<boolean> {
 
 /** 再领一批料：同一个活接着做。 */
 function again() {
-  reset(job.process!, job.task);
-  job.step = 'pick';
+  startActual(job.process!);
 }
 
 async function goHome() {
@@ -423,7 +422,7 @@ async function goHome() {
 
 function back() {
   if (job.step === 'pick') job.step = 'home';
-  else if (job.step === 'confirm') job.step = 'pick';
+  else if (job.step === 'confirm') job.step = job.process?.code === 'MIX' ? 'home' : 'pick';
   else if (job.step === 'report') {
     job.step = job.createFinish ? 'confirm' : 'home';
   }

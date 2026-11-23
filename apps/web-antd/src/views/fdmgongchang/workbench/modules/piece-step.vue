@@ -16,7 +16,7 @@ import StepHeader from './step-header.vue';
 
 /**
  * 开片按本次良品体积统一计价并由参与人员均分；其他工序按各自计价项目登记。
- * 按任务报工时还要拍纸质领料单。
+ * 需现场登记领料的任务可在报工时补传纸质领料单。
  */
 import '../../shared/report-spec.css';
 
@@ -37,6 +37,8 @@ let seed = Math.max(0, ...job.pieces.map((line) => line.key));
 const unit = computed(() => stageOf(job, job.process?.outputStage)?.unit ?? '');
 const primaryWorkerId = computed(() => job.onBehalfOf?.id ?? job.my?.userId);
 const isSlice = computed(() => job.process?.code === 'SLICE');
+const foaming = computed(() => job.process?.code === 'MIX');
+const needsIssueSheet = computed(() => !foaming.value && !!job.prepare && !job.order);
 const volume = computed(() => sliceVolume(job.outputs));
 const sliceItem = computed(() => sliceWageItem(matches.value));
 const allocation = computed(() => sliceWageAllocation(volume.value, sliceItem.value?.price ?? 0, job.pieces.map((line) => line.userId)));
@@ -108,7 +110,7 @@ function submit() {
       return;
     }
   }
-  if (job.prepare && !job.order && job.sheets.length === 0) {
+  if (needsIssueSheet.value && job.sheets.length === 0) {
     message.warning('请拍照上传纸质领料单');
     return;
   }
@@ -125,7 +127,7 @@ function addMate() {
   <div class="mx-auto flex min-h-full w-full max-w-[720px] flex-col">
     <StepHeader
       :subtitle="`好的 ${formatQty(goodTotal(job))} ${unit} · 残次 ${formatQty(defectTotal(job))} ${unit}`"
-      :title="job.order ? '确认本次报工和计件' : job.prepare ? '计件和领料单' : '这批活算给谁？'"
+      :title="job.order || foaming ? '确认本次报工和计件' : needsIssueSheet ? '计件和领料单' : '这批活算给谁？'"
       :current="2"
       :total="2"
       @back="emit('back')"
@@ -193,8 +195,8 @@ function addMate() {
           ＋ 还有人跟我一起做
         </button>
         <p class="m-0 text-xs leading-relaxed text-muted-foreground">{{ isSlice ? '开片按本次良品体积统一计价，参与人员平分同一笔工资。' : '计价项目按做出来的规格自动选好。' }}提交后由班组长确认，月底一起结算。</p>
-        <p v-if="job.order" class="m-0 rounded-md bg-primary/5 p-3 text-sm">本次报工沿用工序单 {{ job.order.orderNo }} 的已领材料及凭证，{{ job.finish ? '提交后结束本批生产' : '提交后继续在制，可再次报工' }}。</p>
-        <section v-if="job.prepare && !job.order" class="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
+        <p v-if="job.order && !foaming" class="m-0 rounded-md bg-primary/5 p-3 text-sm">本次报工沿用工序单 {{ job.order.orderNo }} 的已领材料及凭证，{{ job.finish ? '提交后结束本批生产' : '提交后继续在制，可再次报工' }}。</p>
+        <section v-if="needsIssueSheet" class="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
           <span class="text-sm font-bold">拍纸质领料单<span class="ml-1 text-destructive">*</span></span>
           <ImageUpload
             v-model:value="job.sheets"

@@ -7,6 +7,12 @@ import { stageOf, useJob } from '../use-job';
 /** 完成：货已入库，这批挣了多少、今天累计、订单进度。 */
 const emit = defineEmits<{ again: []; home: [] }>();
 const job = useJob();
+const foaming = computed(() => job.process?.code === 'MIX');
+const title = computed(() => {
+  if (job.result.action === 'report') return '报工好了';
+  if (job.result.action === 'supplement') return '补领完成';
+  return foaming.value ? '发泡开工完成' : '领料开工完成';
+});
 const output = computed(() => stageOf(job, job.process?.outputStage));
 const task = computed(() => job.my?.tasks.find((t) => t.id === job.task?.id));
 const percent = computed(() => {
@@ -21,11 +27,12 @@ const percent = computed(() => {
       <div class="flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground">
         <svg aria-label="提交成功" fill="none" height="30" role="img" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.6" viewBox="0 0 24 24" width="30"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
       </div>
-      <h1 class="m-0 text-xl font-bold">{{ job.result.action === 'report' ? '报工好了' : job.result.action === 'supplement' ? '补领完成' : '领料开工完成' }}</h1>
+      <h1 class="m-0 text-xl font-bold">{{ title }}</h1>
       <p class="m-0 text-sm leading-relaxed text-muted-foreground">
         <template v-if="job.result.action === 'report'">本次实际产出已登记<template v-if="job.result.good > 0">，{{ formatQty(job.result.good) }} {{ output?.unit }}{{ output?.label }}已入库，可供下工序领取</template><br />{{ job.finish || job.createFinish ? '本批生产已结束' : '工序单继续在制，下次只报新增产出' }}</template>
         <template v-else-if="job.supplement && job.order?.status === 'COMPLETED'">补登的料已经算进 {{ job.order?.orderNo }} 的领料</template>
         <template v-else-if="job.supplement">补领材料已计入 {{ job.order?.orderNo }}，做完后从在制工序单报产出。</template>
+        <template v-else-if="foaming">生产完成后，从「正在做」报本工序的实际产出。原料出入库另行登记。</template>
         <template v-else>本次领料已从库存扣减。生产完成后，从「在制工序单」报本工序的实际产出。</template>
       </p>
       <section class="grid w-full grid-cols-2 gap-3 rounded-lg bg-card p-3 text-left border border-border">
@@ -50,7 +57,7 @@ const percent = computed(() => {
     </main>
     <footer class="grid grid-cols-1 gap-2 px-4 pb-4 pt-3 sm:grid-cols-2">
       <button class="h-11 rounded-md bg-primary text-sm font-semibold text-primary-foreground" type="button" @click="emit('home')">回任务列表，继续下一项</button>
-      <button v-if="!job.task && !job.order" class="h-10 rounded-md border border-border bg-card text-sm font-semibold text-foreground" type="button" @click="emit('again')">再领一批料</button>
+      <button v-if="!job.task && !job.order" class="h-10 rounded-md border border-border bg-card text-sm font-semibold text-foreground" type="button" @click="emit('again')">{{ foaming ? '再开一单' : '再领一批料' }}</button>
     </footer>
   </div>
 </template>
