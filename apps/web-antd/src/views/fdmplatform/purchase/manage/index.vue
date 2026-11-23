@@ -120,6 +120,7 @@ import {
   hasPayableBalance,
   paymentSavedMessage,
 } from '../../finance/procurement/model';
+import { contractInternalOrderNo, salesChannelOf } from '../../sales-channel';
 import ProcurementPageHeader from '../components/ProcurementPageHeader.vue';
 import ProcurementStatusBadge from '../components/ProcurementStatusBadge.vue';
 import { localDate } from '../quotes/comparison';
@@ -1039,6 +1040,14 @@ const links = computed(() =>
     ? relatedDocumentLinks(contract.value, 'orders', view.value.order)
     : [],
 );
+const contractLinkText = computed(() => {
+  const parent = contract.value;
+  return (
+    (parent &&
+      contractInternalOrderNo(parent, salesChannelOf(parent.businessType))) ||
+    '内部单号待补齐'
+  );
+});
 const mainLinks = computed(() =>
   links.value.filter(
     (link) =>
@@ -2331,8 +2340,13 @@ watch(financeType, (value, previous) => {
                   :key="JSON.stringify(link.target)"
                   size="small"
                 >
-                  <span class="procurement-muted">{{ link.label }}</span><RelatedLink :target="link.target">
-                    {{ link.value }}
+                  <span class="procurement-muted">{{ link.label }}</span>
+                  <RelatedLink :target="link.target">
+                    {{
+                      link.target.type === 'contract'
+                        ? contractLinkText
+                        : link.value
+                    }}
                   </RelatedLink>
                 </Space>
               </div>

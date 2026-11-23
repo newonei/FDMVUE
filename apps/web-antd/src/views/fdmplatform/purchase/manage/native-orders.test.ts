@@ -616,6 +616,17 @@ describe('unified native purchase workspace', () => {
 describe('related creation inside the purchase workspace', () => {
   const detailLocation =
     '/fdmprocurement/platform-orders?contractId=contract-1&documentId=order-1';
+  it('shows only the internal order number in the linked contract text', async () => {
+    mocks.contract.mockResolvedValueOnce({
+      ...contractFixture(),
+      name: 'NX-001',
+    });
+    const { host } = await mount(detailLocation);
+    const link = host.querySelector(
+      '.order-context a[href="/fdmwaimao/platform-contracts?contractId=contract-1"]',
+    );
+    expect(link?.textContent?.trim()).toBe('NX-001');
+  });
   it('generates orders directly from the filtered list without leaving the page', async () => {
     const { host, router } = await mount();
     const location = router.currentRoute.value.fullPath;
