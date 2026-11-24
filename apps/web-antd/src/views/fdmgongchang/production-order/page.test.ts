@@ -298,8 +298,8 @@ describe('production order page', () => {
     mocks.get.mockResolvedValue(order);
     unmount = mount();
     await flush();
-    // 工厂排单页给工厂的人用，先看本厂收到的单；其他部门提需求在「我提的需求」
-    expect(document.body.textContent).toContain('订单拆分与车间下发');
+    // 工厂默认打开本厂订单，也能从「我提的需求」查看自己提交的需求。
+    expect(document.querySelector('h1')?.textContent).toBe('生产订单');
     expect(document.body.textContent).toContain('1 待接单');
     expect(document.body.textContent).toContain('我提的需求');
 
@@ -511,6 +511,49 @@ describe('production order page', () => {
     expect(mocks.push).toHaveBeenCalledWith({
       path: '/fdmprocurement/platform-orders',
       query: { contractId, documentId: 'po-id' },
+    });
+  });
+
+  it('shows the purchase subject and separately labeled contract numbers in the list and order details', async () => {
+    const purchase: Api.Order = {
+      ...order,
+      customerName: '测试客户',
+      sourceContractCode: 'HT-202611-26',
+      sourceContractId: 'contract-id',
+      sourceContractName: 'NB-202611-18',
+      sourceOrderCode: 'CG-202611-14',
+      sourceOrderId: 'purchase-id',
+      sourceOrderSubject: '瑜伽垫冬季补货',
+      sourceType: 'PURCHASE_ORDER',
+    };
+    const manual: Api.Order = { ...order, id: 10, orderNo: 'GD20261010-002' };
+    mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:handle');
+    mocks.factoryPage.mockResolvedValue({ list: [purchase, manual], total: 2 });
+    mocks.get.mockResolvedValue(purchase);
+    mocks.materialPlan.mockResolvedValue({ items: [], orderId: 9, orderNo: order.orderNo, shortage: false, totals: [] });
+    unmount = mount();
+    await flush();
+
+    const purchaseRow = document.querySelector('tr[data-row-key="9"]')!;
+    const manualRow = document.querySelector('tr[data-row-key="10"]')!;
+    const source = (root: ParentNode) => Object.fromEntries([...root.querySelectorAll('dl > div')].map((line) => [
+      line.querySelector('dt')?.textContent,
+      line.querySelector('dd')?.textContent,
+    ]));
+    expect(source(purchaseRow)).toMatchObject({ 合同内部单号: 'NB-202611-18', 合同编号: 'HT-202611-26', 客户: '测试客户' });
+    expect(purchaseRow.textContent).toContain('瑜伽垫冬季补货');
+    expect(purchaseRow.textContent).toContain('CG-202611-14');
+    expect(manualRow.textContent).toContain('电商备货');
+    expect(manualRow.textContent).not.toContain('合同内部单号');
+
+    button(purchase.orderNo, purchaseRow).click();
+    await flush();
+    expect(source(document.querySelector('[aria-labelledby="po-purchase-source"]')!)).toMatchObject({
+      合同内部单号: 'NB-202611-18',
+      合同编号: 'HT-202611-26',
+      客户: '测试客户',
+      采购主题: '瑜伽垫冬季补货',
+      采购单号: 'CG-202611-14',
     });
   });
 

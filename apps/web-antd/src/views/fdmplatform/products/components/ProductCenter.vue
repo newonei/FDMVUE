@@ -382,11 +382,16 @@ function closeEditor() {
   if (!detailOpen.value) entityDetail.close();
 }
 async function productSaved(product: Product) {
+  const previous = selectedProduct.value;
+  const refreshFirstPage =
+    !codeOrder.value &&
+    previous?.id === product.id &&
+    previous.finishedThicknessMm !== product.finishedThicknessMm;
   detailRefreshSequence++;
   selectedProduct.value = product;
   editorOpen.value = false;
   refreshCategories();
-  await load();
+  await load(refreshFirstPage);
 }
 async function refreshProductDetail() {
   const id = selectedProduct.value?.id;

@@ -9,10 +9,12 @@ import { useAccess } from '@vben/access';
 import { navigationRoute } from '#/views/fdmplatform/documents/navigation';
 
 const props = defineProps<{
+  codeOnly?: boolean;
   order: Pick<Api.Order, 'sourceContractId' | 'sourceOrderCode' | 'sourceOrderId'>;
 }>();
 const router = useRouter();
 const { hasAccessByCodes } = useAccess();
+const label = computed(() => props.codeOnly ? props.order.sourceOrderCode : `采购单 ${props.order.sourceOrderCode}`);
 const target = computed(() => {
   if (!props.order.sourceOrderId || !hasAccessByCodes(['fdmplatform:orders:query'])) {
     return undefined;
@@ -28,7 +30,7 @@ const target = computed(() => {
 
 <template>
   <button v-if="target" type="button" class="text-primary hover:underline" @click.stop="router.push(target)">
-    采购单 {{ order.sourceOrderCode }}
+    {{ label }}
   </button>
-  <span v-else>采购单 {{ order.sourceOrderCode }}</span>
+  <span v-else>{{ label }}</span>
 </template>

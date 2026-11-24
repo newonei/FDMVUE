@@ -74,6 +74,7 @@ const attributeOptions = ref<ProductAttributeOptions>({
   matTypes: [],
 });
 let optionsSequence = 0;
+let layerThicknessEdited = false;
 const categorySelectOptions = computed(() =>
   categoryOptions(categories.value, props.product?.categoryId),
 );
@@ -150,11 +151,57 @@ const stageOptions = computed(() =>
     }),
   ),
 );
+function updateManufacturing(value: ProductAttributes) {
+  const current = manufacturing.value;
+  if (
+    value.frontThicknessMm !== current.frontThicknessMm ||
+    value.backThicknessMm !== current.backThicknessMm
+  ) {
+    layerThicknessEdited = true;
+  }
+  const { backThicknessMm, finishedThicknessMm, frontThicknessMm } =
+    props.product ?? {};
+  const total = value.finishedThicknessMm;
+  if (
+    !layerThicknessEdited &&
+    !deriveLayers.value &&
+    value.constructionType === 'DOUBLE_LAYER' &&
+    typeof total === 'number' &&
+    total !== current.finishedThicknessMm &&
+    typeof finishedThicknessMm === 'number' &&
+    typeof frontThicknessMm === 'number' &&
+    frontThicknessMm > 0 &&
+    typeof backThicknessMm === 'number' &&
+    backThicknessMm > 0 &&
+    Math.abs(frontThicknessMm + backThicknessMm - finishedThicknessMm) <=
+      0.000001
+  ) {
+    const totalUnits = Math.round(total * 10_000);
+    if (total === finishedThicknessMm) {
+      value = { ...value, frontThicknessMm, backThicknessMm };
+    } else if (Number.isSafeInteger(totalUnits) && totalUnits >= 2) {
+      const frontUnits = Math.min(
+        totalUnits - 1,
+        Math.max(
+          1,
+          Math.round((totalUnits * frontThicknessMm) / finishedThicknessMm),
+        ),
+      );
+      value = {
+        ...value,
+        frontThicknessMm: frontUnits / 10_000,
+        backThicknessMm: (totalUnits - frontUnits) / 10_000,
+      };
+    }
+  }
+  manufacturing.value = value;
+}
 watch(
   () => [props.open, props.product?.id],
   () => {
     ++optionsSequence;
     if (!props.open) return;
+    layerThicknessEdited = false;
     for (const [field] of [...fields, ...productionFields, ['color']])
       form[field!] = String(
         (props.product as unknown as Record<string, unknown> | undefined)?.[
@@ -279,6 +326,11 @@ async function save() {
           :key="field"
           :label="title"
           :required="['categoryId', 'code', 'name'].includes(field!)"
+          :extra="
+            product && field === 'spec'
+              ? '修改成品厚度时，保存会同步规格中的尺寸。'
+              : undefined
+          "
         >
           <Select
             v-if="field === 'categoryId'"
@@ -314,9 +366,10 @@ async function save() {
         </Form.Item>
       </Form>
       <ProductManufacturingFields
-        v-model:value="manufacturing"
+        :value="manufacturing"
         :colors="attributeOptions.colors"
         :derive-layers="deriveLayers"
+        @update:value="updateManufacturing"
       />
       <Alert
         v-if="layerStageError"

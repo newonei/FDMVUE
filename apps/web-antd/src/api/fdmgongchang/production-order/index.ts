@@ -207,8 +207,12 @@ export namespace FdmgongchangProductionOrderApi {
     sourceType?: 'MANUAL' | 'PURCHASE_ORDER' | 'RESTOCK';
     sourceOrderId?: null | string;
     sourceOrderCode?: null | string;
+    /** 采购单下单资料的采购主题。 */
+    sourceOrderSubject?: null | string;
     sourceContractId?: null | string;
     sourceContractCode?: null | string;
+    /** 关联合同的内部单号。 */
+    sourceContractName?: null | string;
     customerName?: null | string;
     /** 接单后采购单改了数量、交期或取消了，等工厂确认。 */
     sourceChanged?: boolean | null;

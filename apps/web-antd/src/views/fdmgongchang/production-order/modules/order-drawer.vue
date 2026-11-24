@@ -443,7 +443,6 @@ function producedQty(item: Api.Item) {
           <Tag v-if="status" :color="status.color" class="m-0">{{ status.label }}</Tag>
           <span class="text-muted-foreground">{{ order.factoryName }}</span>
           <span v-if="order.purpose && !fromPurchase" class="text-muted-foreground">· {{ order.purpose }}</span>
-          <Tag v-if="fromPurchase" class="m-0" color="blue">采购单 {{ order.sourceOrderCode }}</Tag>
           <Tag v-if="fromRestock" class="m-0" color="purple">补库</Tag>
         </div>
         <Alert
@@ -460,13 +459,33 @@ function producedQty(item: Api.Item) {
         <p v-else-if="fromPurchase && order.sourceChangeNote && order.status === 'SUBMITTED'" class="m-0 text-xs text-warning">
           {{ order.sourceChangeNote }}
         </p>
+        <section v-if="fromPurchase" aria-labelledby="po-purchase-source" class="rounded-lg border border-border bg-muted/30 px-4 py-3">
+          <h3 id="po-purchase-source" class="m-0 text-xs font-medium text-muted-foreground">采购来源</h3>
+          <dl class="mb-0 mt-2 grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div class="min-w-0 sm:col-span-2 lg:col-span-4">
+              <dt class="text-xs text-muted-foreground">采购主题</dt>
+              <dd class="m-0 break-words text-base font-semibold">{{ order.sourceOrderSubject || '未填写采购主题' }}</dd>
+            </div>
+            <div class="min-w-0">
+              <dt class="text-xs text-muted-foreground">合同内部单号</dt>
+              <dd class="m-0 break-words font-medium">{{ order.sourceContractName || '—' }}</dd>
+            </div>
+            <div class="min-w-0">
+              <dt class="text-xs text-muted-foreground">合同编号</dt>
+              <dd class="m-0 break-words">{{ order.sourceContractCode || '—' }}</dd>
+            </div>
+            <div class="min-w-0">
+              <dt class="text-xs text-muted-foreground">采购单号</dt>
+              <dd class="m-0 break-words"><SourcePurchaseLink v-if="order.sourceOrderCode" :order="order" code-only /><span v-else>—</span></dd>
+            </div>
+            <div class="min-w-0">
+              <dt class="text-xs text-muted-foreground">客户</dt>
+              <dd class="m-0 break-words">{{ order.customerName || '—' }}</dd>
+            </div>
+          </dl>
+        </section>
         <div class="flex flex-col gap-3" :class="{ 'accept-overview': canHandle }">
           <Descriptions :column="{ xs: 1, sm: 2 }" size="small" bordered>
-            <Descriptions.Item v-if="fromPurchase" :span="2" label="来源">
-              <SourcePurchaseLink :order="order" />
-              <template v-if="order.sourceContractCode"> · 合同 {{ order.sourceContractCode }}</template>
-              <span v-if="order.customerName" class="text-muted-foreground">（{{ order.customerName }}）</span>
-            </Descriptions.Item>
             <Descriptions.Item :label="fromPurchase ? '采购员' : '下单人'">{{ order.requesterName }}<span v-if="order.requesterDeptName" class="text-muted-foreground">（{{ order.requesterDeptName }}）</span></Descriptions.Item>
             <Descriptions.Item label="下单时间">{{ timeText(order.createTime) }}</Descriptions.Item>
             <Descriptions.Item :label="fromPurchase ? '采购单交期' : '希望交货'">{{ dateText(order.requiredDate) || '没填' }}</Descriptions.Item>

@@ -89,6 +89,17 @@ vi.mock('./ProductEditor.vue', () => ({
                   },
                   '保存维护',
                 ),
+                h(
+                  'button',
+                  {
+                    onClick: () =>
+                      ctx.emit('saved', {
+                        ...props.product,
+                        finishedThicknessMm: 5,
+                      }),
+                  },
+                  '保存厚度',
+                ),
               ],
             )
           : null;
@@ -929,6 +940,46 @@ describe('actual product detail and edit route integration', () => {
       detail(host)?.querySelector('[data-detail-title]')?.textContent,
     ).toContain('更新后产品');
   });
+  it.each([
+    { order: undefined, pageNo: 1 },
+    { order: 'asc', pageNo: 2 },
+  ])(
+    'reloads the saved thickness at page $pageNo for sort $order',
+    async ({ order, pageNo }) => {
+      const source = {
+        ...product('A'),
+        lengthMm: 1830,
+        widthMm: 610,
+        finishedThicknessMm: 6,
+      };
+      mocks.getProducts.mockResolvedValue({ list: [source], total: 12 });
+      const { host } = await mountCenter(
+        `/fdmproducts/catalog?catalogPage=2${order ? `&catalogCodeOrder=${order}` : ''}`,
+      );
+      await vi.waitFor(() =>
+        expect(
+          host.querySelector('[data-table-row="A"]')?.textContent,
+        ).toContain('1830 × 610 × 6 mm'),
+      );
+      clickText(host.querySelector('[data-table-row="A"]')!, '维护档案');
+      await nextTick();
+      mocks.getProducts.mockResolvedValue({
+        list: [{ ...source, finishedThicknessMm: 5 }],
+        total: 12,
+      });
+      const previousRequests = mocks.getProducts.mock.calls.length;
+      clickText(host.querySelector('[data-product-editor]')!, '保存厚度');
+      await vi.waitFor(() =>
+        expect(
+          host.querySelector('[data-table-row="A"]')?.textContent,
+        ).toContain('1830 × 610 × 5 mm'),
+      );
+      expect(mocks.getProducts).toHaveBeenCalledTimes(previousRequests + 1);
+      expect(mocks.getProducts).toHaveBeenLastCalledWith(
+        expect.objectContaining({ codeOrder: order, pageNo }),
+      );
+    },
+  );
   it('shows the actual selected summary unit and never adds quantities of different units', async () => {
     const { host } = await mountCenter('/fdmproducts/catalog?productId=A');
     await vi.waitFor(() =>

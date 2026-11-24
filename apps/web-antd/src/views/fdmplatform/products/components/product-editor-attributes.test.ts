@@ -561,6 +561,40 @@ describe('产品档案编辑与查看', () => {
       }),
     );
   });
+  it('只改历史双层总厚时按原比例提交两层并回显保存后的规格', async () => {
+    const source: Product = {
+      ...product,
+      lengthMm: 1830,
+      widthMm: 610,
+      constructionType: 'DOUBLE_LAYER',
+      finishedThicknessMm: 6,
+      frontThicknessMm: 2,
+      backThicknessMm: 4,
+      spec: '1830×610×6mm 加长款',
+    };
+    const savedSpec = '1830×610×5mm 加长款';
+    api.save.mockImplementationOnce(async (payload) => ({
+      ...source,
+      ...payload,
+      spec: savedSpec,
+      specification: savedSpec,
+    }));
+    await mount(source);
+    await fill('成品厚度（mm）', '5');
+    await save();
+    expect(api.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: source.id,
+        code: source.code,
+        finishedThicknessMm: 5,
+        frontThicknessMm: 1.6667,
+        backThicknessMm: 3.3333,
+      }),
+    );
+    expect(
+      document.querySelector('.product-detail-drawer')?.textContent,
+    ).toContain(savedSpec);
+  });
   it('匹配其他 SKU 且层厚不一致时提示冲突并保留填写值', async () => {
     const source: Product = {
       ...product,
@@ -579,6 +613,7 @@ describe('产品档案编辑与查看', () => {
     });
     await mount(source);
     await fill('成品厚度（mm）', '8');
+    await fill('正面层厚度（mm）', '3');
     await fill('反面层厚度（mm）', '5');
     await save();
     expect(document.body.textContent).toContain(
