@@ -185,11 +185,14 @@ beforeEach(() => {
   mocks.contract.mockResolvedValue({
     id: 'contract-1',
     companyId: 1,
+    businessType: 'FOREIGN',
     code: 'HT001',
+    name: '  WB-20261124-01  ',
     items: [{ id: 'item-1', skuName: '瑜伽垫', quantity: 10 }],
     requests: [
       {
         id: 'request-1',
+        name: '外贸瑜伽垫采购',
         items: [
           {
             id: 'request-line-1',
@@ -318,6 +321,7 @@ describe('采购开单先保存草稿', () => {
       expect.objectContaining({
         contractId: 'contract-1',
         requestId: undefined,
+        subject: undefined,
         submit: false,
         lines: [
           expect.objectContaining({
@@ -434,6 +438,7 @@ describe('采购开单先保存草稿', () => {
     mocks.contract.mockResolvedValue({
       id: 'contract-1',
       companyId: 1,
+      name: 'WB-20261124-01',
       items: [
         { id: 'item-1', skuName: '瑜伽垫' },
         { id: 'item-2', skuName: '外箱' },
@@ -451,7 +456,7 @@ describe('采购开单先保存草稿', () => {
     mocks.order.mockResolvedValue({
       contractId: 'contract-1',
       companyId: 1,
-      details: { status: 'DRAFT' },
+      details: { subject: '已经调整的采购主题', status: 'DRAFT' },
       order: {
         id: 'source-order',
         requestId: 'request-1',
@@ -472,6 +477,9 @@ describe('采购开单先保存草稿', () => {
     const { host } = await mount({
       editOf: { contractId: 'contract-1', orderId: 'source-order' },
     });
+    expect(
+      host.querySelector<HTMLInputElement>('.entry-head input')!.value,
+    ).toBe('已经调整的采购主题');
     const product = host.querySelector<HTMLInputElement>(
       'tbody .product-pick input',
     )!;
@@ -490,6 +498,7 @@ describe('采购开单先保存草稿', () => {
       'contract-1',
       'source-order',
       expect.objectContaining({
+        subject: '已经调整的采购主题',
         lines: [
           expect.objectContaining({
             contractItemId: 'item-2',
@@ -504,11 +513,14 @@ describe('采购开单先保存草稿', () => {
     );
   });
 
-  it('申请转采购单保留申请来源并保存草稿', async () => {
+  it('外贸转单带出合同内部单号，采购员改写主题后保存草稿', async () => {
     const { host, saved } = await mount({
       contractId: 'contract-1',
       requestId: 'request-1',
     });
+    const subject = host.querySelector<HTMLInputElement>('.entry-head input')!;
+    expect(subject.value).toBe('WB-20261124-01');
+    await fill(subject, 'WB-20261124-01 瑜伽垫采购');
     await fill(
       host.querySelector<HTMLInputElement>('[data-supplier]')!,
       'supplier-1',
@@ -524,6 +536,7 @@ describe('采购开单先保存草稿', () => {
         submit: false,
         requestId: 'request-1',
         contractId: 'contract-1',
+        subject: 'WB-20261124-01 瑜伽垫采购',
         lines: [
           expect.objectContaining({
             contractItemId: 'item-1',
@@ -535,12 +548,13 @@ describe('采购开单先保存草稿', () => {
     );
     expect(saved).toHaveBeenCalledWith(result, 'draft');
   });
-  it('内贸转单带出申请主题和预计采购价，新标签打开同一内贸合同', async () => {
+  it('内贸转单带出合同内部单号和预计采购价，新标签打开同一内贸合同', async () => {
     mocks.contract.mockResolvedValue({
       id: 'contract-1',
       companyId: 1,
       businessType: 'DOMESTIC',
       code: 'HT001',
+      name: 'NX-20261124-02',
       items: [{ id: 'item-1', skuName: '瑜伽垫', unitPrice: '999' }],
       requests: [
         {
@@ -577,7 +591,7 @@ describe('采购开单先保存草稿', () => {
     );
     expect(
       host.querySelector<HTMLInputElement>('.entry-head input')!.value,
-    ).toBe('内贸瑜伽垫采购');
+    ).toBe('NX-20261124-02');
     const prices = [
       ...host.querySelectorAll<HTMLInputElement>('input[aria-label$="行单价"]'),
     ];
@@ -596,7 +610,7 @@ describe('采购开单先保存草稿', () => {
     await settle();
     expect(mocks.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        subject: '内贸瑜伽垫采购',
+        subject: 'NX-20261124-02',
         lines: ['12.345678', '0', '3'].map((unitPrice) =>
           expect.objectContaining({ unitPrice }),
         ),

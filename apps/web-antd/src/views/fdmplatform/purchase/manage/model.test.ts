@@ -170,16 +170,18 @@ describe('采购下单资料', () => {
       }),
     ).toEqual({ contactId: 'person', clauseIds: ['term'] });
   });
-  it('提交采购日期和空交付日期，自动生成的单据日期不随请求发送', () => {
+  it('提交采购主题、采购日期和空交付日期，自动生成的单据日期不随请求发送', () => {
     expect(
       orderDetailsPayload({
         deliveryDate: '',
         documentDate: '2026-11-18',
         purchaseDate: '2026-11-17',
+        subject: 'NB-202611-18 瑜伽垫包装',
       }),
     ).toEqual({
       deliveryDate: null,
       purchaseDate: '2026-11-17',
+      subject: 'NB-202611-18 瑜伽垫包装',
     });
   });
   it('多行十进制合计不引入浮点残差', () => {

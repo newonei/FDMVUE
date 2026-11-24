@@ -46,7 +46,11 @@ import { errorText, money, rows as records } from '../../../data';
 import { navigationRoute } from '../../../documents/navigation';
 import ProductStructureDetails from '../../../products/components/ProductStructureDetails.vue';
 import { productStructure } from '../../../products/structure';
-import { DOMESTIC_CURRENCY, salesChannelOf } from '../../../sales-channel';
+import {
+  contractInternalOrderNo,
+  DOMESTIC_CURRENCY,
+  salesChannelOf,
+} from '../../../sales-channel';
 import { localDate } from '../../quotes/comparison';
 import {
   requestAvailableQuantity,
@@ -476,14 +480,12 @@ function fillFromRequest(requestId: string) {
     requests.find((entry) => entry.id === requestId) ??
     requests.find((entry) => entry.id === assignment?.requestId);
   sourceRequestId.value = request ? String(request.id) : requestId;
-  const domestic = salesChannelOf(source.businessType) === 'DOMESTIC';
-  if (domestic) {
-    header.value.subject = (
-      request?.name?.trim() ||
-      source.name?.trim() ||
-      source.code
-    )?.slice(0, 200);
-  }
+  const channel = salesChannelOf(source.businessType);
+  header.value.subject ??= contractInternalOrderNo(source, channel)?.slice(
+    0,
+    200,
+  );
+  const domestic = channel === 'DOMESTIC';
   const items = new Map(source.items.map((item) => [item.id, item]));
   rows.value = transferableRequestLines(source, requestId).flatMap(
     ({ line, assignmentId, remaining }) => {

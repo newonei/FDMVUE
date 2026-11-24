@@ -65,6 +65,7 @@ watch([contactsOpen, extrasBusy], ([contacts, extras]) =>
 );
 onBeforeUnmount(() => emit('busy', false));
 const form = reactive({
+  subject: '',
   contactId: undefined as string | undefined,
   deliveryDate: '',
   deliveryAddress: '',
@@ -226,6 +227,7 @@ watch(
     // Saving only print extras must preserve any unfinished contact/terms edits.
     if (previous?.[0] !== props.view.id || !formDirty.value) {
       Object.assign(form, {
+        subject: props.view.details.subject ?? '',
         contactId: props.view.details.contactId,
         deliveryDate: props.view.details.deliveryDate ?? '',
         deliveryAddress: props.view.details.deliveryAddress ?? '',
@@ -253,6 +255,10 @@ function payload() {
   return {
     ...details,
     ...form,
+    subject:
+      form.subject === (props.view.details.subject ?? '')
+        ? undefined
+        : form.subject,
     ...(canEditExtras.value ? printExtras.value?.payload() : {}),
   };
 }
@@ -273,7 +279,10 @@ function pendingSave() {
     : { action: 'SAVE_EXTRAS', payload: printExtras.value?.payload() ?? {} };
 }
 function markSaved(action: string) {
-  if (action !== 'SAVE_EXTRAS') formBaseline.value = JSON.stringify(form);
+  if (action !== 'SAVE_EXTRAS') {
+    form.subject = props.view.details.subject ?? '';
+    formBaseline.value = JSON.stringify(form);
+  }
   printExtras.value?.markSaved();
   extrasDirty.value = false;
 }
@@ -314,8 +323,20 @@ function confirm() {
           {{ view.details.status === 'CONFIRMED' ? '已确认' : '草稿' }}
         </Tag>
       </template>
-      <h4 class="section-title">工厂与交货</h4>
       <Form layout="vertical" class="order-fields">
+        <Form.Item
+          html-for="order-details-subject"
+          label="采购主题"
+          class="wide"
+        >
+          <Input
+            id="order-details-subject"
+            v-model:value="form.subject"
+            :disabled="!canEdit || saving"
+            :maxlength="200"
+          />
+        </Form.Item>
+        <h4 class="section-title wide">工厂与交货</h4>
         <Form.Item
           label="采购日期"
           html-for="order-details-purchase-date"

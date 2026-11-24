@@ -303,6 +303,7 @@ export function orderDetailsPayload(value: Record<string, unknown>) {
       'deliveryAddress',
       'deliveryDate',
       'purchaseDate',
+      'subject',
       'remark',
       'accessoryNote',
       'reason',

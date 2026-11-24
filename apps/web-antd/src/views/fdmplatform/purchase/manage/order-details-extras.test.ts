@@ -98,6 +98,7 @@ function fixture(actions: string[]): ProcurementOrderView {
       deliveryDate: '2026-11-28',
       documentDate: '2026-11-18',
       purchaseDate: '2026-11-17',
+      subject: 'NB-202611-18',
       clauseIds: [],
     },
     allowedActions: actions,
@@ -197,6 +198,38 @@ describe('independent procurement extras saving', () => {
     expect(confirmed.mock.calls[0]![0]).not.toHaveProperty('documentDate');
   });
 
+  it('保存下单资料时可以修改采购主题', async () => {
+    const { host, view, savedDetails, details } = await mount(['SAVE_DETAILS']);
+    const subject = host.querySelector<HTMLInputElement>(
+      '#order-details-subject',
+    )!;
+    expect(subject.value).toBe('NB-202611-18');
+    expect(details.value?.isDirty()).toBe(false);
+
+    subject.value = 'NB-202611-18 瑜伽垫包装';
+    subject.dispatchEvent(new Event('input'));
+    await nextTick();
+    expect(details.value?.pendingSave()).toMatchObject({
+      action: 'SAVE_DETAILS',
+      payload: { subject: subject.value },
+    });
+    [...host.querySelectorAll('button')]
+      .find((button) => button.textContent?.trim() === '先存草稿')!
+      .click();
+    expect(savedDetails).toHaveBeenCalledWith(
+      expect.objectContaining({ subject: subject.value }),
+    );
+
+    view.value = {
+      ...view.value,
+      details: { ...view.value.details, subject: subject.value, version: 2 },
+    };
+    await nextTick();
+    details.value?.markSaved('SAVE_DETAILS');
+    expect(subject.value).toBe('NB-202611-18 瑜伽垫包装');
+    expect(details.value?.isDirty()).toBe(false);
+  });
+
   it('does not count automatically selected settings and contacts as edits', async () => {
     defaultSettings();
     vi.mocked(getSupplierContacts).mockResolvedValue([
@@ -249,6 +282,9 @@ describe('independent procurement extras saving', () => {
 
   it('allows confirmed details to save only the six extras fields', async () => {
     const { host, saved } = await mount(['SAVE_EXTRAS']);
+    expect(
+      host.querySelector<HTMLInputElement>('#order-details-subject')?.disabled,
+    ).toBe(true);
     const button = host.querySelector<HTMLButtonElement>('[data-extras]')!;
     expect(button.disabled).toBe(false);
     button.click();
