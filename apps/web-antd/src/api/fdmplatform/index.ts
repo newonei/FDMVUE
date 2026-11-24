@@ -99,7 +99,9 @@ export interface ContractItemSpecCorrection {
   correctedAt: number | string;
   reason: string;
   items: {
+    after?: ProductAttributes;
     afterSpecification: string;
+    before?: ProductAttributes;
     beforeSpecification: string;
     contractItemId: string;
     skuCode?: string;

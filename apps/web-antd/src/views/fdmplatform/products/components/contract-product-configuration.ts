@@ -1,5 +1,7 @@
 import type { Contract, ContractItem } from '#/api/fdmplatform';
 import type {
+  ProductAttributeOptions,
+  ProductAttributes,
   ProductConfiguration,
   ProductConfigurationItem,
 } from '#/api/fdmplatform/products';
@@ -21,13 +23,48 @@ export const contractConfigurationFields = [
 export type ContractConfigurationField =
   (typeof contractConfigurationFields)[number]['key'];
 
-/** 兼容仍以 cm 尺寸文本保存的标准产品；不从型号猜测颜色、纹路或图案。 */
+export function contractConfigurationChoices(
+  field: ContractConfigurationField,
+  value: ProductConfiguration[ContractConfigurationField],
+  options?: ProductAttributeOptions,
+  current?: ContractItem,
+) {
+  if (field === 'colorMode')
+    return [
+      { value: 'UNKNOWN', label: '待确认' },
+      { value: 'SINGLE', label: '单色' },
+      { value: 'DUAL', label: '双色' },
+    ];
+  if (field === 'patternMode')
+    return [
+      { value: 'UNKNOWN', label: '待确认' },
+      { value: 'NONE', label: '不雕刻' },
+      { value: 'LASER', label: '激光雕刻' },
+    ];
+  let available = options?.colors ?? [];
+  if (field === 'patternCode') available = options?.patterns ?? [];
+  else if (field.startsWith('texture')) available = options?.textures ?? [];
+  const labels: Partial<Record<ContractConfigurationField, null | string>> = {
+    frontColor: current?.frontColorLabel,
+    backColor: current?.backColorLabel,
+    textureFront: current?.textureFrontLabel,
+    textureBack: current?.textureBackLabel,
+  };
+  return typeof value === 'string' &&
+    value &&
+    !available.some((option) => option.value === value)
+    ? [...available, { value, label: labels[field] || value }]
+    : available;
+}
+
+/** 兼容旧版型号与规格文本，以及按 cm 保存的尺寸。 */
 export function contractConfigurationFrom(
   item: ContractItem,
 ): ProductConfiguration {
-  const parsed = (item.size ?? '').match(
-    /^\s*(\d+(?:\.\d+)?)\s*[*x×]\s*(\d+(?:\.\d+)?)\s*[*x×]\s*(\d+(?:\.\d+)?)\s*(mm|cm)\s*$/i,
-  );
+  const sizePattern =
+    /(?:^|规格[:：])\s*(\d+(?:\.\d+)?)\s*[*x×]\s*(\d+(?:\.\d+)?)\s*[*x×]\s*(\d+(?:\.\d+)?)\s*(mm|cm)\s*$/i;
+  const parsed =
+    item.size?.match(sizePattern) ?? item.specification?.match(sizePattern);
   const scale = parsed?.[4]?.toLowerCase() === 'mm' ? 1 : 10;
   const dimension = (index: number) =>
     parsed ? Number(parsed[index]) * scale : null;
@@ -136,7 +173,7 @@ export function applyConfiguredContractItem(
   };
 }
 
-export function contractConfigurationSummary(item: ContractItem) {
+export function contractConfigurationSummary(item: ProductAttributes) {
   const front =
     item.frontColorLabel ||
     item.frontColor ||
@@ -149,6 +186,8 @@ export function contractConfigurationSummary(item: ContractItem) {
   let color = '颜色方式待确认';
   if (item.colorMode === 'SINGLE') color = `单色 · ${front}`;
   else if (item.colorMode === 'DUAL') color = `双色 · 正 ${front} / 反 ${back}`;
+  else if (item.frontColor || item.backColor)
+    color += ` · 正 ${front} / 反 ${back}`;
   let pattern = '雕刻要求待确认';
   if (item.patternMode === 'NONE') pattern = '不雕刻';
   else if (item.patternMode === 'LASER')

@@ -1,14 +1,31 @@
 <script setup lang="ts">
-import type { Contract } from '#/api/fdmplatform';
+import type { ContractConfigurationField } from '../products/components/contract-product-configuration';
 
-import { computed, ref } from 'vue';
+import type { Contract, ContractItem } from '#/api/fdmplatform';
+import type {
+  ProductAttributeOptions,
+  ProductConfiguration,
+} from '#/api/fdmplatform/products';
 
-import { Alert, Checkbox, Input, InputNumber, Modal } from 'ant-design-vue';
+import { computed, onMounted, ref } from 'vue';
+
+import {
+  Alert,
+  Button,
+  Checkbox,
+  Input,
+  InputNumber,
+  Modal,
+  Select,
+} from 'ant-design-vue';
 
 import { contractAction, newIdempotencyKey } from '#/api/fdmplatform';
+import { getProductAttributeOptions } from '#/api/fdmplatform/products';
 
 import { errorText } from '../data';
 import {
+  contractConfigurationChoices,
+  contractConfigurationFields,
   contractConfigurationFrom,
   contractConfigurationSummary,
 } from '../products/components/contract-product-configuration';
@@ -16,59 +33,143 @@ import {
 const props = defineProps<{ contract: Contract }>();
 const emit = defineEmits<{ close: []; saved: [value: Contract] }>();
 
-const dimensionFields = [
-  { key: 'lengthMm', label: '长（mm）' },
-  { key: 'widthMm', label: '宽（mm）' },
-  { key: 'thicknessMm', label: '厚（mm）' },
-] as const;
+const fields = contractConfigurationFields.filter(({ key }) => key !== 'name');
 const contractId = props.contract.id;
 const expectedVersion = props.contract.version;
 const entries = ref(
-  props.contract.items.map((item, index) => {
-    const configuration = contractConfigurationFrom(item);
-    const original = {
-      lengthMm: configuration.lengthMm ?? undefined,
-      widthMm: configuration.widthMm ?? undefined,
-      thicknessMm: configuration.finishedThicknessMm ?? undefined,
-    };
-    return {
-      item,
-      index: index + 1,
-      original,
-      dimensions: { ...original },
-      blockReason: props.contract.itemSpecCorrectionBlockReasons?.[item.id],
-      selected: false,
-    };
-  }),
+  props.contract.items.map((item, index) => ({
+    item,
+    index: index + 1,
+    draft: correctionConfigurationFrom(item),
+    blockReason: props.contract.itemSpecCorrectionBlockReasons?.[item.id],
+    selected: false,
+  })),
 );
 const reason = ref('');
 const saving = ref(false);
 const saveError = ref('');
+const options = ref<ProductAttributeOptions>();
+const optionsLoading = ref(false);
+const optionsError = ref('');
+
 const selected = computed(() =>
   entries.value.filter((entry) => entry.selected && !entry.blockReason),
 );
-const inputsValid = computed(() =>
-  selected.value.every(
-    ({ dimensions, original }) =>
-      dimensionFields.every(({ key }) => {
-        const value = dimensions[key];
-        return typeof value === 'number' && Number.isFinite(value) && value > 0;
-      }) &&
-      dimensionFields.some(({ key }) => dimensions[key] !== original[key]),
-  ),
-);
 const canSave = computed(
-  () => selected.value.length > 0 && inputsValid.value && !!reason.value.trim(),
+  () =>
+    selected.value.length > 0 &&
+    selected.value.every(({ item, draft }) => !inputError(item, draft)) &&
+    !!reason.value.trim(),
 );
 let attempt: undefined | { fingerprint: string; key: string };
+
+async function loadOptions() {
+  optionsLoading.value = true;
+  optionsError.value = '';
+  try {
+    options.value = await getProductAttributeOptions(props.contract.companyId);
+  } catch (error) {
+    optionsError.value = errorText(error);
+  } finally {
+    optionsLoading.value = false;
+  }
+}
+onMounted(loadOptions);
+
+function correctionConfigurationFrom(item: ContractItem): ProductConfiguration {
+  const configuration = contractConfigurationFrom(item);
+  if (configuration.colorMode !== 'SINGLE') {
+    configuration.frontColor = item.frontColor ?? '';
+    configuration.backColor = item.backColor ?? '';
+  }
+  return configuration;
+}
+
+function linePayload(contractItemId: string, draft: ProductConfiguration) {
+  const frontColor = draft.frontColor?.trim() ?? '';
+  const noPattern = draft.patternMode === 'NONE';
+  return {
+    contractItemId,
+    lengthMm: draft.lengthMm ?? null,
+    widthMm: draft.widthMm ?? null,
+    thicknessMm: draft.finishedThicknessMm ?? null,
+    colorMode: draft.colorMode || 'UNKNOWN',
+    frontColor,
+    backColor:
+      draft.colorMode === 'SINGLE'
+        ? frontColor
+        : (draft.backColor?.trim() ?? ''),
+    textureFront: draft.textureFront?.trim() ?? '',
+    textureBack: draft.textureBack?.trim() ?? '',
+    patternMode: draft.patternMode || 'UNKNOWN',
+    patternCode: noPattern ? '' : (draft.patternCode?.trim() ?? ''),
+    patternVersion: noPattern ? '' : (draft.patternVersion?.trim() ?? ''),
+  };
+}
+
+function inputError(item: ContractItem, draft: ProductConfiguration) {
+  const payload = linePayload(item.id, draft);
+  if (
+    [payload.lengthMm, payload.widthMm, payload.thicknessMm].some(
+      (value) =>
+        value === null ||
+        !Number.isFinite(value) ||
+        value < 0.001 ||
+        value > 10_000_000,
+    )
+  )
+    return '请填写大于零的长、宽、厚';
+  if (
+    payload.colorMode === 'DUAL' &&
+    payload.frontColor &&
+    payload.backColor &&
+    payload.frontColor.toUpperCase() === payload.backColor.toUpperCase()
+  )
+    return '双色的正反面颜色必须不同';
+  const original = linePayload(item.id, {
+    ...correctionConfigurationFrom(item),
+    lengthMm: item.lengthMm,
+    widthMm: item.widthMm,
+    finishedThicknessMm: item.finishedThicknessMm,
+  });
+  return JSON.stringify(payload) === JSON.stringify(original)
+    ? '请至少更正一项规格'
+    : '';
+}
+
+function updateField(
+  draft: ProductConfiguration,
+  field: ContractConfigurationField,
+  value: unknown,
+) {
+  Object.assign(draft, {
+    [field]: value ?? (field.endsWith('Mm') ? null : ''),
+  });
+  if (draft.colorMode === 'SINGLE') draft.backColor = draft.frontColor;
+  if (draft.patternMode === 'NONE') {
+    draft.patternCode = '';
+    draft.patternVersion = '';
+  }
+  saveError.value = '';
+}
+
+function choices(
+  field: ContractConfigurationField,
+  item: ContractItem,
+  draft: ProductConfiguration,
+) {
+  return contractConfigurationChoices(
+    field,
+    draft[field],
+    options.value,
+    item,
+  ).filter(({ value }) => value !== 'UNKNOWN');
+}
 
 async function save() {
   if (!canSave.value || saving.value) return;
   const payload = {
-    items: selected.value.map(({ dimensions, item }) => ({
-      contractItemId: item.id,
-      ...dimensions,
-    })),
+    items: selected.value.map(({ draft, item }) => linePayload(item.id, draft)),
     reason: reason.value.trim(),
   };
   const fingerprint = JSON.stringify(payload);
@@ -111,8 +212,19 @@ async function save() {
     @ok="save"
   >
     <p class="correction-intro">
-      勾选尺寸有误的明细，填写正确尺寸。保存后同步关联的采购申请和采购草稿。
+      勾选需要更正的明细。颜色、纹路和雕刻可留空，保存后同步关联的采购申请和采购草稿。
     </p>
+    <Alert
+      v-if="optionsError"
+      :message="optionsError"
+      class="correction-options"
+      type="error"
+      show-icon
+    >
+      <template #action>
+        <Button size="small" @click="loadOptions">重新加载规格选项</Button>
+      </template>
+    </Alert>
     <div class="correction-items" aria-label="合同明细">
       <div
         v-for="entry in entries"
@@ -127,7 +239,7 @@ async function save() {
           <span v-if="entry.item.skuCode">（{{ entry.item.skuCode }}）</span>
         </Checkbox>
         <div class="correction-item-meta">
-          原尺寸 {{ entry.item.size || entry.item.specification || '未维护' }} ·
+          原规格 {{ entry.item.size || entry.item.specification || '未维护' }} ·
           {{ entry.item.quantity }} {{ entry.item.unit }}
         </div>
         <div class="correction-item-meta">
@@ -136,22 +248,81 @@ async function save() {
         <div v-if="entry.blockReason" class="correction-item-meta">
           {{ entry.blockReason }}
         </div>
-        <div v-if="entry.selected" class="correction-dimensions">
-          <label v-for="field in dimensionFields" :key="field.key">
-            {{ field.label }}
-            <InputNumber
-              v-model:value="entry.dimensions[field.key]"
-              :disabled="saving"
-              :controls="false"
-              :aria-label="`第 ${entry.index} 行${field.label}`"
-            />
-          </label>
-        </div>
+        <template v-if="entry.selected">
+          <div class="correction-fields">
+            <label
+              v-for="field in fields"
+              v-show="
+                (field.key !== 'patternCode' &&
+                  field.key !== 'patternVersion') ||
+                entry.draft.patternMode === 'LASER'
+              "
+              :key="field.key"
+              :for="`correction-${entry.index}-${field.key}`"
+            >
+              {{ field.label }}
+              <InputNumber
+                v-if="field.type === 'number'"
+                :id="`correction-${entry.index}-${field.key}`"
+                :value="entry.draft[field.key] ?? undefined"
+                :disabled="saving"
+                :min="0.001"
+                :max="10_000_000"
+                :precision="3"
+                :controls="false"
+                :aria-label="`第 ${entry.index} 行${field.label}`"
+                @update:value="
+                  (value) => updateField(entry.draft, field.key, value)
+                "
+              />
+              <Select
+                v-else-if="field.type === 'select'"
+                :id="`correction-${entry.index}-${field.key}`"
+                :value="
+                  entry.draft[field.key] === 'UNKNOWN'
+                    ? undefined
+                    : entry.draft[field.key] || undefined
+                "
+                :options="choices(field.key, entry.item, entry.draft)"
+                :disabled="
+                  saving ||
+                  !options ||
+                  (field.key === 'backColor' &&
+                    entry.draft.colorMode === 'SINGLE')
+                "
+                :loading="optionsLoading"
+                allow-clear
+                show-search
+                option-filter-prop="label"
+                placeholder="选填"
+                :aria-label="`第 ${entry.index} 行${field.label}`"
+                @update:value="
+                  (value) => updateField(entry.draft, field.key, value)
+                "
+              />
+              <Input
+                v-else
+                :id="`correction-${entry.index}-${field.key}`"
+                :value="entry.draft[field.key] ?? undefined"
+                :disabled="saving"
+                :maxlength="100"
+                placeholder="选填"
+                :aria-label="`第 ${entry.index} 行${field.label}`"
+                @update:value="
+                  (value) => updateField(entry.draft, field.key, value)
+                "
+              />
+            </label>
+          </div>
+          <p
+            v-if="inputError(entry.item, entry.draft)"
+            class="correction-item-meta"
+          >
+            {{ inputError(entry.item, entry.draft) }}
+          </p>
+        </template>
       </div>
     </div>
-    <p v-if="selected.length && !inputsValid" role="status">
-      请为每条选中明细填写大于零的长、宽、厚，并修改至少一项尺寸。
-    </p>
     <label class="correction-reason">
       更正原因（必填）
       <Input.TextArea
@@ -167,7 +338,8 @@ async function save() {
 </template>
 
 <style scoped>
-.correction-intro {
+.correction-intro,
+.correction-options {
   margin-bottom: 12px;
 }
 
@@ -192,24 +364,31 @@ async function save() {
   color: hsl(var(--muted-foreground));
 }
 
-.correction-dimensions {
+.correction-fields {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   margin: 8px 0 0 24px;
 }
 
-.correction-dimensions label,
+.correction-fields label,
 .correction-reason {
   display: grid;
   gap: 4px;
+  min-width: 0;
 }
 
-.correction-dimensions :deep(.ant-input-number) {
+.correction-fields :deep(.ant-input-number) {
   width: 100%;
 }
 
 .correction-reason {
   margin-bottom: 12px;
+}
+
+@media (max-width: 600px) {
+  .correction-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 </style>

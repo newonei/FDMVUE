@@ -35,6 +35,7 @@ import {
 
 import { productPatternText } from '../manufacturing';
 import {
+  contractConfigurationChoices,
   contractConfigurationFields,
   contractConfigurationFrom,
   contractConfigurationItems,
@@ -164,36 +165,12 @@ function stringValue(field: ContractConfigurationField) {
   return draft.value[field] as string | undefined;
 }
 function choices(field: ContractConfigurationField) {
-  if (field === 'colorMode')
-    return [
-      { value: 'UNKNOWN', label: '待确认' },
-      { value: 'SINGLE', label: '单色' },
-      { value: 'DUAL', label: '双色' },
-    ];
-  if (field === 'patternMode')
-    return [
-      { value: 'UNKNOWN', label: '待确认' },
-      { value: 'NONE', label: '不雕刻' },
-      { value: 'LASER', label: '激光雕刻' },
-    ];
-  let available = options.value?.colors ?? [];
-  if (field === 'patternCode') available = options.value?.patterns ?? [];
-  else if (field.startsWith('texture'))
-    available = options.value?.textures ?? [];
-  const value = draft.value[field];
-  const current = props.items[0];
-  const labels: Partial<Record<ContractConfigurationField, null | string>> = {
-    frontColor: current?.frontColorLabel,
-    backColor: current?.backColorLabel,
-    textureFront: current?.textureFrontLabel,
-    textureBack: current?.textureBackLabel,
-  };
-  const label = labels[field];
-  return typeof value === 'string' &&
-    value &&
-    !available.some((option) => option.value === value)
-    ? [...available, { value, label: label || value }]
-    : available;
+  return contractConfigurationChoices(
+    field,
+    draft.value[field],
+    options.value,
+    props.items[0],
+  );
 }
 async function loadPreview() {
   if (busy.value || !sourceReady.value || fields.value.length === 0) return;

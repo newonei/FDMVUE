@@ -13,6 +13,7 @@ import type {
   ContractItem,
   Directory,
   DocumentRow,
+  ContractItemSpecCorrection as ItemSpecCorrectionRecord,
   MasterRecord,
   PageResource,
 } from '#/api/fdmplatform';
@@ -124,6 +125,15 @@ const emit = defineEmits<{
   refresh: [];
   updated: [value: Contract];
 }>();
+
+function specCorrectionAttributeChange(
+  item: ItemSpecCorrectionRecord['items'][number],
+) {
+  if (!item.before || !item.after) return '';
+  const before = contractConfigurationSummary(item.before);
+  const after = contractConfigurationSummary(item.after);
+  return before === after ? '' : `${before} → ${after}`;
+}
 
 /** 出库单：新建弹窗、详情抽屉和库存中心同一组件，在合同订单里直接弹出 */
 const StockOutDialog = defineAsyncComponent(
@@ -1644,6 +1654,12 @@ async function download(file: { id: string; name: string }) {
                     <span class="spec-correction-change">
                       {{ item.beforeSpecification || '原规格待核对' }} →
                       {{ item.afterSpecification }}
+                    </span>
+                    <span
+                      v-if="specCorrectionAttributeChange(item)"
+                      class="spec-correction-change"
+                    >
+                      {{ specCorrectionAttributeChange(item) }}
                     </span>
                   </li>
                 </ul>

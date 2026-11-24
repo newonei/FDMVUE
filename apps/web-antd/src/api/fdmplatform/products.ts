@@ -361,9 +361,10 @@ export function getProducts(params: ProductQuery) {
   return requestClient.get<PageResult<Product>>(base, { params });
 }
 /** 生产分类和生产属性字典，包含工厂维护的自定义颜色。 */
-export function getProductAttributeOptions() {
+export function getProductAttributeOptions(companyId?: number) {
   return requestClient.get<ProductAttributeOptions>(
     `${base}/attribute-options`,
+    companyId === undefined ? undefined : { params: { companyId } },
   );
 }
 /** 产品档案左侧分类：分类和各分类产品数，口径与同条件下的产品列表一致（不含分类本身）。 */
