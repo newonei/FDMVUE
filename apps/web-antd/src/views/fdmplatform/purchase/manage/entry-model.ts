@@ -205,7 +205,7 @@ export function entryTotals(rows: EntryRow[], header: EntryHeader) {
     ...(hasAgreedAmount && {
       discountAdjustment: discountAdjustment.toFixed(2),
     }),
-    quantity: quantity.toFixed(0),
+    quantity: quantity.toFixed(quantity.decimalPlaces() ?? 0),
     count: rows.filter((row) => !blank(row.quantity)).length,
   };
 }
