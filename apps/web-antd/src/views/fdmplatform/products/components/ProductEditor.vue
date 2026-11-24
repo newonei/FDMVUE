@@ -369,6 +369,7 @@ async function save() {
         :value="manufacturing"
         :colors="attributeOptions.colors"
         :derive-layers="deriveLayers"
+        :saved-colors="product"
         @update:value="updateManufacturing"
       />
       <Alert

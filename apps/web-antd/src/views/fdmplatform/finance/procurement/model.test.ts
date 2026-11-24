@@ -153,6 +153,19 @@ describe('采购财务编辑与金额口径', () => {
       ),
     ).toBe('0.81');
   });
+  it('固定总价优先于折算单价，取消余额时按有效数量分摊', () => {
+    const line = {
+      quantity: '30000',
+      unitPrice: '0.035264',
+      agreedAmount: '1057.91',
+    };
+    expect(procurementLineAmount(line)).toBe('1057.91');
+    expect(procurementLineAmount({ ...line, cancelledQuantity: '15000' })).toBe(
+      '528.96',
+    );
+    expect(procurementLineAmount({ ...line, agreedAmount: '0' })).toBe('0.00');
+    expect(procurementOrderAmount([line], 'CNY', '2.25')).toBe('1060.16');
+  });
   it('先按每行币种小数位取整再合计，而不是最终统一取整', () => {
     expect(
       procurementOrderAmount(

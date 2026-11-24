@@ -13,6 +13,7 @@ import {
   quotedSupplier,
   setRowGift,
   setRowPrice,
+  setRowPricingMode,
   setRowQuantity,
   setRowTotal,
 } from './entry-model';
@@ -121,6 +122,32 @@ describe('新建采购单表单', () => {
     expect([line.unitPrice, line.total]).toEqual(['0', '0.00']);
   });
 
+  it('固定总价按币种校验并允许零元，切回单价后使用六位单价', () => {
+    const line = row({ quantity: '30000' });
+    const header = { currency: 'CNY', supplierId: 's', companyId: 1 };
+    setRowPricingMode(line, 'TOTAL');
+    setRowTotal(line, '1057.911');
+    expect(entryErrors([line], header).lines.r1).toContain('最多 2 位小数');
+    expect(entryErrors([line], { ...header, currency: 'KWD' }).lines).toEqual(
+      {},
+    );
+
+    setRowTotal(line, '0');
+    expect(entryErrors([line], header).lines).toEqual({});
+    expect(entryPayload([line], header, 'key').lines[0]).toMatchObject({
+      pricingMode: 'TOTAL',
+      agreedAmount: '0',
+    });
+
+    setRowTotal(line, '1057.91');
+    setRowPricingMode(line, 'UNIT');
+    expect(entryPayload([line], header, 'key').lines[0]).toMatchObject({
+      pricingMode: 'UNIT',
+      unitPrice: '0.035264',
+      agreedAmount: undefined,
+    });
+  });
+
   it('totals lines, adds fees and subtracts the round-off like 金智', () => {
     const rows = [
       row({ quantity: '100', unitPrice: '12.5' }),
@@ -132,6 +159,7 @@ describe('新建采购单表单', () => {
       lines: '1250.00',
       discounted: '1250.00',
       total: '1275.00',
+      quantity: '101',
       count: 2,
     });
     expect(

@@ -30,6 +30,7 @@ import {
 } from 'ant-design-vue';
 
 import {
+  feedbackDiagnosticType,
   getDesktopFeedbackAttachment,
   getDesktopFeedbackPage,
   updateDesktopFeedback,
@@ -170,6 +171,10 @@ function changePage(next: number, limit: number) {
 }
 
 const detail = ref<DesktopFeedback>();
+const detailAttachments = computed(() => [
+  ...(detail.value?.attachments ?? []),
+  ...(detail.value?.diagnostics ?? []),
+]);
 const editStatus = ref<FeedbackStatus>('pending');
 const reply = ref('');
 const saving = ref(false);
@@ -182,26 +187,30 @@ const changed = computed(
 );
 
 const imageTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
-const selectedImage = ref<number>();
-const loadingImage = ref(false);
-const image = ref<{ name: string; url: string }>();
-const imageError = ref('');
+const selectedAttachment = ref<number>();
+const loadingAttachment = ref(false);
+const attachmentPreview = ref<{
+  name: string;
+  text?: string;
+  url: string;
+}>();
+const attachmentError = ref('');
 let attachmentRequest: AbortController | undefined;
 
-function resetImage() {
+function resetAttachment() {
   attachmentRequest?.abort();
   attachmentRequest = undefined;
-  if (image.value) URL.revokeObjectURL(image.value.url);
-  image.value = undefined;
-  selectedImage.value = undefined;
-  loadingImage.value = false;
-  imageError.value = '';
+  if (attachmentPreview.value) URL.revokeObjectURL(attachmentPreview.value.url);
+  attachmentPreview.value = undefined;
+  selectedAttachment.value = undefined;
+  loadingAttachment.value = false;
+  attachmentError.value = '';
 }
 
 function openDetail(id: string) {
   const row = rows.value.find((item) => item.id === id);
   if (!row) return;
-  resetImage();
+  resetAttachment();
   detail.value = row;
   editStatus.value = row.status;
   reply.value = row.reply ?? '';
@@ -209,7 +218,7 @@ function openDetail(id: string) {
 }
 
 function closeDetail() {
-  resetImage();
+  resetAttachment();
   detail.value = undefined;
 }
 
@@ -229,19 +238,19 @@ function requestClose() {
   });
 }
 
-async function showImage(attachment: FeedbackAttachment) {
+async function showAttachment(attachment: FeedbackAttachment) {
   const row = detail.value;
   if (
     !row ||
-    (selectedImage.value === attachment.index &&
-      (image.value || loadingImage.value))
+    (selectedAttachment.value === attachment.index &&
+      (attachmentPreview.value || loadingAttachment.value))
   )
     return;
-  resetImage();
+  resetAttachment();
   const request = new AbortController();
   attachmentRequest = request;
-  selectedImage.value = attachment.index;
-  loadingImage.value = true;
+  selectedAttachment.value = attachment.index;
+  loadingAttachment.value = true;
   try {
     const blob = await getDesktopFeedbackAttachment(
       row.id,
@@ -249,18 +258,28 @@ async function showImage(attachment: FeedbackAttachment) {
       request.signal,
     );
     if (request.signal.aborted) return;
-    if (!imageTypes.has(blob.type)) {
-      imageError.value = '此截图无法预览。';
+    const diagnostic = attachment.contentType === feedbackDiagnosticType;
+    const supported = diagnostic
+      ? blob.type === feedbackDiagnosticType
+      : imageTypes.has(blob.type);
+    if (!supported || blob.size !== attachment.size) {
+      attachmentError.value = '此附件无法预览。';
       return;
     }
-    image.value = { name: attachment.name, url: URL.createObjectURL(blob) };
+    const text = diagnostic ? await blob.text() : undefined;
+    if (request.signal.aborted) return;
+    attachmentPreview.value = {
+      name: attachment.name,
+      text,
+      url: URL.createObjectURL(blob),
+    };
   } catch {
     if (!request.signal.aborted)
-      imageError.value = '截图加载失败，点击文件名可重试。';
+      attachmentError.value = '附件加载失败，点击文件名可重试。';
   } finally {
     if (attachmentRequest === request) {
       attachmentRequest = undefined;
-      loadingImage.value = false;
+      loadingAttachment.value = false;
     }
   }
 }
@@ -297,7 +316,7 @@ async function saveDetail() {
   }
 }
 
-onBeforeUnmount(resetImage);
+onBeforeUnmount(resetAttachment);
 </script>
 
 <template>
@@ -493,38 +512,52 @@ onBeforeUnmount(resetImage);
         </section>
 
         <section
-          v-if="detail.attachments.length"
+          v-if="detailAttachments.length"
           class="feedback-detail-section"
         >
           <h3>
-            截图
-            <small class="text-muted-foreground">{{ detail.attachments.length }} 张</small>
+            附件
+            <small class="text-muted-foreground">{{ detailAttachments.length }} 个</small>
           </h3>
           <div class="feedback-attachment-buttons">
             <Button
-              v-for="attachment in detail.attachments"
+              v-for="attachment in detailAttachments"
               :key="attachment.index"
-              :type="selectedImage === attachment.index ? 'primary' : 'default'"
-              :loading="selectedImage === attachment.index && loadingImage"
-              :aria-pressed="selectedImage === attachment.index"
+              :type="
+                selectedAttachment === attachment.index ? 'primary' : 'default'
+              "
+              :loading="
+                selectedAttachment === attachment.index && loadingAttachment
+              "
+              :aria-pressed="selectedAttachment === attachment.index"
               :title="attachment.name"
-              @click="showImage(attachment)"
+              @click="showAttachment(attachment)"
             >
               {{ attachment.name }}
             </Button>
           </div>
           <Alert
-            v-if="imageError"
+            v-if="attachmentError"
             class="mt-3"
-            :message="imageError"
+            :message="attachmentError"
             type="error"
             show-icon
           />
-          <div v-if="image" class="feedback-image-view bg-muted/50">
+          <div
+            v-if="attachmentPreview?.text !== undefined"
+            class="feedback-diagnostic-view bg-muted/50"
+          >
+            <pre>{{ attachmentPreview.text }}</pre>
+            <a :href="attachmentPreview.url" :download="attachmentPreview.name">下载诊断日志</a>
+          </div>
+          <div
+            v-else-if="attachmentPreview"
+            class="feedback-image-view bg-muted/50"
+          >
             <Image
-              :src="image.url"
-              :alt="image.name"
-              @error="imageError = '此截图无法预览。'"
+              :src="attachmentPreview.url"
+              :alt="attachmentPreview.name"
+              @error="attachmentError = '此截图无法预览。'"
             />
           </div>
         </section>
@@ -777,6 +810,20 @@ onBeforeUnmount(resetImage);
 .feedback-image-view :deep(img) {
   max-height: 290px;
   object-fit: contain;
+}
+
+.feedback-diagnostic-view {
+  padding: 12px;
+  margin-top: 10px;
+  border-radius: 8px;
+}
+
+.feedback-diagnostic-view pre {
+  max-height: 290px;
+  margin-bottom: 8px;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .feedback-resolution {

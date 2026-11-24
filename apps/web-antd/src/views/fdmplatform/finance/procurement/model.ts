@@ -517,23 +517,47 @@ export function procurementLineAmount(
   line: Record<string, unknown>,
   currency = 'CNY',
 ) {
-  return procurementLineValue(line).toFixed(
+  return procurementLineValue(line, currency).toFixed(
     currencyScale(currency),
     BigNumber.ROUND_HALF_UP,
   );
 }
-export function procurementLineValue(line: Record<string, unknown>) {
-  return new BigNumber(String(line.quantity ?? 0))
-    .minus(String(line.cancelledQuantity ?? 0))
-    .multipliedBy(String(line.unitPrice ?? 0));
+export function procurementLineValue(
+  line: Record<string, unknown>,
+  currency = 'CNY',
+) {
+  const ordered = new BigNumber(String(line.quantity ?? 0));
+  const effective = ordered.minus(String(line.cancelledQuantity ?? 0));
+  if (line.agreedAmount === null || line.agreedAmount === undefined)
+    return effective.multipliedBy(String(line.unitPrice ?? 0));
+  if (!ordered.gt(0) || !effective.gt(0)) return new BigNumber(0);
+
+  // 按原行总价和剩余数量分摊，金额按币种四舍五入一次。
+  const scale = currencyScale(currency);
+  const numerator = new BigNumber(String(line.agreedAmount))
+    .shiftedBy(scale)
+    .multipliedBy(effective);
+  const units = numerator.dividedToIntegerBy(ordered);
+  const roundUp = numerator.modulo(ordered).multipliedBy(2).gte(ordered);
+  return units.plus(roundUp ? 1 : 0).shiftedBy(-scale);
+}
+
+export function procurementUnitPrice(value: unknown) {
+  const price = new BigNumber(String(value ?? ''));
+  return price.isFinite()
+    ? price.toFormat(Math.max(2, price.decimalPlaces() ?? 0))
+    : '—';
 }
 export function procurementOrderAmount(
   lines: Record<string, unknown>[],
   currency: string,
+  additionalAmount?: unknown,
 ) {
   let total = new BigNumber(0);
   for (const line of lines)
     total = total.plus(procurementLineAmount(line, currency));
+  const adjustment = new BigNumber(String(additionalAmount ?? 0));
+  if (adjustment.isFinite()) total = total.plus(adjustment);
   return total.toFixed(currencyScale(currency));
 }
 export function hasPayableBalance(value: unknown) {

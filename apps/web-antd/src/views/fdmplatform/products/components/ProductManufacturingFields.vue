@@ -8,7 +8,10 @@ import { computed } from 'vue';
 
 import { Form, Input, InputNumber, Select } from 'ant-design-vue';
 
+import FdmColorPreview from '#/components/fdm-color-preview/fdm-color-preview.vue';
+
 import { filterProductColorOption } from '../attributes';
+import { productColorPreview } from '../color-preview';
 import {
   COLOR_DERIVED_LAYER_RULE,
   colorDerivedLayers,
@@ -26,11 +29,33 @@ const props = withDefaults(
   defineProps<{
     colors: ProductAttributeOption[];
     deriveLayers?: boolean;
+    savedColors?: ProductAttributes;
     value: ProductAttributes;
   }>(),
-  { deriveLayers: undefined },
+  { deriveLayers: undefined, savedColors: undefined },
 );
 const emit = defineEmits<{ 'update:value': [value: ProductAttributes] }>();
+
+const colorFields = {
+  DUAL: [
+    ['frontColor', '正面色号'],
+    ['backColor', '反面色号'],
+  ],
+  SINGLE: [['colorCode', '色号']],
+  UNKNOWN: [],
+} as const;
+type ColorField = (typeof colorFields)[keyof typeof colorFields][number][0];
+
+const colorsByValue = computed(
+  () => new Map(props.colors.map((color) => [color.value, color])),
+);
+const selectedColorFields = computed(() =>
+  colorFields[props.value.colorMode ?? 'UNKNOWN'].map(([field, label]) => ({
+    field,
+    label,
+    preview: selectedPreview(field),
+  })),
+);
 const automaticLayers = computed(
   () => props.deriveLayers ?? usesColorDerivedLayers(props.value),
 );
@@ -60,12 +85,27 @@ const layers = computed(() => {
 function update(field: keyof ProductAttributes, value: unknown) {
   emit('update:value', { ...props.value, [field]: value });
 }
-function colorOptionsFor(field: 'backColor' | 'colorCode' | 'frontColor') {
+function selectedPreview(field: ColorField) {
   const value = props.value[field];
-  if (!value || props.colors.some((color) => color.value === value))
-    return props.colors;
+  if (!value) return undefined;
+
+  const option = colorsByValue.value.get(value);
+  const saved =
+    props.savedColors?.[field] === value ? props.savedColors : undefined;
+  return productColorPreview(
+    value,
+    option?.label ?? saved?.[`${field}Label`],
+    option ? option.preview : saved?.[`${field}Preview`],
+  );
+}
+function colorOptionsFor(field: ColorField) {
+  const value = props.value[field];
+  if (!value || colorsByValue.value.has(value)) return props.colors;
+
+  const saved =
+    props.savedColors?.[field] === value ? props.savedColors : undefined;
   return [
-    { value, label: props.value[`${field}Label`] || value, disabled: true },
+    { value, label: saved?.[`${field}Label`] || value, disabled: true },
     ...props.colors,
   ];
 }
@@ -142,40 +182,27 @@ function changeMode(mode: unknown) {
           />
         </Form.Item>
       </template>
-      <Form.Item v-if="value.colorMode === 'SINGLE'" label="色号" required>
-        <Select
-          :value="value.colorCode || undefined"
-          :options="colorOptionsFor('colorCode')"
-          :filter-option="filterProductColorOption"
-          show-search
-          allow-clear
-          aria-label="色号"
-          placeholder="搜索色号，如 6225 C"
-          @update:value="(v) => update('colorCode', v ?? '')"
-        />
-      </Form.Item>
-      <template v-if="value.colorMode === 'DUAL'">
-        <Form.Item
-          v-for="[field, label] in [
-            ['frontColor', '正面色号'],
-            ['backColor', '反面色号'],
-          ] as const"
-          :key="field"
-          :label="label"
-          required
-        >
+      <Form.Item
+        v-for="{ field, label, preview } in selectedColorFields"
+        :key="field"
+        :label="label"
+        required
+      >
+        <div class="color-field">
           <Select
             :value="value[field] || undefined"
             :options="colorOptionsFor(field)"
             :filter-option="filterProductColorOption"
+            :aria-label="label"
+            class="color-select"
             show-search
             allow-clear
-            :aria-label="label"
             placeholder="搜索色号，如 6225 C"
             @update:value="(v) => update(field, v ?? '')"
           />
-        </Form.Item>
-      </template>
+          <FdmColorPreview v-if="preview" :color="preview" size="small" />
+        </div>
+      </Form.Item>
       <ProductColorSummary
         v-if="!value.colorMode || value.colorMode === 'UNKNOWN'"
         :value="value"
@@ -252,6 +279,17 @@ h3 {
 
 .fields :deep(.ant-input-number) {
   width: 100%;
+}
+
+.color-field {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.color-select {
+  flex: 1;
+  min-width: 0;
 }
 
 @media (max-width: 600px) {

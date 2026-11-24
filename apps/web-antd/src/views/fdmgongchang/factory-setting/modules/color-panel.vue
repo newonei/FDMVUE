@@ -23,14 +23,11 @@ import {
   getFactoryColors,
   saveFactoryColor,
 } from '#/api/fdmgongchang/factory';
+import { colorPreview, HEX_PATTERN } from '#/components/fdm-color-preview/color-preview';
+import FdmColorPreview from '#/components/fdm-color-preview/fdm-color-preview.vue';
 import ImageUpload from '#/components/upload/image-upload.vue';
 
-import {
-  colorPreview,
-  colorProblem,
-  filterColors,
-  HEX_PATTERN,
-} from './color-model';
+import { colorProblem, filterColors } from './color-model';
 
 /**
  * 颜色配置：板材、片材等工序物料的色号，可选色值（列表里显示色块）和实物照片（有照片时优先显示）。
@@ -58,7 +55,9 @@ interface Draft {
 const editing = ref<Draft>();
 const saving = ref(false);
 
-const rows = computed(() => filterColors(list.value, keyword.value, filter.value));
+const rows = computed(() =>
+  filterColors(list.value, keyword.value, filter.value),
+);
 const missing = computed(
   () => list.value.filter((c) => colorPreview(c).kind === 'none').length,
 );
@@ -151,7 +150,7 @@ async function remove(color: FdmgongchangColor) {
 <template>
   <section class="flex flex-col gap-3">
     <h2 class="m-0 text-sm font-semibold">
-      颜色配置<span class="ml-2 text-xs font-normal text-muted-foreground">板材、片材等的色号；有照片显示照片，没有照片显示色值色块。各厂共用</span>
+      颜色配置<span class="ml-2 text-xs font-normal text-muted-foreground">板材、片材等的色号，各厂共用</span>
     </h2>
     <div class="flex flex-wrap items-center gap-2">
       <Input
@@ -180,18 +179,7 @@ async function remove(color: FdmgongchangColor) {
     >
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'preview'">
-          <img
-            v-if="colorPreview(row(record)).kind === 'image'"
-            :src="colorPreview(row(record)).value"
-            :alt="record.code"
-            class="color-chip object-cover"
-          />
-          <span
-            v-else-if="colorPreview(row(record)).kind === 'swatch'"
-            class="color-chip"
-            :style="{ background: colorPreview(row(record)).value }"
-          ></span>
-          <span v-else class="color-chip color-chip-empty">无</span>
+          <FdmColorPreview :color="row(record)" empty />
         </template>
         <template v-else-if="column.key === 'code'">
           {{ record.code }}
@@ -304,23 +292,6 @@ async function remove(color: FdmgongchangColor) {
 </template>
 
 <style scoped>
-.color-chip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  font-size: 11px;
-  vertical-align: middle;
-  border: 1px solid var(--ant-color-border, #d9d9d9);
-  border-radius: 6px;
-}
-
-.color-chip-empty {
-  color: var(--ant-color-text-quaternary, #bfbfbf);
-  border-style: dashed;
-}
-
 .color-picker {
   width: 36px;
   height: 32px;

@@ -264,7 +264,67 @@ async function fill(input: HTMLInputElement, value: string) {
   await settle();
 }
 
+async function pressKey(host: HTMLElement, label: string, key: string) {
+  const handle = host.querySelector(`[aria-label="${label}"]`);
+  expect(handle).not.toBeNull();
+  handle!.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key }));
+  await settle();
+}
+
 describe('采购开单先保存草稿', () => {
+  it('按总价计价时独立保存实物数量和成交金额', async () => {
+    const { host } = await mount();
+    const input = (label: string) =>
+      host.querySelector<HTMLInputElement>(`[aria-label="第1行${label}"]`)!;
+
+    await fill(input('计价方式'), 'TOTAL');
+    await fill(input('总价'), '1057.91');
+    await fill(input('数量'), '30000');
+
+    expect(input('总价').value).toBe('1057.91');
+    expect(input('单价').value).toBe('0.035263666667');
+    expect(input('单价').disabled).toBe(true);
+    expect(host.querySelector('.formula')?.textContent).toContain('¥1057.91');
+
+    button(host, '保存草稿并完善资料').click();
+    await settle();
+    expect(mocks.create).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        lines: [
+          expect.objectContaining({
+            agreedAmount: '1057.91',
+            pricingMode: 'TOTAL',
+            quantity: '30000',
+          }),
+        ],
+      }),
+    );
+  });
+
+  it('实时汇总采购明细数量', async () => {
+    const { host } = await mount();
+    const summary = () =>
+      host.querySelector('.formula > span')?.textContent?.trim();
+    const quantityInput = (row: number) =>
+      host.querySelector<HTMLInputElement>(`[aria-label="第${row}行数量"]`)!;
+
+    expect(summary()).toBe('总数量 10');
+    button(host, '添加一行').click();
+    await settle();
+    expect(summary()).toBe('总数量 10');
+
+    await fill(quantityInput(1), '10.1');
+    await fill(quantityInput(2), '0.2');
+    expect(summary()).toBe('总数量 10.3');
+
+    button(quantityInput(2).closest('tr')!, '删除').click();
+    await settle();
+    expect(summary()).toBe('总数量 10.1');
+
+    await fill(quantityInput(1), '');
+    expect(summary()).toBe('总数量 0');
+  });
+
   it('quickly creates an auxiliary SKU, fills it into the locked contract and saves without a request source', async () => {
     mocks.auxiliary.mockResolvedValue({
       id: 'sku-label',
@@ -526,7 +586,7 @@ describe('采购开单先保存草稿', () => {
       'supplier-1',
     );
     await fill(
-      host.querySelector<HTMLInputElement>('tbody tr td:nth-child(5) input')!,
+      host.querySelector<HTMLInputElement>('[aria-label="第1行单价"]')!,
       '2',
     );
     button(host, '保存草稿并完善资料').click();
@@ -796,6 +856,151 @@ describe('采购开单先保存草稿', () => {
         deliveryDate: null,
       }),
       true,
+    );
+  });
+});
+
+describe('采购单产品明细排列', () => {
+  it('调整产品列的位置和单价列的宽度后，表头与输入列对齐且重新打开时保留设置', async () => {
+    localStorage.clear();
+    cleanup.push(() => localStorage.clear());
+    const columnOrder = (host: HTMLElement, selector: string) =>
+      [...host.querySelectorAll<HTMLElement>(selector)].map(
+        (element) => element.dataset.column,
+      );
+    const priceWidth = (host: HTMLElement) =>
+      Number.parseFloat(
+        host.querySelector<HTMLTableColElement>('col[data-column="unitPrice"]')!
+          .style.width,
+      );
+
+    const { host } = await mount();
+    const original = columnOrder(host, 'thead th[data-column]');
+    const productIndex = original.indexOf('product');
+    expect(productIndex).toBeGreaterThanOrEqual(0);
+    expect(original[productIndex + 1]).toBe('supplier');
+    const originalWidth = priceWidth(host);
+
+    const updated = [...original];
+    updated.splice(productIndex, 2, 'supplier', 'product');
+    const productHandle = host.querySelector('[aria-label="移动产品列"]')!;
+    const supplierHeader = host.querySelector('th[data-column="supplier"]')!;
+    productHandle.dispatchEvent(new DragEvent('dragstart', { bubbles: true }));
+    const dragOver = new DragEvent('dragover', {
+      bubbles: true,
+      cancelable: true,
+    });
+    supplierHeader.dispatchEvent(dragOver);
+    expect(dragOver.defaultPrevented).toBe(true);
+    supplierHeader.dispatchEvent(new DragEvent('drop', { bubbles: true }));
+    await settle();
+    expect(columnOrder(host, 'thead th[data-column]')).toEqual(updated);
+
+    await pressKey(host, '移动产品列', 'ArrowLeft');
+    expect(columnOrder(host, 'thead th[data-column]')).toEqual(original);
+    await pressKey(host, '移动产品列', 'ArrowRight');
+    expect(columnOrder(host, 'thead th[data-column]')).toEqual(updated);
+    expect(columnOrder(host, 'tbody tr:first-child td[data-column]')).toEqual(
+      updated,
+    );
+    expect(columnOrder(host, 'col[data-column]')).toEqual(updated);
+    const resizeHandle = host.querySelector('[aria-label="调整单价列宽"]')!;
+    for (const [event, clientX] of [
+      ['pointerdown', 100],
+      ['pointermove', 124],
+      ['pointerup', 124],
+    ] as const) {
+      resizeHandle.dispatchEvent(
+        new PointerEvent(event, { bubbles: true, clientX, pointerId: 1 }),
+      );
+    }
+    await settle();
+    expect(priceWidth(host)).toBe(originalWidth + 24);
+    await pressKey(host, '调整单价列宽', 'ArrowRight');
+    expect(priceWidth(host)).toBe(originalWidth + 40);
+
+    const reopened = await mount();
+    expect(columnOrder(reopened.host, 'thead th[data-column]')).toEqual(
+      updated,
+    );
+    expect(priceWidth(reopened.host)).toBe(originalWidth + 40);
+  });
+
+  it('把同色号的明细排到一起，手动调整行序后按实际顺序保存草稿', async () => {
+    const products = [
+      { id: 'blue-1', colorCode: 'BL01', name: '蓝色内箱', quantity: 10 },
+      { id: 'red-1', colorCode: 'RD02', name: '红色包装', quantity: 20 },
+      { id: 'blue-2', colorCode: 'BL01', name: '蓝色外箱', quantity: 30 },
+    ];
+    mocks.order.mockResolvedValue({
+      contractId: '',
+      companyId: 1,
+      details: {
+        status: 'DRAFT',
+        lineNotes: Object.fromEntries(
+          products.map(({ id, name }) => [id, { remark: `${name}备注` }]),
+        ),
+      },
+      order: {
+        id: 'source-order',
+        supplierId: 'supplier-1',
+        lines: products.map(({ id, colorCode, name, quantity }) => ({
+          id,
+          skuId: `sku-${id}`,
+          quantity,
+          unitPrice: 2,
+          specificationSnapshot: {
+            colorCode,
+            colorMode: 'SINGLE',
+            skuName: name,
+          },
+        })),
+      },
+    });
+    const { host } = await mount({
+      editOf: { contractId: '', orderId: 'source-order' },
+    });
+    const quantityInputs = () => [
+      ...host.querySelectorAll<HTMLInputElement>('input[aria-label$="行数量"]'),
+    ];
+    const quantities = () => quantityInputs().map(({ value }) => value);
+    await fill(quantityInputs()[2]!, '35');
+
+    expect(quantities()).toEqual(['10', '20', '35']);
+    button(host, '按色号排列').click();
+    await settle();
+    expect(quantities()).toEqual(['10', '35', '20']);
+    await pressKey(host, '移动第2行', 'ArrowUp');
+    expect(quantities()).toEqual(['35', '10', '20']);
+
+    button(host, '保存草稿').click();
+    await settle();
+    expect(mocks.update).toHaveBeenCalledExactlyOnceWith(
+      '',
+      'source-order',
+      expect.objectContaining({
+        lines: [
+          {
+            id: 'blue-2',
+            productId: 'sku-blue-2',
+            quantity: '35',
+            remark: '蓝色外箱备注',
+          },
+          {
+            id: 'blue-1',
+            productId: 'sku-blue-1',
+            quantity: '10',
+            remark: '蓝色内箱备注',
+          },
+          {
+            id: 'red-1',
+            productId: 'sku-red-1',
+            quantity: '20',
+            remark: '红色包装备注',
+          },
+        ].map((line) => expect.objectContaining(line)),
+      }),
+      false,
     );
   });
 });

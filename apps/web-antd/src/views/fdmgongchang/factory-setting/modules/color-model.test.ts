@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { colorPreview, colorProblem, filterColors } from './color-model';
+import { colorPreview } from '#/components/fdm-color-preview/color-preview';
+
+import { colorProblem, filterColors } from './color-model';
 
 const list = [
   { code: 'MB', name: '米白', dictLinked: true, hex: '#F5F0E6', itemCount: 2 },
@@ -17,6 +19,33 @@ describe('颜色配置', () => {
     expect(colorPreview(list[0]!).kind).toBe('swatch');
     expect(colorPreview(list[2]!).kind).toBe('none');
     expect(colorPreview({ code: 'X', hex: 'red' }).kind).toBe('none');
+  });
+
+  it('uses the color number to look up separate coated and uncoated swatches', () => {
+    expect(colorPreview({ code: '101 C' })).toEqual({
+      kind: 'swatch',
+      reference: true,
+      value: '#F7EB49',
+    });
+    expect(colorPreview({ code: '101u' }).value).toBe('#FFF166');
+    expect(colorPreview({ code: '6185 U' }).value).toBe('#7B837C');
+    expect(colorPreview({ code: '6092 U' }).value).toBe('#898DC7');
+    expect(colorPreview({ code: '6139 U' }).value).toBe('#49888E');
+    expect(colorPreview({ code: '8004', name: '棕' }).kind).toBe('none');
+  });
+
+  it('keeps the configured preview ahead of the color-number reference', () => {
+    const color = { code: '101 C', hex: '#112233' };
+    expect(colorPreview(color)).toEqual({ kind: 'swatch', value: '#112233' });
+    expect(colorPreview({ ...color, imageUrl: 'https://x/photo.jpg' })).toEqual({
+      kind: 'image',
+      value: 'https://x/photo.jpg',
+    });
+    expect(
+      filterColors([...list, { code: '101 C' }], '', 'noPreview').map(
+        ({ code }) => code,
+      ),
+    ).toEqual(['崔先生7632']);
   });
 
   it('searches code, name and remark and filters', () => {

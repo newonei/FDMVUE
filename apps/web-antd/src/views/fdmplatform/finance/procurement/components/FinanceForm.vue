@@ -157,6 +157,7 @@ async function loadOrder() {
     orderAmount.value = procurementOrderAmount(
       rows(value.order.lines),
       String(value.order.currency),
+      value.order.additionalAmount,
     );
   } catch (error) {
     pageError.value = errorText(error);

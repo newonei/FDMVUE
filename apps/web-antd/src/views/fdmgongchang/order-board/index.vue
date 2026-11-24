@@ -257,7 +257,17 @@ async function saveOwner() {
           <span class="text-muted-foreground">本页：待接单 {{ pageSummary.pending }} · 生产中 {{ pageSummary.running }} · 未分配负责人 {{ pageSummary.unassigned }}</span>
         </div>
         <Alert v-if="error" class="mb-3" type="warning" show-icon message="刷新失败，当前显示上次加载的订单，请稍后重试。" />
-        <Table :columns="columns" :data-source="rows" :loading="loading" row-key="id" size="middle" :scroll="{ x: 800 }" :pagination="{ current: pageNo, pageSize, total, showSizeChanger: true, pageSizeOptions: ['10', '20', '50'], showTotal: (count: number) => `共 ${count} 张订单` }" @change="(page) => { pageNo = page.current ?? 1; pageSize = page.pageSize ?? 10; load(); }">
+        <Table
+          :columns="columns"
+          :data-source="rows"
+          :loading="loading"
+          :row-class-name="(order: Api.Order) => order.status === 'COMPLETED' ? 'order-row--completed' : ''"
+          row-key="id"
+          size="middle"
+          :scroll="{ x: 800 }"
+          :pagination="{ current: pageNo, pageSize, total, showSizeChanger: true, pageSizeOptions: ['10', '20', '50'], showTotal: (count: number) => `共 ${count} 张订单` }"
+          @change="(page) => { pageNo = page.current ?? 1; pageSize = page.pageSize ?? 10; load(); }"
+        >
           <template #emptyText><div class="py-10 text-muted-foreground">{{ filters.keyword || filters.status || filters.ownerUserId ? '没有符合筛选条件的订单' : '当前工厂还没有生产订单' }}</div></template>
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'order'">
@@ -491,6 +501,15 @@ async function saveOwner() {
 .board-panel :deep(.ant-table-cell) {
   vertical-align: top;
 
+}
+
+.board-panel :deep(.ant-table-tbody > .order-row--completed > td) {
+  background: color-mix(in srgb, hsl(var(--success)) 8%, hsl(var(--background)));
+}
+
+.board-panel :deep(.ant-table-tbody > .order-row--completed:hover > td),
+.board-panel :deep(.ant-table-tbody > .order-row--completed > .ant-table-cell-row-hover) {
+  background: color-mix(in srgb, hsl(var(--success)) 12%, hsl(var(--background)));
 }
 
 .board-panel :deep(.ant-table-thead > tr > th) {

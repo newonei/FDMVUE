@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { LineColumn } from '../../../components/line-table-model';
 import type { EntryHeader, EntryRow } from '../entry-model';
 
 import type {
@@ -13,8 +14,11 @@ import type {
 } from '#/api/fdmplatform/procurement';
 import type { Product, ProductStructure } from '#/api/fdmplatform/products';
 
-import { computed, defineAsyncComponent, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, nextTick, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
+
+import { GripVertical } from '@vben/icons';
+import { useAccessStore, useUserStore } from '@vben/stores';
 
 import {
   Alert,
@@ -28,6 +32,8 @@ import {
   Textarea,
 } from 'ant-design-vue';
 import BigNumber from 'bignumber.js';
+import { getActivePinia } from 'pinia';
+import draggable from 'vuedraggable';
 
 import { getContract, getDirectory } from '#/api/fdmplatform';
 import { getContractBoard } from '#/api/fdmplatform/contract-board';
@@ -41,6 +47,15 @@ import {
 } from '#/api/fdmplatform/procurement';
 import { getProducts } from '#/api/fdmplatform/products';
 
+import {
+  clampWidth,
+  defaultSetting,
+  loadSetting,
+  moveKey,
+  saveSetting,
+  storageKey,
+  tableWidth,
+} from '../../../components/line-table-model';
 import RemoteMasterSelect from '../../../components/RemoteMasterSelect.vue';
 import { errorText, money, rows as records } from '../../../data';
 import { navigationRoute } from '../../../documents/navigation';
@@ -56,6 +71,7 @@ import {
   requestAvailableQuantity,
   transferableRequestLines,
 } from '../../request-transfer';
+import { entryRowsByColor } from '../entry-color-order';
 import {
   copyEntry,
   emptyRow,
@@ -70,6 +86,7 @@ import {
   quotedSupplier,
   setRowGift,
   setRowPrice,
+  setRowPricingMode,
   setRowQuantity,
   setRowTotal,
 } from '../entry-model';
@@ -94,6 +111,217 @@ const emit = defineEmits<{
 const today = localDate();
 const header = ref<EntryHeader>({});
 const rows = ref<EntryRow[]>([]);
+const detailColumns = [
+  { key: 'product', title: '产品', width: 300, minWidth: 145, required: true },
+  {
+    key: 'supplier',
+    title: '供应商',
+    width: 200,
+    minWidth: 115,
+    hint: '（不选同表头）',
+  },
+  {
+    key: 'specification',
+    title: '规格 / 单位 / 产品资料',
+    width: 280,
+    minWidth: 100,
+  },
+  { key: 'pricingMode', title: '计价方式', width: 120, minWidth: 110 },
+  { key: 'unitPrice', title: '单价', width: 128, minWidth: 75 },
+  { key: 'quantity', title: '数量', width: 110, minWidth: 75, required: true },
+  { key: 'total', title: '总价', width: 110, minWidth: 75, required: true },
+  {
+    key: 'arrivalDate',
+    title: '到货日期',
+    width: 150,
+    minWidth: 135,
+    hint: '（选填）',
+  },
+  { key: 'gift', title: '赠品', width: 72, minWidth: 60 },
+  { key: 'remark', title: '备注', width: 100, minWidth: 60 },
+] satisfies (LineColumn & {
+  hint?: string;
+  minWidth: number;
+  required?: boolean;
+})[];
+type DetailColumn = (typeof detailColumns)[number];
+
+const pinia = getActivePinia();
+const access = pinia ? useAccessStore(pinia) : undefined;
+const user = pinia ? useUserStore(pinia) : undefined;
+const columnStorageKey = computed(() =>
+  storageKey(
+    'purchase-order-editor',
+    `${access?.tenantId ?? ''}:${user?.userInfo?.id ?? user?.userInfo?.userId ?? 'anonymous'}`,
+  ),
+);
+const columnSetting = ref(defaultSetting(detailColumns));
+const columnDrag = ref<string>();
+const columnDrop = ref<string>();
+const draggedColumnIndex = computed(() =>
+  columnSetting.value.keys.indexOf(columnDrag.value ?? ''),
+);
+const columnResize = ref<{
+  key: string;
+  pointerId: number;
+  startWidth: number;
+  startX: number;
+  width: number;
+}>();
+const columnDefinitions = new Map(
+  detailColumns.map((column) => [column.key, column]),
+);
+const columns = computed(() =>
+  columnSetting.value.keys.map((key) => {
+    const column = columnDefinitions.get(key)!;
+    const width =
+      columnResize.value?.key === key
+        ? columnResize.value.width
+        : (columnSetting.value.widths[key] ?? column.width);
+    return { ...column, width: Math.max(column.minWidth, width) };
+  }),
+);
+const rowNumberWidth = 58;
+const actionsWidth = 64;
+const gridWidth = computed(
+  () => rowNumberWidth + tableWidth(columns.value) + actionsWidth,
+);
+const stickyProduct = computed(
+  () => columns.value[0]?.key === 'product' && columns.value[0].width <= 360,
+);
+
+watch(
+  [() => props.open, columnStorageKey],
+  ([open, key]) => {
+    clearColumnDrag();
+    columnResize.value = undefined;
+    if (!open) return;
+    const saved = loadSetting(detailColumns, key);
+    const savedKeys = [...saved.keys];
+    const unitPriceIndex = savedKeys.indexOf('unitPrice');
+    if (unitPriceIndex !== -1 && !savedKeys.includes('pricingMode'))
+      savedKeys.splice(unitPriceIndex, 0, 'pricingMode');
+    columnSetting.value = {
+      ...saved,
+      keys: [
+        ...new Set([
+          ...savedKeys,
+          ...detailColumns.map((column) => column.key),
+        ]),
+      ],
+    };
+  },
+  { immediate: true },
+);
+
+function focusAfterReorder(event: KeyboardEvent) {
+  const handle = event.currentTarget as HTMLButtonElement;
+  void nextTick(() => handle.focus());
+}
+
+function moveColumn(key: string, target: number, event?: KeyboardEvent) {
+  const keys = columnSetting.value.keys;
+  const next = moveKey(keys, keys.indexOf(key), target, 0);
+  if (next === keys) return;
+  columnSetting.value = { ...columnSetting.value, keys: next };
+  saveSetting(columnStorageKey.value, columnSetting.value);
+  if (event) focusAfterReorder(event);
+}
+
+function startColumnDrag(event: DragEvent, key: string) {
+  columnDrag.value = key;
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', key);
+  }
+}
+
+function overColumn(event: DragEvent, key: string) {
+  if (!columnDrag.value) return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+  columnDrop.value = key;
+}
+
+function leaveColumn(event: DragEvent, key: string) {
+  const cell = event.currentTarget as HTMLElement;
+  const target = event.relatedTarget;
+  if (
+    columnDrop.value === key &&
+    !(target instanceof Node && cell.contains(target))
+  )
+    columnDrop.value = undefined;
+}
+
+function dropColumn(event: DragEvent, target: number) {
+  if (!columnDrag.value) return;
+  event.preventDefault();
+  moveColumn(columnDrag.value, target);
+  clearColumnDrag();
+}
+
+function clearColumnDrag() {
+  columnDrag.value = undefined;
+  columnDrop.value = undefined;
+}
+
+function saveColumnWidth(key: string, width: number) {
+  columnSetting.value = {
+    ...columnSetting.value,
+    widths: { ...columnSetting.value.widths, [key]: width },
+  };
+  saveSetting(columnStorageKey.value, columnSetting.value);
+}
+
+function startColumnResize(event: PointerEvent, column: DetailColumn) {
+  if (event.button !== 0 || columnResize.value) return;
+  event.preventDefault();
+  (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  columnResize.value = {
+    key: column.key,
+    pointerId: event.pointerId,
+    startWidth: column.width,
+    startX: event.clientX,
+    width: column.width,
+  };
+}
+
+function resizeColumn(event: PointerEvent, column: DetailColumn) {
+  const resize = columnResize.value;
+  if (resize?.pointerId !== event.pointerId) return;
+  resize.width = Math.max(
+    column.minWidth,
+    clampWidth(resize.startWidth + event.clientX - resize.startX),
+  );
+}
+
+function finishColumnResize(event: PointerEvent) {
+  const resize = columnResize.value;
+  if (resize?.pointerId !== event.pointerId) return;
+  if (event.type === 'pointerup' && resize.width !== resize.startWidth)
+    saveColumnWidth(resize.key, resize.width);
+  columnResize.value = undefined;
+}
+
+function resizeColumnBy(column: DetailColumn, offset: number) {
+  const width = Math.max(column.minWidth, clampWidth(column.width + offset));
+  if (width !== column.width) saveColumnWidth(column.key, width);
+}
+
+const rowsByColor = computed(() => entryRowsByColor(rows.value));
+const canGroupColors = computed(() =>
+  rowsByColor.value.some((row, index) => row !== rows.value[index]),
+);
+function moveRow(index: number, offset: number, event: KeyboardEvent) {
+  const target = index + offset;
+  if (saving.value || target < 0 || target >= rows.value.length) return;
+  const next = [...rows.value];
+  const [row] = next.splice(index, 1);
+  next.splice(target, 0, row!);
+  rows.value = next;
+  focusAfterReorder(event);
+}
+
 const directory = ref<Directory>();
 const contract = ref<Contract>();
 const contracts = ref<{ label: string; value: string }[]>([]);
@@ -156,13 +384,26 @@ let sequence = 0;
 
 const errors = computed(() => entryErrors(rows.value, header.value));
 const totals = computed(() => entryTotals(rows.value, header.value));
+const currencyMark = computed(() =>
+  !header.value.currency || header.value.currency === 'CNY'
+    ? '¥'
+    : `${header.value.currency} `,
+);
+const pricingOptions = [
+  { label: '按单价计价', value: 'UNIT' },
+  { label: '按总价计价', value: 'TOTAL' },
+];
 const missingRequestPrices = computed(() => {
   if (
     !props.requestId ||
     salesChannelOf(contract.value?.businessType) !== 'DOMESTIC'
   )
     return 0;
-  return rows.value.filter((row) => row.requestItemId && !row.unitPrice).length;
+  return rows.value.filter(
+    (row) =>
+      row.requestItemId &&
+      (row.pricingMode === 'TOTAL' ? !row.total : !row.unitPrice),
+  ).length;
 });
 /** 供应商名称：下拉选中或报价带出时记下，用来提示拆单结果。 */
 const supplierNames = ref<Record<string, string>>({});
@@ -784,7 +1025,9 @@ async function save(submit = false) {
               :href="contractReviewHref"
               target="_blank"
               rel="noopener noreferrer"
-              >查看合同订单</a>
+            >
+              查看合同订单
+            </a>
             <button
               v-else-if="requestId && contract"
               type="button"
@@ -807,7 +1050,9 @@ async function save(submit = false) {
           />
         </div>
         <div class="field">
-          <span><em v-if="rows.some((row) => !row.supplierId)">*</em>供应商</span>
+          <span>
+            <em v-if="rows.some((row) => !row.supplierId)">*</em>供应商
+          </span>
           <RemoteMasterSelect
             v-model:value="header.supplierId"
             type="SUPPLIER"
@@ -865,6 +1110,14 @@ async function save(submit = false) {
         <b>产品明细</b>
         <span class="muted">共 {{ totals.count }} 行</span>
         <span class="grow"></span>
+        <Button
+          :disabled="saving || !canGroupColors"
+          size="small"
+          title="将相同色号的产品明细排在一起"
+          @click="rows = rowsByColor"
+        >
+          按色号排列
+        </Button>
         <Button size="small" type="primary" ghost @click="openPicker()">
           从产品中心选择
         </Button>
@@ -882,173 +1135,286 @@ async function save(submit = false) {
       <p v-if="missingRequestPrices" class="muted" role="status">
         {{ missingRequestPrices }} 行采购单价待核对填写
       </p>
-      <!-- 固定列宽：长产品名在列内换行，列放不下时横向滚动，序号/产品/删除列冻结 -->
       <div class="table-wrap">
-        <table class="entry-grid">
+        <table
+          class="entry-grid"
+          :style="{
+            width: `${gridWidth}px`,
+            '--row-number-width': `${rowNumberWidth}px`,
+          }"
+        >
+          <colgroup>
+            <col data-column="no" :style="{ width: `${rowNumberWidth}px` }" />
+            <col
+              v-for="column in columns"
+              :key="column.key"
+              :data-column="column.key"
+              :style="{ width: `${column.width}px` }"
+            />
+            <col data-column="ops" :style="{ width: `${actionsWidth}px` }" />
+          </colgroup>
           <thead>
             <tr>
-              <th class="no">#</th>
-              <th class="product"><em>*</em>产品</th>
-              <th class="supplier-col">供应商（不选同表头）</th>
-              <th class="spec-col">规格 / 单位 / 产品资料</th>
-              <th class="money"><em>*</em>单价</th>
-              <th class="money"><em>*</em>数量</th>
-              <th class="money"><em>*</em>总价</th>
-              <th class="date">到货日期（选填）</th>
-              <th class="gift">赠品</th>
-              <th class="remark">备注</th>
-              <th class="ops"></th>
+              <th class="no" data-column="no" scope="col">#</th>
+              <th
+                v-for="(column, index) in columns"
+                :key="column.key"
+                class="detail-column"
+                :class="{
+                  'sticky-product': column.key === 'product' && stickyProduct,
+                  'drop-before':
+                    columnDrop === column.key && draggedColumnIndex > index,
+                  'drop-after':
+                    columnDrop === column.key && draggedColumnIndex < index,
+                  resizing: columnResize?.key === column.key,
+                }"
+                :data-column="column.key"
+                scope="col"
+                @dragleave="leaveColumn($event, column.key)"
+                @dragover="overColumn($event, column.key)"
+                @drop="dropColumn($event, index)"
+              >
+                <button
+                  class="column-drag-handle"
+                  type="button"
+                  draggable="true"
+                  :aria-label="`移动${column.title}列`"
+                  :title="`${column.title}${column.hint ?? ''} · 拖动调整列顺序`"
+                  @dragend="clearColumnDrag"
+                  @dragstart="startColumnDrag($event, column.key)"
+                  @keydown.left.prevent="
+                    moveColumn(column.key, index - 1, $event)
+                  "
+                  @keydown.right.prevent="
+                    moveColumn(column.key, index + 1, $event)
+                  "
+                >
+                  <GripVertical :size="12" aria-hidden="true" />
+                  <span>
+                    <em v-if="column.required">*</em>{{ column.title
+                    }}{{ column.hint }}
+                  </span>
+                </button>
+                <button
+                  class="column-resize-handle"
+                  type="button"
+                  :aria-label="`调整${column.title}列宽`"
+                  title="拖动调整列宽"
+                  @keydown.left.prevent="resizeColumnBy(column, -16)"
+                  @keydown.right.prevent="resizeColumnBy(column, 16)"
+                  @lostpointercapture="finishColumnResize"
+                  @pointercancel="finishColumnResize"
+                  @pointerdown="startColumnResize($event, column)"
+                  @pointermove="resizeColumn($event, column)"
+                  @pointerup="finishColumnResize"
+                ></button>
+              </th>
+              <th class="ops" data-column="ops" scope="col"></th>
             </tr>
           </thead>
-          <tbody>
-            <tr
-              v-for="(row, index) in rows"
-              :key="row.key"
-              :class="{ invalid: submitted && errors.lines[row.key] }"
-            >
-              <td class="no">{{ index + 1 }}</td>
-              <td class="product">
-                <div class="product-pick">
-                  <Select
-                    :value="rowProductValue(row)"
-                    show-search
-                    :filter-option="false"
-                    :options="
-                      sourceRequestId && (editOf || !row.requestItemId)
-                        ? [...draftRequestProducts, ...productOptions]
-                        : [...contractItems, ...productOptions]
-                    "
-                    :disabled="!!row.requestItemId && !editOf"
-                    :placeholder="row.name || '搜索产品编号、名称'"
-                    :dropdown-match-select-width="460"
-                    style="width: 100%"
-                    @search="searchProducts"
-                    @update:value="(value) => chooseProduct(row, value)"
-                  />
-                  <Button
-                    v-if="!row.requestItemId || editOf"
-                    size="small"
-                    type="link"
-                    title="从产品中心按分类选择"
-                    @click="openPicker(row)"
-                  >
-                    选择
-                  </Button>
-                </div>
-                <span
-                  v-if="row.name"
-                  class="hint clamp"
-                  :title="`${row.code ?? ''} ${row.name}`"
-                  >{{ row.code }} {{ row.name }}</span>
-                <span v-if="row.requestItemId" class="hint">申请明细 · 本次最多可转
-                  {{ row.availableQuantity ?? row.quantity }}
-                  {{ row.unit }}</span>
-                <span
-                  v-if="submitted && errors.lines[row.key]"
-                  class="field-error"
-                  >{{ errors.lines[row.key] }}</span>
-              </td>
-              <td>
-                <Select
-                  v-model:value="row.supplierId"
-                  show-search
-                  allow-clear
-                  :filter-option="false"
-                  :options="rowSupplierOptions"
-                  placeholder="同表头"
-                  :dropdown-match-select-width="300"
-                  style="width: 100%"
-                  :aria-label="`第${index + 1}行供应商`"
-                  @search="searchSuppliers"
-                />
-              </td>
-              <td>
-                <span class="spec clamp" :title="row.specification">{{
-                  row.specification || '—'
-                }}</span>
-                <span class="hint">{{ row.unit }}</span>
-                <ProductStructureDetails
-                  v-if="row.productId || row.contractItemId"
-                  :value="row.structure ?? {}"
-                />
-              </td>
-              <td>
-                <InputNumber
-                  :value="row.unitPrice"
-                  string-mode
-                  :min="0"
-                  :controls="false"
-                  :disabled="row.gift"
-                  style="width: 100%"
-                  :aria-label="`第${index + 1}行单价`"
-                  @update:value="
-                    (value) =>
-                      setRowPrice(
-                        row,
-                        value == null ? undefined : String(value),
-                      )
-                  "
-                />
-              </td>
-              <td>
-                <InputNumber
-                  :value="row.quantity"
-                  string-mode
-                  :min="0"
-                  :max="row.availableQuantity"
-                  :controls="false"
-                  style="width: 100%"
-                  :aria-label="`第${index + 1}行数量`"
-                  @update:value="
-                    (value) =>
-                      setRowQuantity(
-                        row,
-                        value == null ? undefined : String(value),
-                      )
-                  "
-                />
-              </td>
-              <td>
-                <InputNumber
-                  :value="row.total"
-                  string-mode
-                  :min="0"
-                  :controls="false"
-                  :disabled="row.gift"
-                  style="width: 100%"
-                  :aria-label="`第${index + 1}行总价`"
-                  @update:value="
-                    (value) =>
-                      setRowTotal(
-                        row,
-                        value == null ? undefined : String(value),
-                      )
-                  "
-                />
-              </td>
-              <td>
-                <Input v-model:value="row.arrivalDate" type="date" />
-              </td>
-              <td class="gift">
-                <Checkbox
-                  :checked="row.gift"
-                  @update:checked="(value) => setRowGift(row, !!value)"
-                />
-              </td>
-              <td><Input v-model:value="row.remark" /></td>
-              <td class="ops">
-                <Button
-                  type="link"
-                  size="small"
-                  danger
-                  :disabled="rows.length === 1"
-                  @click="removeRow(row)"
+          <draggable
+            v-model="rows"
+            :disabled="saving || rows.length < 2"
+            direction="vertical"
+            ghost-class="row-drag-ghost"
+            handle=".row-drag-handle"
+            item-key="key"
+            tag="tbody"
+          >
+            <template #item="{ element: row, index }">
+              <tr :class="{ invalid: submitted && errors.lines[row.key] }">
+                <td class="no" data-column="no">
+                  <div class="row-position">
+                    <button
+                      class="row-drag-handle"
+                      type="button"
+                      :aria-label="`移动第${index + 1}行`"
+                      :disabled="saving || rows.length < 2"
+                      title="拖动调整明细行顺序"
+                      @keydown.down.prevent="moveRow(index, 1, $event)"
+                      @keydown.up.prevent="moveRow(index, -1, $event)"
+                    >
+                      <GripVertical :size="14" aria-hidden="true" />
+                    </button>
+                    <span>{{ index + 1 }}</span>
+                  </div>
+                </td>
+                <td
+                  v-for="column in columns"
+                  :key="column.key"
+                  :class="{
+                    gift: column.key === 'gift',
+                    'sticky-product': column.key === 'product' && stickyProduct,
+                  }"
+                  :data-column="column.key"
                 >
-                  删除
-                </Button>
-              </td>
-            </tr>
-          </tbody>
+                  <template v-if="column.key === 'product'">
+                    <div class="product-pick">
+                      <Select
+                        :value="rowProductValue(row)"
+                        show-search
+                        :filter-option="false"
+                        :options="
+                          sourceRequestId && (editOf || !row.requestItemId)
+                            ? [...draftRequestProducts, ...productOptions]
+                            : [...contractItems, ...productOptions]
+                        "
+                        :disabled="!!row.requestItemId && !editOf"
+                        :placeholder="row.name || '搜索产品编号、名称'"
+                        :dropdown-match-select-width="460"
+                        style="width: 100%"
+                        @search="searchProducts"
+                        @update:value="(value) => chooseProduct(row, value)"
+                      />
+                      <Button
+                        v-if="!row.requestItemId || editOf"
+                        size="small"
+                        type="link"
+                        title="从产品中心按分类选择"
+                        @click="openPicker(row)"
+                      >
+                        选择
+                      </Button>
+                    </div>
+                    <span
+                      v-if="row.name"
+                      class="hint clamp"
+                      :title="`${row.code ?? ''} ${row.name}`"
+                    >
+                      {{ row.code }} {{ row.name }}
+                    </span>
+                    <span v-if="row.requestItemId" class="hint">
+                      申请明细 · 本次最多可转
+                      {{ row.availableQuantity ?? row.quantity }}
+                      {{ row.unit }}
+                    </span>
+                    <span
+                      v-if="submitted && errors.lines[row.key]"
+                      class="field-error"
+                    >
+                      {{ errors.lines[row.key] }}
+                    </span>
+                  </template>
+                  <Select
+                    v-else-if="column.key === 'supplier'"
+                    v-model:value="row.supplierId"
+                    show-search
+                    allow-clear
+                    :filter-option="false"
+                    :options="rowSupplierOptions"
+                    placeholder="同表头"
+                    :dropdown-match-select-width="300"
+                    style="width: 100%"
+                    :aria-label="`第${index + 1}行供应商`"
+                    @search="searchSuppliers"
+                  />
+                  <template v-else-if="column.key === 'specification'">
+                    <span class="spec clamp" :title="row.specification">{{
+                      row.specification || '—'
+                    }}</span>
+                    <span class="hint">{{ row.unit }}</span>
+                    <ProductStructureDetails
+                      v-if="row.productId || row.contractItemId"
+                      :value="row.structure ?? {}"
+                    />
+                  </template>
+                  <Select
+                    v-else-if="column.key === 'pricingMode'"
+                    :value="row.pricingMode ?? 'UNIT'"
+                    :options="pricingOptions"
+                    :disabled="row.gift"
+                    style="width: 100%"
+                    :aria-label="`第${index + 1}行计价方式`"
+                    @update:value="
+                      (value) =>
+                        setRowPricingMode(
+                          row,
+                          value === 'TOTAL' ? 'TOTAL' : 'UNIT',
+                        )
+                    "
+                  />
+                  <template v-else-if="column.key === 'unitPrice'">
+                    <InputNumber
+                      :value="row.unitPrice"
+                      string-mode
+                      :min="0"
+                      :controls="false"
+                      :disabled="row.gift || row.pricingMode === 'TOTAL'"
+                      style="width: 100%"
+                      :aria-label="`第${index + 1}行单价`"
+                      @update:value="
+                        (value) =>
+                          setRowPrice(
+                            row,
+                            value == null ? undefined : String(value),
+                          )
+                      "
+                    />
+                    <span v-if="row.pricingMode === 'TOTAL'" class="hint">折算单价</span>
+                  </template>
+                  <InputNumber
+                    v-else-if="column.key === 'quantity'"
+                    :value="row.quantity"
+                    string-mode
+                    :min="0"
+                    :max="row.availableQuantity"
+                    :controls="false"
+                    style="width: 100%"
+                    :aria-label="`第${index + 1}行数量`"
+                    @update:value="
+                      (value) =>
+                        setRowQuantity(
+                          row,
+                          value == null ? undefined : String(value),
+                        )
+                    "
+                  />
+                  <InputNumber
+                    v-else-if="column.key === 'total'"
+                    :value="row.total"
+                    string-mode
+                    :min="0"
+                    :controls="false"
+                    :disabled="row.gift"
+                    style="width: 100%"
+                    :aria-label="`第${index + 1}行总价`"
+                    @update:value="
+                      (value) =>
+                        setRowTotal(
+                          row,
+                          value == null ? undefined : String(value),
+                        )
+                    "
+                  />
+                  <Input
+                    v-else-if="column.key === 'arrivalDate'"
+                    v-model:value="row.arrivalDate"
+                    type="date"
+                  />
+                  <Checkbox
+                    v-else-if="column.key === 'gift'"
+                    :checked="row.gift"
+                    @update:checked="(value) => setRowGift(row, !!value)"
+                  />
+                  <Input
+                    v-else-if="column.key === 'remark'"
+                    v-model:value="row.remark"
+                  />
+                </td>
+                <td class="ops" data-column="ops">
+                  <Button
+                    type="link"
+                    size="small"
+                    danger
+                    :disabled="rows.length === 1"
+                    @click="removeRow(row)"
+                  >
+                    删除
+                  </Button>
+                </td>
+              </tr>
+            </template>
+          </draggable>
         </table>
       </div>
 
@@ -1120,11 +1486,21 @@ async function save(submit = false) {
           <Input v-model:value="header.remark" />
         </label>
         <p class="formula">
-          总金额 <b>¥{{ totals.total }}</b> = 产品明细 ¥{{ totals.lines }} ×
-          整单折扣 {{ header.discountRate || 100 }}% − 优惠抹零 ¥{{
-            header.roundOff || 0
-          }}
-          + 附加费用 ¥{{ money(header.additionalAmount || 0) }}
+          <span>
+            总数量 <b>{{ totals.quantity }}</b>
+          </span>
+          <span>
+            总金额 <b>{{ currencyMark }}{{ totals.total }}</b> = 产品明细
+            {{ currencyMark }}{{ totals.lines }}
+            <template v-if="totals.discountAdjustment !== undefined">
+              − 整单折扣 {{ currencyMark }}{{ totals.discountAdjustment }}
+            </template>
+            <template v-else>
+              × 整单折扣 {{ header.discountRate || 100 }}%
+            </template>
+            − 优惠抹零 {{ currencyMark }}{{ header.roundOff || 0 }} + 附加费用
+            {{ currencyMark }}{{ money(header.additionalAmount || 0) }}
+          </span>
         </p>
       </section>
     </div>
@@ -1275,6 +1651,7 @@ em {
 
 .entry-lines-head {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
 }
@@ -1316,8 +1693,6 @@ em {
 }
 
 .entry-grid {
-  width: 100%;
-  min-width: 1460px;
   font-size: 13px;
   table-layout: fixed;
   border-spacing: 0;
@@ -1347,26 +1722,116 @@ em {
   border-top: 1px solid hsl(var(--border));
 }
 
+.entry-grid th.detail-column {
+  padding: 0 9px 0 4px;
+  border-right: 1px solid hsl(var(--border));
+}
+
+.column-drag-handle,
+.row-drag-handle {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+  padding: 0;
+  color: inherit;
+  cursor: grab;
+}
+
+.column-drag-handle {
+  width: 100%;
+  padding: 8px 1px;
+  text-align: left;
+}
+
+.column-drag-handle svg {
+  flex-shrink: 0;
+}
+
+.column-drag-handle span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.row-position {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.row-drag-handle {
+  flex-shrink: 0;
+  justify-content: center;
+  width: 18px;
+  height: 24px;
+  touch-action: none;
+}
+
+.row-drag-handle:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.column-drag-handle:hover,
+.row-drag-handle:not(:disabled):hover {
+  color: hsl(var(--primary));
+}
+
+.column-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 9px;
+  height: 100%;
+  padding: 0;
+  touch-action: none;
+  cursor: col-resize;
+}
+
+.column-resize-handle::after {
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 2px;
+  content: '';
+}
+
+.column-resize-handle:hover::after,
+.column-resize-handle:focus-visible::after,
+.entry-grid th.resizing .column-resize-handle::after {
+  background: hsl(var(--primary));
+}
+
+.entry-grid th.drop-before {
+  box-shadow: inset 3px 0 hsl(var(--primary));
+}
+
+.entry-grid th.drop-after {
+  box-shadow: inset -3px 0 hsl(var(--primary));
+}
+
+.row-drag-ghost {
+  opacity: 0.45;
+}
+
 .entry-grid tr.invalid td {
   background: hsl(var(--destructive) / 5%);
 }
 
-/* 冻结列：横向滚动时序号、产品、删除始终可见 */
+/* 序号和操作固定，产品列位于表首且宽度适中时一同冻结。 */
 .entry-grid .no,
-.entry-grid .product,
+.entry-grid .sticky-product,
 .entry-grid .ops {
   position: sticky;
   z-index: 1;
 }
 
 .entry-grid td.no,
-.entry-grid td.product,
+.entry-grid td.sticky-product,
 .entry-grid td.ops {
   background: var(--ant-color-bg-elevated, #fff);
 }
 
 .entry-grid tr.invalid td.no,
-.entry-grid tr.invalid td.product,
+.entry-grid tr.invalid td.sticky-product,
 .entry-grid tr.invalid td.ops {
   background:
     linear-gradient(hsl(var(--destructive) / 5%), hsl(var(--destructive) / 5%)),
@@ -1374,29 +1839,19 @@ em {
 }
 
 .entry-grid th.no,
-.entry-grid th.product,
+.entry-grid th.sticky-product,
 .entry-grid th.ops {
   z-index: 3;
 }
 
 .entry-grid .no {
   left: 0;
-  width: 40px;
   color: hsl(var(--muted-foreground));
 }
 
-.entry-grid .product {
-  left: 40px;
-  width: 300px;
+.entry-grid .sticky-product {
+  left: var(--row-number-width);
   border-right: 1px solid hsl(var(--border));
-}
-
-.entry-grid .supplier-col {
-  width: 200px;
-}
-
-.entry-grid .spec-col {
-  width: 280px;
 }
 
 .splits {
@@ -1405,22 +1860,12 @@ em {
   list-style: none;
 }
 
-.entry-grid .money {
-  width: 110px;
-}
-
-.entry-grid .date {
-  width: 140px;
-}
-
 .entry-grid .gift {
-  width: 52px;
   text-align: center;
 }
 
 .entry-grid .ops {
   right: 0;
-  width: 64px;
   border-left: 1px solid hsl(var(--border));
 }
 
@@ -1438,7 +1883,11 @@ em {
 }
 
 .formula {
+  display: flex;
+  flex-wrap: wrap;
   grid-column: 1 / -1;
+  gap: 4px 16px;
+  align-items: baseline;
   margin: 0;
   font-size: 13px;
   color: hsl(var(--muted-foreground));
@@ -1453,6 +1902,12 @@ em {
   .entry-head,
   .entry-foot {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 760px) {
+  .entry-grid .sticky-product {
+    left: auto;
   }
 }
 </style>

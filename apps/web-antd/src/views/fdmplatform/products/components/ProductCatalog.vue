@@ -21,7 +21,10 @@ import {
   Table,
 } from 'ant-design-vue';
 
+import FdmColorPreview from '#/components/fdm-color-preview/fdm-color-preview.vue';
+
 import { productProcessText, productStageText } from '../attributes';
+import { productCatalogColors } from '../color-preview';
 import {
   colorModeText,
   constructionText,
@@ -125,17 +128,7 @@ const columns = computed<TableColumnsType<Product>>(() => {
 });
 const rows = computed(() =>
   props.products.map((product) => {
-    const front = product.frontColorLabel || product.frontColor;
-    const back = product.backColorLabel || product.backColor;
-    const single = product.colorCodeLabel || product.colorCode;
-    let colors = [front && `正 ${front}`, back && `反 ${back}`]
-      .filter(Boolean)
-      .join(' / ');
-    if (product.colorMode === 'SINGLE' && (single || front)) {
-      colors = `单色 · ${single || front}`;
-    } else if (product.colorMode === 'DUAL' && colors) {
-      colors = `双色 · ${colors}`;
-    }
+    const colors = productCatalogColors(product);
     const machining = productProcessText(product);
     const stage = productStageText(product);
     const construction =
@@ -173,11 +166,13 @@ const rows = computed(() =>
     return {
       ...product,
       catalog: {
-        colors: colors || single || product.color,
+        colors,
         process: process || machining,
         processTitle: [
           `颜色方式：${colorModeText(product)}`,
-          colors || single || product.color,
+          colors
+            .map(({ label, side }) => (side ? `${side} ${label}` : label))
+            .join(' / '),
           construction,
           machining,
           productSliceThicknessText(product),
@@ -412,16 +407,32 @@ const rows = computed(() =>
               v-else-if="column.key === 'process'"
               :title="record.catalog.processTitle"
             >
-              <span v-if="record.catalog.colors" class="cell-line">
-                {{ record.catalog.colors }}
-              </span>
+              <div v-if="record.catalog.colors.length" class="catalog-colors">
+                <span
+                  v-for="color in record.catalog.colors"
+                  :key="color.side || color.label"
+                  class="catalog-color"
+                >
+                  <span v-if="color.side" class="color-side">{{
+                    color.side
+                  }}</span>
+                  <FdmColorPreview
+                    v-if="color.sample"
+                    :color="color.sample"
+                    size="small"
+                  />
+                  <span class="cell-line" :title="color.label">{{
+                    color.label
+                  }}</span>
+                </span>
+              </div>
               <span
                 v-if="record.catalog.process"
                 class="cell-line"
-                :class="{ secondary: record.catalog.colors }"
+                :class="{ secondary: record.catalog.colors.length }"
                 >{{ record.catalog.process }}</span>
               <span
-                v-if="!record.catalog.colors && !record.catalog.process"
+                v-if="!record.catalog.colors.length && !record.catalog.process"
                 class="secondary"
                 >未维护</span>
             </div>
@@ -682,6 +693,31 @@ const rows = computed(() =>
 .catalog-product-copy {
   flex: 1;
   min-width: 0;
+}
+
+.catalog-colors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: center;
+  margin-bottom: 2px;
+}
+
+.catalog-color {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.color-side {
+  flex: none;
+  padding: 1px 4px;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--muted));
+  border-radius: 4px;
 }
 
 .cell-line {

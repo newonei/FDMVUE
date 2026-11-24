@@ -36,6 +36,10 @@ import {
 } from '#/api/fdmplatform/procurement';
 
 import { errorText, money } from '../../../data';
+import {
+  procurementLineValue,
+  procurementUnitPrice,
+} from '../../../finance/procurement/model';
 import { purchaseRowLabels } from '../model';
 import {
   additionalLineAmount,
@@ -287,10 +291,13 @@ const additionalTotal = computed(() => {
   );
 });
 function priceAmount(line: Line) {
-  return additionalLineAmount(
-    { quantity: quantity(line), unitPrice: Number(line.unitPrice ?? 0) },
-    String(props.view.order.currency ?? 'CNY'),
-  );
+  const currency = String(props.view.order.currency ?? 'CNY');
+  const amount = line.additional
+    ? new BigNumber(additionalLineAmount(line.additional, currency))
+    : procurementLineValue(line, currency);
+  return amount.isFinite()
+    ? amount.toFormat(currencyDigits(currency), BigNumber.ROUND_HALF_UP)
+    : '—';
 }
 function lineImages(line: Line, field: LineImageField = 'imageId') {
   const id = extra(line)[field];
@@ -630,27 +637,14 @@ defineExpose({
                         ? record.additional.unit
                         : (spec(record).unit ?? record.unit ?? '件')
                     }}</span>
-                  <span>单价
+                  <span>{{ record.agreedAmount == null ? '单价' : '折算单价' }}
                     {{
-                      money(
+                      procurementUnitPrice(
                         record.additional?.unitPrice ?? record.unitPrice,
-                        '',
-                        '—',
                       )
                     }}</span>
                   <strong>{{ view.order.currency ?? 'CNY' }}
-                    {{
-                      money(
-                        record.additional
-                          ? additionalLineAmount(
-                              record.additional,
-                              String(view.order.currency ?? 'CNY'),
-                            )
-                          : priceAmount(record),
-                        '',
-                        '—',
-                      )
-                    }}</strong>
+                    {{ priceAmount(record) }}</strong>
                 </div>
               </div>
             </template>

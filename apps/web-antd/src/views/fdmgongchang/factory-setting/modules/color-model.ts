@@ -1,14 +1,6 @@
 import type { FdmgongchangColor } from '#/api/fdmgongchang/factory';
 
-export const HEX_PATTERN = /^#[0-9a-f]{6}$/i;
-
-/** 预览：有照片用照片，否则有色值用色块，都没有为空。 */
-export function colorPreview(color: FdmgongchangColor) {
-  if (color.imageUrl) return { kind: 'image' as const, value: color.imageUrl };
-  if (color.hex && HEX_PATTERN.test(color.hex))
-    return { kind: 'swatch' as const, value: color.hex };
-  return { kind: 'none' as const, value: '' };
-}
+import { colorPreview, HEX_PATTERN } from '#/components/fdm-color-preview/color-preview';
 
 export type ColorFilter = 'all' | 'disabled' | 'noPreview' | 'used';
 

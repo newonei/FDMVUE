@@ -9,9 +9,16 @@ export type ProductConstructionType =
   | 'DOUBLE_LAYER'
   | 'SINGLE_LAYER'
   | 'UNKNOWN';
+export interface ProductColorPreview {
+  code: string;
+  hex?: null | string;
+  imageUrl?: null | string;
+}
+
 export interface ProductAttributeOption {
   value: string;
   label: string;
+  preview?: null | ProductColorPreview;
 }
 export interface ProductAttributeOptions {
   stages: Array<ProductAttributeOption & { group: string }>;
@@ -45,10 +52,13 @@ export interface ProductAttributes {
   resolvedProductStageLabel?: null | string;
   colorCode?: null | string;
   colorCodeLabel?: null | string;
+  colorCodePreview?: null | ProductColorPreview;
   frontColor?: null | string;
   frontColorLabel?: null | string;
+  frontColorPreview?: null | ProductColorPreview;
   backColor?: null | string;
   backColorLabel?: null | string;
+  backColorPreview?: null | ProductColorPreview;
   textureFront?: null | string;
   textureFrontLabel?: null | string;
   textureBack?: null | string;
@@ -59,7 +69,11 @@ export interface ProductAttributes {
 /** 单据产品结构快照；只使用来源已维护的属性，不推测正反面。 */
 export interface ProductStructure extends Omit<
   ProductAttributes,
-  'resolvedProductStage' | 'resolvedProductStageLabel'
+  | 'backColorPreview'
+  | 'colorCodePreview'
+  | 'frontColorPreview'
+  | 'resolvedProductStage'
+  | 'resolvedProductStageLabel'
 > {
   material?: null | string;
   size?: null | string;

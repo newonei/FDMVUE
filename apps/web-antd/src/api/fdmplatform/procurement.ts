@@ -276,6 +276,10 @@ export interface PurchaseOrderEntryLine {
   contractItemId?: string;
   quantity: Decimal;
   unitPrice?: Decimal;
+  /** 显式切回 UNIT 时清除该行原有的约定总价。 */
+  pricingMode?: 'TOTAL' | 'UNIT';
+  /** 按总价计价时保存的原始成交金额。 */
+  agreedAmount?: Decimal;
   arrivalDate?: string;
   gift: boolean;
   remark?: string;

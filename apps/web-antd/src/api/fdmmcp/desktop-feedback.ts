@@ -4,6 +4,7 @@ import { requestClient } from '#/api/request';
 
 export type FeedbackCategory = 'feature' | 'issue' | 'suggestion';
 export type FeedbackStatus = 'completed' | 'pending' | 'processing';
+export const feedbackDiagnosticType = 'application/x-ndjson';
 
 export interface FeedbackAttachment {
   contentType: string;
@@ -18,6 +19,7 @@ export interface DesktopFeedback {
   category: FeedbackCategory;
   createdAt: string;
   description: string;
+  diagnostics?: FeedbackAttachment[];
   id: string;
   platform: null | string;
   reply: null | string;

@@ -27,6 +27,8 @@ import {
 } from 'ant-design-vue';
 
 import { getProductActivity } from '#/api/fdmplatform/product-activity';
+import { colorPreview } from '#/components/fdm-color-preview/color-preview';
+import FdmColorPreview from '#/components/fdm-color-preview/fdm-color-preview.vue';
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { errorText, label, money } from '../../data';
@@ -44,6 +46,7 @@ import {
   quantityText,
 } from '../activity-model';
 import { productAttributeDetails, productProcessText } from '../attributes';
+import { productColorPreview } from '../color-preview';
 import { productDimensionsText, productPatternText } from '../manufacturing';
 import { missingProductFields } from '../model';
 import ProductColorSummary from './ProductColorSummary.vue';
@@ -57,6 +60,13 @@ const emit = defineEmits<{
   refresh: [];
   remove: [product: Product];
 }>();
+const legacyColor = computed(() => {
+  const product = props.product;
+  if (!product || product.colorCode || product.frontColor || product.backColor)
+    return undefined;
+  const sample = productColorPreview(product.color);
+  return sample && colorPreview(sample).kind !== 'none' ? sample : undefined;
+});
 const { TabPane } = Tabs;
 const view = ref<ProductActivityView>();
 const loading = ref(false);
@@ -344,10 +354,17 @@ function refresh() {
               {{ product.shape || '—' }}
             </Descriptions.Item>
             <Descriptions.Item label="颜色原文">
+              <span v-if="legacyColor" class="mr-1.5">
+                <FdmColorPreview :color="legacyColor" size="small" />
+              </span>
               {{ product.color || '—' }}
             </Descriptions.Item>
             <Descriptions.Item label="颜色 / 制造结构" :span="2">
-              <ProductColorSummary :value="product" construction />
+              <ProductColorSummary
+                :value="product"
+                construction
+                show-previews
+              />
             </Descriptions.Item>
             <Descriptions.Item label="雕刻 / 图案版本" :span="2">
               {{ productPatternText(product) }}
@@ -394,10 +411,17 @@ function refresh() {
                 {{ productDimensionsText(product) || product.size || '—' }}
               </Descriptions.Item>
               <Descriptions.Item label="颜色原文">
+                <span v-if="legacyColor" class="mr-1.5">
+                  <FdmColorPreview :color="legacyColor" size="small" />
+                </span>
                 {{ product.color || '—' }}
               </Descriptions.Item>
               <Descriptions.Item label="颜色 / 制造结构">
-                <ProductColorSummary :value="product" construction />
+                <ProductColorSummary
+                  :value="product"
+                  construction
+                  show-previews
+                />
               </Descriptions.Item>
               <Descriptions.Item
                 v-for="item in productAttributeDetails(product).filter(

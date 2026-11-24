@@ -5,9 +5,15 @@ import type { ProcurementOrderView } from '#/api/fdmplatform/procurement';
 
 import { computed } from 'vue';
 
+import BigNumber from 'bignumber.js';
+
 import LineTable from '../../../components/LineTable.vue';
-import { money, rows } from '../../../data';
-import { procurementLineValue } from '../../../finance/procurement/model';
+import { rows } from '../../../data';
+import {
+  currencyScale,
+  procurementLineValue,
+  procurementUnitPrice,
+} from '../../../finance/procurement/model';
 import {
   colorModeText,
   constructionText,
@@ -42,7 +48,7 @@ const columns: LineColumn[] = [
   { key: 'packaging', title: '包装', optional: true },
   { key: 'quantity', title: '订购数量', width: 110, align: 'right' },
   { key: 'unit', title: '单位', width: 80 },
-  { key: 'unitPrice', title: '单价', width: 110, align: 'right' },
+  { key: 'unitPrice', title: '单价', width: 156, align: 'right' },
   { key: 'amount', title: '有效金额', width: 130, align: 'right' },
   { key: 'arrivalDate', title: '到货日期', width: 120 },
   { key: 'arrivedQuantity', title: '已到货', width: 100, align: 'right' },
@@ -63,6 +69,9 @@ const productLines = computed(() =>
     >;
     const pick = (field: string) => snapshot[field];
     const structure = productStructure(snapshot);
+    const currency = String(props.view.order.currency ?? 'CNY');
+    const amount = procurementLineValue(line, currency);
+    const price = procurementUnitPrice(line.unitPrice);
     return {
       ...line,
       skuName: pick('skuName') ?? '产品',
@@ -102,8 +111,13 @@ const productLines = computed(() =>
       printing: pick('printing'),
       packaging: pick('packaging'),
       unit: pick('unit'),
-      unitPrice: money(line.unitPrice, '', '—'),
-      amount: money(procurementLineValue(line), '', '—'),
+      unitPrice:
+        line.agreedAmount === null || line.agreedAmount === undefined
+          ? price
+          : `${price}（折算）`,
+      amount: amount.isFinite()
+        ? amount.toFormat(currencyScale(currency), BigNumber.ROUND_HALF_UP)
+        : '—',
       arrivalDate:
         props.view.details.lineDates?.[line.id] ||
         props.view.lineDeliveryDates?.[line.id] ||
@@ -121,7 +135,7 @@ const productLines = computed(() =>
     >
       <template #extra>
         <span class="muted">
-          产品、数量和单价以下单时为准，不直接覆盖已下单的资料；剩余不再采购的数量可在「更多操作」里结束余额。
+          产品、数量和成交价格以下单时为准；剩余不再采购的数量可在「更多操作」里结束余额。
         </span>
       </template>
       <template #emptyText>采购单没有产品明细</template>
