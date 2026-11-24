@@ -93,6 +93,19 @@ export interface ContractItem extends BusinessRecord, ProductAttributes {
     type: string;
   }[];
 }
+export interface ContractItemSpecCorrection {
+  id: string;
+  actorId: number;
+  correctedAt: number | string;
+  reason: string;
+  items: {
+    afterSpecification: string;
+    beforeSpecification: string;
+    contractItemId: string;
+    skuCode?: string;
+    skuName?: string;
+  }[];
+}
 export interface Contract extends BusinessRecord {
   migration?: MigrationInfo;
   blockReasons?: string[];
@@ -118,6 +131,8 @@ export interface Contract extends BusinessRecord {
   paymentTerms?: string;
   signedDate?: string;
   items: ContractItem[];
+  itemSpecCorrectionBlockReasons?: Record<string, string>;
+  itemSpecCorrections?: ContractItemSpecCorrection[];
   requests?: BusinessRecord[];
   assignments?: BusinessRecord[];
   quotes?: BusinessRecord[];

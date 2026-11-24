@@ -193,6 +193,7 @@ export const statusLabels: Record<string, string> = {
   CONFIRM_CONTRACT: '合同生效',
   UPDATE_CONTRACT: '修订合同',
   CHANGE_CONTRACT_COMPANY: '更正合同主体',
+  CORRECT_CONTRACT_ITEM_SPEC: '更正合同明细规格',
   CREATE_REQUEST: '创建采购申请',
   ASSIGN_FULFILLMENT: '分派采购任务',
   TRANSFER_ASSIGNMENT: '转派任务',

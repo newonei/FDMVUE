@@ -93,6 +93,7 @@ import { contractWorkboard, workboardDocumentRow } from './contract-workboard';
 import { contractQuickActionReason } from './contract-workflow';
 import ContractDocumentDialog from './ContractDocumentDialog.vue';
 import ContractFilesPanel from './ContractFilesPanel.vue';
+import ContractItemSpecCorrection from './ContractItemSpecCorrection.vue';
 import ContractMainline from './ContractMainline.vue';
 import ContractRelatedDocs from './ContractRelatedDocs.vue';
 import ContractTimeline from './ContractTimeline.vue';
@@ -242,6 +243,7 @@ const workLaunch = ref<WorkboardLaunch>();
 const workRow = ref<DocumentRow>();
 const purchaseOrderEntryOpen = ref(false);
 const purchaseOrder = ref<{ contractId: string; orderId: string }>();
+const specCorrectionOpen = ref(false);
 const attachmentBusy = ref(false);
 const terminating = ref(false);
 const terminateAction = ref<'CANCEL_CONTRACT' | 'CLOSE_CONTRACT'>();
@@ -261,6 +263,7 @@ const childOpen = computed(
     !!workLaunch.value ||
     purchaseOrderEntryOpen.value ||
     !!purchaseOrder.value ||
+    specCorrectionOpen.value ||
     activating.value ||
     attachmentBusy.value ||
     !!terminateAction.value,
@@ -586,6 +589,7 @@ watch(
     workRow.value = undefined;
     purchaseOrderEntryOpen.value = false;
     purchaseOrder.value = undefined;
+    specCorrectionOpen.value = false;
     terminateAction.value = undefined;
     related.value = undefined;
     if (!props.open) autoRanFor = undefined;
@@ -655,6 +659,12 @@ function documentUpdated(value: Contract) {
   void loadFiles();
   void loadRelatedDocs();
   if (activeTab.value === 'audit') void loadAudit();
+}
+function specCorrectionSaved(value: Contract) {
+  specCorrectionOpen.value = false;
+  if (!props.open || props.contract?.id !== value.id) return;
+  documentUpdated(value);
+  message.success('规格更正已保存，可在操作记录查看');
 }
 async function activateContract() {
   const current = props.contract;
@@ -1104,11 +1114,21 @@ async function download(file: { id: string; name: string }) {
             :data-source="pipeline"
           >
             <template #extra>
-              <Tooltip
-                title="数量只统计已匹配到本合同明细的单据；未匹配或独立单据计入关联总数。数量缺失时显示待核对，不按零判定完成。"
-              >
-                <span class="note" tabindex="0">数量口径说明</span>
-              </Tooltip>
+              <Space wrap>
+                <Tooltip
+                  title="数量只统计已匹配到本合同明细的单据；未匹配或独立单据计入关联总数。数量缺失时显示待核对，不按零判定完成。"
+                >
+                  <span class="note" tabindex="0">数量口径说明</span>
+                </Tooltip>
+                <Button
+                  v-if="allowed('CORRECT_CONTRACT_ITEM_SPEC')"
+                  :disabled="childOpen || loading"
+                  size="small"
+                  @click="specCorrectionOpen = true"
+                >
+                  更正规格
+                </Button>
+              </Space>
             </template>
             <template #bodyCell="{ column, record: item }">
               <div v-if="column.key === 'skuName'" class="prod">
@@ -1601,6 +1621,34 @@ async function download(file: { id: string; name: string }) {
           </TabPane>
           <TabPane key="audit" tab="操作记录">
             <Alert v-if="auditError" :message="auditError" type="error" />
+            <section
+              v-if="contract.itemSpecCorrections?.length"
+              class="spec-correction-history"
+              aria-label="规格更正记录"
+            >
+              <h3 class="section-title">规格更正记录</h3>
+              <article
+                v-for="entry in contract.itemSpecCorrections"
+                :key="entry.id"
+                class="spec-correction-history-entry"
+              >
+                <p class="muted">
+                  {{ personLabel(directory, entry.actorId) }} ·
+                  {{ formatTemporalField('correctedAt', entry.correctedAt) }}
+                </p>
+                <p class="spec-correction-reason">{{ entry.reason }}</p>
+                <ul>
+                  <li v-for="item in entry.items" :key="item.contractItemId">
+                    {{ item.skuName || itemName(item.contractItemId) }}
+                    <span v-if="item.skuCode">（{{ item.skuCode }}）</span>
+                    <span class="spec-correction-change">
+                      {{ item.beforeSpecification || '原规格待核对' }} →
+                      {{ item.afterSpecification }}
+                    </span>
+                  </li>
+                </ul>
+              </article>
+            </section>
             <RecordTable
               :data="auditRows"
               :columns="
@@ -1708,6 +1756,12 @@ async function download(file: { id: string; name: string }) {
       "
     />
   </Modal>
+  <ContractItemSpecCorrection
+    v-if="open && specCorrectionOpen && contract"
+    :contract="contract"
+    @close="specCorrectionOpen = false"
+    @saved="specCorrectionSaved"
+  />
   <ContractDocumentDialog
     :open="open && documentsOpen"
     :kind="documentKind"
@@ -1811,6 +1865,29 @@ async function download(file: { id: string; name: string }) {
 </template>
 <style scoped>
 /* 合同订单详情（金智式）：左侧基本信息、产品明细、下属单据页签，右侧摘要与待办 */
+.spec-correction-history {
+  margin-bottom: 14px;
+}
+
+.spec-correction-history-entry {
+  padding: 10px 0;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.spec-correction-history-entry ul {
+  padding-left: 20px;
+  list-style: disc;
+}
+
+.spec-correction-reason {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.spec-correction-change {
+  display: block;
+}
+
 .contract-title {
   display: flex;
   gap: 8px;

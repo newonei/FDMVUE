@@ -33,6 +33,7 @@ const dateTimeFields = new Set([
   'closedAt',
   'completedAt',
   'confirmedAt',
+  'correctedAt',
   'created_at',
   'createdAt',
   'createTime',
