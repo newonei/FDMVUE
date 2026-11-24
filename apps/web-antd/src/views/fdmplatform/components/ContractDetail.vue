@@ -565,7 +565,7 @@ function runAutoNext() {
   if (next.action) runNext(next.action);
 }
 watch(
-  () => [props.open, props.contract?.id],
+  [() => props.open, () => props.contract?.id],
   () => {
     ++summarySequence;
     activationKey = newIdempotencyKey();
@@ -1721,6 +1721,7 @@ async function download(file: { id: string; name: string }) {
     :directory="directory"
     :master="master"
     @close="editorOpen = false"
+    @company-changed="documentUpdated"
     @saved="
       (value) => {
         editorOpen = false;

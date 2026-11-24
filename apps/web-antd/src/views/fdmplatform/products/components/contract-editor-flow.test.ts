@@ -1,6 +1,8 @@
 /* eslint-disable vue/one-component-per-file -- Small controls exercise the actual editor without overlay animations. */
 import type { PropType } from 'vue';
 
+import type { Contract } from '#/api/fdmplatform';
+
 import { createApp, defineComponent, h, nextTick, reactive, ref } from 'vue';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -14,6 +16,7 @@ const api = vi.hoisted(() => ({
   saveCustomer: vi.fn(),
   resolve: vi.fn(),
   create: vi.fn(),
+  update: vi.fn(),
   counter: 0,
 }));
 vi.mock('#/api/fdmplatform', () => ({
@@ -44,7 +47,7 @@ vi.mock('#/api/fdmplatform/contract-review', () => ({
 }));
 vi.mock('#/api/fdmplatform/submissions', () => ({
   createContractWithAttachments: api.create,
-  contractActionWithAttachments: vi.fn(),
+  contractActionWithAttachments: api.update,
 }));
 vi.mock('../../components/RemoteMasterSelect.vue', () => ({
   default: defineComponent({ render: () => null }),
@@ -273,14 +276,19 @@ vi.mock('ant-design-vue', () => {
     Tag: block,
     Modal: Object.assign(
       defineComponent({
-        props: { open: Boolean, okText: String, title: String },
+        props: {
+          open: Boolean,
+          okText: { type: String, default: '' },
+          title: { type: String, default: '' },
+        },
         emits: ['ok'],
         setup:
-          (props, { emit }) =>
+          (props, { emit, slots }) =>
           () =>
             props.open
               ? h('dialog', { open: true }, [
                   props.title,
+                  slots.default?.(),
                   h('button', { onClick: () => emit('ok') }, props.okText),
                 ])
               : null,
@@ -316,11 +324,15 @@ async function fill(
 }
 async function mountEditor(
   defaultBusinessType: 'DOMESTIC' | 'FOREIGN' = 'FOREIGN',
+  contract?: Contract,
 ) {
   const host = document.createElement('div');
   document.body.append(host);
+  const onCompanyChanged = vi.fn();
   const props = reactive({
+    contract,
     defaultBusinessType,
+    onCompanyChanged,
     open: false,
     master: [],
     directory: {
@@ -341,7 +353,7 @@ async function mountEditor(
       host.querySelector('[data-label="合同主体"] option[value="1"]'),
     ).toBeTruthy(),
   );
-  return { host, props };
+  return { host, onCompanyChanged, props };
 }
 async function addProduct(host: HTMLElement) {
   button(host, '从产品中心选择').click();
@@ -362,6 +374,7 @@ beforeEach(() => {
   api.customers.mockReset().mockResolvedValue({ list: [], total: 0 });
   api.confirm.mockReset();
   api.create.mockReset();
+  api.update.mockReset();
   api.saveCustomer.mockReset();
   api.resolve.mockReset().mockResolvedValue([
     {
@@ -379,6 +392,103 @@ afterEach(() => {
 });
 
 describe('order entry without changing menus', () => {
+  it('corrects the subject on the existing contract and keeps unsaved edits for the next revision', async () => {
+    const contract: Contract = {
+      id: 'contract',
+      code: 'HT-001',
+      name: 'WM-001',
+      companyId: 1,
+      departmentId: 8,
+      ownerUserId: 7,
+      customerId: 'customer',
+      customerName: '客户甲',
+      businessType: 'FOREIGN',
+      productCategory: 'YOGA',
+      currency: 'CNY',
+      status: 'EXECUTING',
+      version: 12,
+      businessVersion: 2,
+      signedDate: '2026-05-28',
+      items: [
+        {
+          id: 'item',
+          skuId: 'sku',
+          skuName: '规格',
+          specVersion: 'spec-1',
+          specification: '测试规格',
+          quantity: '2',
+          unitPrice: '10',
+          unit: '件',
+        },
+      ],
+      purchaseOrders: [{ id: 'purchase-order', companyId: 1 }],
+      allowedActions: ['UPDATE_CONTRACT', 'CHANGE_CONTRACT_COMPANY'],
+    };
+    api.access.mockResolvedValue({
+      userId: 7,
+      companies: [
+        { companyId: 1, companyName: '原公司' },
+        { companyId: 2, companyName: '正确公司' },
+      ],
+    });
+    api.customers.mockResolvedValue({
+      list: [
+        { id: 'customer', name: '客户甲', type: 'CUSTOMER', active: true },
+      ],
+      total: 1,
+    });
+    const corrected = { ...contract, companyId: 2, version: 13 };
+    api.confirm
+      .mockRejectedValueOnce(new Error('请重新校验后提交'))
+      .mockResolvedValueOnce(corrected);
+    api.update.mockResolvedValue(corrected);
+    const { host, onCompanyChanged } = await mountEditor('FOREIGN', contract);
+    await fill(host, '内部单号', 'WM-001-新备注');
+    button(host, '更正主体').click();
+    await nextTick();
+    const modal = host.querySelector('dialog')!;
+    expect(modal.textContent).toContain('更正合同主体');
+    expect(modal.querySelector('option[value="1"]')).toBeNull();
+    await fill(modal, '新的合同主体', '2', 'select');
+    button(modal, '确认更正').click();
+    await nextTick();
+    expect(modal.textContent).toContain('请填写更正原因');
+    expect(api.confirm).not.toHaveBeenCalled();
+    await fill(modal, '更正原因', '  原主体录入有误  ');
+    button(modal, '确认更正').click();
+    await vi.waitFor(() =>
+      expect(modal.textContent).toContain('请重新校验后提交'),
+    );
+    expect(button(host, '保存合同修订').disabled).toBe(true);
+    button(modal, '确认更正').click();
+    await vi.waitFor(() =>
+      expect(onCompanyChanged).toHaveBeenCalledWith(corrected),
+    );
+    expect(api.confirm).toHaveBeenLastCalledWith(
+      'contract',
+      'CHANGE_CONTRACT_COMPANY',
+      12,
+      expect.any(String),
+      { companyId: 2, reason: '原主体录入有误' },
+    );
+    expect(api.confirm.mock.calls[1]).toEqual(api.confirm.mock.calls[0]);
+    expect(host.querySelector('dialog')).toBeNull();
+    expect(
+      host.querySelector<HTMLSelectElement>('[data-label="合同主体"] select')
+        ?.value,
+    ).toBe('2');
+    button(host, '保存合同修订').click();
+    await vi.waitFor(() =>
+      expect(api.update).toHaveBeenCalledWith(
+        'contract',
+        'UPDATE_CONTRACT',
+        13,
+        expect.any(String),
+        expect.objectContaining({ companyId: 2, name: 'WM-001-新备注' }),
+        [],
+      ),
+    );
+  });
   it('saves the adopted SKU identity while retaining the contract quantity, price and note and clearing price provenance', async () => {
     api.customers.mockResolvedValue({
       list: [

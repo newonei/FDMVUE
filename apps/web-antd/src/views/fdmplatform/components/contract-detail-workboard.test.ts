@@ -180,7 +180,30 @@ vi.mock('./ContractDocumentDialog.vue', () => ({
   }),
 }));
 vi.mock('../products/components/ContractEditor.vue', () => ({
-  default: defineComponent({ render: () => null }),
+  default: defineComponent({
+    props: {
+      contract: { type: Object as PropType<Contract>, required: true },
+      open: Boolean,
+    },
+    emits: ['companyChanged'],
+    setup:
+      (props, { emit }) =>
+      () =>
+        props.open
+          ? h(
+              'button',
+              {
+                onClick: () =>
+                  emit('companyChanged', {
+                    ...props.contract,
+                    companyId: 2,
+                    version: props.contract.version + 1,
+                  }),
+              },
+              '更正测试合同主体',
+            )
+          : null,
+  }),
 }));
 vi.mock('../documents/ImportedContractCompletion.vue', () => ({
   default: defineComponent({ render: () => null }),
@@ -514,6 +537,26 @@ afterEach(() => {
 });
 
 describe('contractDetail workboard integration', () => {
+  it('refreshes the existing contract after a company correction and keeps its editor open', async () => {
+    const { host, props, updated } = await mountDetail();
+    props.contract = {
+      ...contract(),
+      allowedActions: ['UPDATE_CONTRACT', 'CHANGE_CONTRACT_COMPANY'],
+    };
+    updated.mockImplementation((value: Contract) => {
+      props.contract = value;
+    });
+    await nextTick();
+    button(host, '编辑').click();
+    await nextTick();
+    button(host, '更正测试合同主体').click();
+    await nextTick();
+    expect(updated).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ id: 'contract-1', companyId: 2, version: 2 }),
+    );
+    expect(button(host, '更正测试合同主体')).toBeTruthy();
+  });
+
   it('opens a contract-locked purchase editor without a request and then opens the saved draft', async () => {
     const { host, props, refresh } = await mountDetail();
     expect(host.textContent).not.toContain('新建采购单');

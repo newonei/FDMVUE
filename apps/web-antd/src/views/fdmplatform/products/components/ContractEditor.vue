@@ -102,7 +102,11 @@ const props = defineProps<{
   master: MasterRecord[];
   open: boolean;
 }>();
-const emit = defineEmits<{ close: []; saved: [contract: Contract] }>();
+const emit = defineEmits<{
+  close: [];
+  companyChanged: [contract: Contract];
+  saved: [contract: Contract];
+}>();
 const access = ref<Access>();
 /** 新建时回填的系统建议订单号；保存时没改过就重新取号，改过就按手填 */
 const orderCompanies = computed(() =>
@@ -125,6 +129,17 @@ const form = reactive({
   deliveryRequirement: '',
   attachmentIds: [] as string[],
 });
+const companyChange = reactive({
+  companyId: undefined as number | undefined,
+  error: '',
+  key: '',
+  open: false,
+  reason: '',
+  saving: false,
+});
+const companyChangeOptions = computed(() =>
+  orderCompanies.value.filter((option) => option.value !== form.companyId),
+);
 /** 业务线由入口决定（外贸 / 内销部门），编辑时沿用原合同；历史合同没有业务类型算外贸 */
 const channel = computed(() =>
   props.contract
@@ -162,7 +177,11 @@ const configurationItems = ref<ContractItem[]>([]);
 const selectedConfigurationIds = ref<string[]>([]);
 const newCustomerName = ref('');
 const childOpen = computed(
-  () => pickerOpen.value || customerEditorOpen.value || configurationOpen.value,
+  () =>
+    pickerOpen.value ||
+    customerEditorOpen.value ||
+    configurationOpen.value ||
+    companyChange.open,
 );
 const replacementId = ref<string>();
 const key = ref('');
@@ -529,6 +548,7 @@ watch(
     clearTimeout(customerTimer);
     pickerOpen.value = false;
     customerEditorOpen.value = false;
+    companyChange.open = false;
     resolving.value = false;
     if (!open) return;
     const contract = props.contract;
@@ -820,6 +840,53 @@ function close() {
     onOk: () => emit('close'),
   });
 }
+function openCompanyChange() {
+  if (saving.value || resolving.value || childOpen.value) return;
+  companyChange.companyId = undefined;
+  companyChange.reason = '';
+  companyChange.error = '';
+  companyChange.key = newIdempotencyKey();
+  companyChange.open = true;
+}
+async function saveCompanyChange() {
+  const contract = props.contract;
+  const { companyId } = companyChange;
+  const reason = companyChange.reason.trim();
+  if (!contract || !companyChange.open || companyChange.saving) return;
+  if (
+    !companyChangeOptions.value.some((option) => option.value === companyId)
+  ) {
+    companyChange.error = '请选择新的合同主体';
+    return;
+  }
+  if (!reason) {
+    companyChange.error = '请填写更正原因';
+    return;
+  }
+  const run = editorSequence;
+  companyChange.saving = true;
+  companyChange.error = '';
+  try {
+    const result = await contractAction(
+      contract.id,
+      'CHANGE_CONTRACT_COMPANY',
+      expectedVersion.value,
+      companyChange.key,
+      { companyId, reason },
+    );
+    if (run !== editorSequence) return;
+    form.companyId = result.companyId;
+    expectedVersion.value = result.version;
+    key.value = newIdempotencyKey();
+    companyChange.open = false;
+    emit('companyChanged', result);
+    message.success('合同主体已更正');
+  } catch (error) {
+    if (run === editorSequence) companyChange.error = errorText(error);
+  } finally {
+    companyChange.saving = false;
+  }
+}
 async function save(activate = false) {
   if (saving.value || resolving.value || childOpen.value) return;
   if (!validProductCategory(form.productCategory)) {
@@ -1036,14 +1103,25 @@ async function save(activate = false) {
             </div>
           </Form.Item>
           <Form.Item label="合同主体" required>
-            <Select
-              v-model:value="form.companyId"
-              :options="orderCompanies"
-              :disabled="Boolean(contract)"
-              placeholder="请选择签约的合同主体（公司）"
-              show-search
-              option-filter-prop="label"
-            />
+            <div class="company-field">
+              <Select
+                v-model:value="form.companyId"
+                :options="orderCompanies"
+                :disabled="Boolean(contract)"
+                placeholder="请选择签约的合同主体（公司）"
+                show-search
+                option-filter-prop="label"
+              />
+              <Button
+                v-if="
+                  contract?.allowedActions?.includes('CHANGE_CONTRACT_COMPANY')
+                "
+                :disabled="companyChangeOptions.length === 0"
+                @click="openCompanyChange"
+              >
+                更正主体
+              </Button>
+            </div>
           </Form.Item>
           <Form.Item label="内部单号" required>
             <Input
@@ -1556,6 +1634,49 @@ async function save(activate = false) {
       </Space>
     </template>
   </FdmResizableDrawer>
+  <Modal
+    :open="open && companyChange.open"
+    title="更正合同主体"
+    ok-text="确认更正"
+    :confirm-loading="companyChange.saving"
+    :mask-closable="false"
+    :keyboard="!companyChange.saving"
+    :closable="!companyChange.saving"
+    :cancel-button-props="{ disabled: companyChange.saving }"
+    :z-index="2100"
+    @cancel="!companyChange.saving && (companyChange.open = false)"
+    @ok="saveCompanyChange"
+  >
+    <p>此操作更正销售合同主体。已关联的采购单继续归属原采购公司。</p>
+    <Alert
+      v-if="companyChange.error"
+      type="error"
+      show-icon
+      :message="companyChange.error"
+    />
+    <Form layout="vertical">
+      <Form.Item label="新的合同主体" required>
+        <Select
+          v-model:value="companyChange.companyId"
+          :options="companyChangeOptions"
+          :disabled="companyChange.saving"
+          :get-popup-container="(trigger) => trigger.parentElement ?? trigger"
+          placeholder="请选择正确的合同主体"
+          show-search
+          option-filter-prop="label"
+        />
+      </Form.Item>
+      <Form.Item label="更正原因" required>
+        <Input.TextArea
+          v-model:value="companyChange.reason"
+          :disabled="companyChange.saving"
+          :maxlength="1000"
+          :rows="3"
+          placeholder="请说明原主体录错的原因"
+        />
+      </Form.Item>
+    </Form>
+  </Modal>
   <ContractProductConfigurationModal
     v-if="configurationOpen"
     :open="configurationOpen"
@@ -1589,6 +1710,16 @@ async function save(activate = false) {
 </template>
 
 <style scoped>
+.company-field {
+  display: flex;
+  gap: 8px;
+}
+
+.company-field :deep(.ant-select) {
+  flex: 1;
+  min-width: 0;
+}
+
 .recent-row {
   display: flex;
   gap: 8px;
