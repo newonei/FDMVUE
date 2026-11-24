@@ -31,8 +31,10 @@ import {
 import { errorText } from '../../data';
 import { productProcessText } from '../attributes';
 import {
+  COLOR_DERIVED_LAYER_RULE,
   configurationMissingFields,
   productDimensionsText,
+  productNominalLayersText,
   productPatternText,
   productSliceThicknessText,
   productThicknessProcessText,
@@ -41,7 +43,7 @@ import ProductColorSummary from './ProductColorSummary.vue';
 import ProductImportRowEditor from './ProductImportRowEditor.vue';
 
 const props = defineProps<{ companyId: number; open: boolean }>();
-const emit = defineEmits<{ close: []; imported: [] }>();
+const emit = defineEmits<{ close: []; detail: [id: string]; imported: [] }>();
 const { Dragger } = Upload;
 const templateSources = ['自产', '外采'] as const;
 const file = shallowRef<File>();
@@ -55,6 +57,7 @@ const onlyIssues = ref(false);
 const idempotencyKey = ref('');
 const corrections = shallowRef<ProductImportCorrections>({});
 const validatedCorrections = shallowRef(corrections.value);
+const selectedRows = shallowRef<number[]>();
 const editing = ref<ProductImportRow>();
 const busy = computed(() => previewing.value || importing.value);
 const needsValidation = computed(
@@ -92,6 +95,23 @@ const importableCount = computed(
     (result.value?.readyCount ?? 0) +
     (completed.value ? 0 : reusableCount.value),
 );
+const failedRows = computed(() =>
+  (result.value?.rows ?? []).filter((row) => row.status === 'ERROR'),
+);
+const canEditRows = computed(
+  () => !completed.value || failedRows.value.some((row) => row.rawCells),
+);
+const resultAlert = computed(() => {
+  const receipt = result.value;
+  if (!completed.value || !receipt) return undefined;
+  const reused = receipt.reusedCount ?? reusableCount.value;
+  const stats = `新增 ${receipt.createdCount} 个产品，复用 ${reused} 个 SKU，失败 ${receipt.errorCount} 行${receipt.skippedCount ? `，跳过 ${receipt.skippedCount} 行` : ''}。`;
+  if (receipt.createdCount + reused === 0)
+    return { type: 'error' as const, message: `导入未完成。 ${stats}` };
+  if (receipt.errorCount > 0)
+    return { type: 'warning' as const, message: `部分导入完成。 ${stats}` };
+  return { type: 'success' as const, message: `导入完成。 ${stats}` };
+});
 function missingConfiguration(
   source: ProductImportRow['productSource'],
   values: ProductImportRow['values'] = {},
@@ -135,9 +155,9 @@ const columns = computed(() => [
   { title: '颜色 / 制造结构', key: 'colors', width: 175 },
   { title: '生产分类 / 工艺属性', key: 'production', width: 180 },
   { title: '分类 / 状态', key: 'category', width: 125 },
-  ...(completed.value
-    ? []
-    : [{ title: '操作', key: 'action', width: 76, fixed: 'right' as const }]),
+  ...(canEditRows.value
+    ? [{ title: '操作', key: 'action', width: 76, fixed: 'right' as const }]
+    : []),
 ]);
 const statusText: Record<ProductImportRow['status'], string> = {
   ERROR: '待修正',
@@ -156,9 +176,6 @@ const statusColor: Record<ProductImportRow['status'], string> = {
   SKIPPED: 'default',
 };
 
-const failedRows = computed(() =>
-  (result.value?.rows ?? []).filter((row) => row.status === 'ERROR'),
-);
 /** 失败清单：行号、编号、名称、失败原因，便于在原 Excel 里逐行修改。 */
 function downloadFailures() {
   const quote = (value: unknown) =>
@@ -191,6 +208,7 @@ function clearFile() {
   idempotencyKey.value = '';
   corrections.value = {};
   validatedCorrections.value = corrections.value;
+  selectedRows.value = undefined;
   editing.value = undefined;
 }
 function chooseFile(selected: File) {
@@ -209,19 +227,43 @@ function chooseFile(selected: File) {
   void preview();
   return false;
 }
-async function preview() {
-  if (!file.value || busy.value || completed.value || editing.value) return;
+async function preview(failedOnly = false) {
+  if (
+    !file.value ||
+    busy.value ||
+    editing.value ||
+    (completed.value && !failedOnly)
+  )
+    return;
+  const selection = failedOnly
+    ? failedRows.value.map((row) => row.rowNumber)
+    : selectedRows.value;
+  if (selection?.length === 0) return;
   previewing.value = true;
   panelError.value = '';
   const changes = corrections.value;
   const hadResult = Boolean(result.value);
   try {
-    const next =
-      Object.keys(changes).length > 0
-        ? await previewProductImport(file.value, props.companyId, changes)
-        : await previewProductImport(file.value, props.companyId);
+    let next: ProductImportResult;
+    if (selection) {
+      next = await previewProductImport(
+        file.value,
+        props.companyId,
+        changes,
+        selection,
+      );
+    } else if (Object.keys(changes).length > 0) {
+      next = await previewProductImport(file.value, props.companyId, changes);
+    } else {
+      next = await previewProductImport(file.value, props.companyId);
+    }
     result.value = next;
     validatedCorrections.value = changes;
+    selectedRows.value = selection;
+    if (failedOnly) {
+      completed.value = false;
+      idempotencyKey.value = newIdempotencyKey();
+    }
     const issues = next.errorCount + next.skippedCount;
     if (!hadResult || issues === 0) onlyIssues.value = issues > 0;
   } catch (error) {
@@ -232,13 +274,13 @@ async function preview() {
 }
 function saveRowChanges(changes: Record<string, string>) {
   const row = editing.value;
-  if (!row || busy.value || completed.value) return;
+  if (!row || busy.value || (completed.value && row.status !== 'ERROR')) return;
   if (Object.keys(changes).length > 0) {
     corrections.value = {
       ...corrections.value,
       [row.rowNumber]: { ...corrections.value[row.rowNumber], ...changes },
     };
-    idempotencyKey.value = newIdempotencyKey();
+    if (!completed.value) idempotencyKey.value = newIdempotencyKey();
     panelError.value = '';
   }
   editing.value = undefined;
@@ -263,10 +305,17 @@ async function submit() {
       ...(Object.keys(corrections.value).length > 0
         ? { corrections: corrections.value }
         : {}),
+      ...(selectedRows.value ? { selectedRows: selectedRows.value } : {}),
       previewHash: result.value.previewHash,
       idempotencyKey: idempotencyKey.value,
     });
     completed.value = true;
+    if (
+      result.value.createdCount +
+        (result.value.reusedCount ?? reusableCount.value) >
+      0
+    )
+      onlyIssues.value = false;
     emit('imported');
   } catch (error) {
     panelError.value = errorText(error);
@@ -365,8 +414,14 @@ async function downloadTemplate(productSource: ProductImportSource) {
       <div v-if="file" class="import-file-actions">
         <span class="import-muted">{{
           completed
-            ? '本次导入已完成，选择新文件可继续导入。'
-            : '旧表可以在预览中逐行选择产品来源，然后重新校验。'
+            ? failedRows.length
+              ? '可继续修正失败行，然后仅重新校验并导入这些行。'
+              : '选择新文件可继续导入。'
+            : selectedRows
+              ? `本次重试仅处理上一批失败的 ${selectedRows.length} 行。`
+              : result?.templateSource
+                ? `已识别${result.templateSource}导入模板。`
+                : '旧表可以在预览中逐行选择产品来源，然后重新校验。'
         }}</span>
         <Space wrap>
           <template v-if="result">
@@ -403,10 +458,10 @@ async function downloadTemplate(productSource: ProductImportSource) {
       />
       <template v-if="result">
         <Alert
-          v-if="completed"
-          type="success"
+          v-if="resultAlert"
+          :type="resultAlert.type"
           show-icon
-          :message="`导入完成：新增 ${result.createdCount} 个产品，复用 ${result.reusedCount ?? reusableCount} 个 SKU，导入失败 ${result.errorCount} 行。`"
+          :message="resultAlert.message"
         />
         <Alert
           v-for="(warning, index) in result.warnings"
@@ -420,7 +475,7 @@ async function downloadTemplate(productSource: ProductImportSource) {
             <span>数据总行数</span><strong>{{ result.totalCount }}</strong>
           </div>
           <div class="result-ready">
-            <span>{{ completed ? '已新增' : '可导入' }}</span><strong>{{
+            <span>{{ completed ? '已新增' : '可新增' }}</span><strong>{{
               completed ? result.createdCount : result.readyCount
             }}</strong>
           </div>
@@ -460,7 +515,7 @@ async function downloadTemplate(productSource: ProductImportSource) {
           row-key="rowNumber"
           size="small"
           :loading="previewing"
-          :scroll="{ x: completed ? 1395 : 1471, y: 310 }"
+          :scroll="{ x: canEditRows ? 1471 : 1395, y: 310 }"
           :pagination="{
             pageSize: 10,
             showSizeChanger: false,
@@ -469,7 +524,30 @@ async function downloadTemplate(productSource: ProductImportSource) {
         >
           <template #bodyCell="{ column, record }">
             <div v-if="column.key === 'product'" class="import-product">
-              <strong>{{ record.name || '未填名称' }}</strong><span>{{ record.code || '未填编号' }}</span>
+              <strong>{{ record.name || '未填名称' }}</strong>
+              <span
+                v-if="!record.matchedCode || record.code !== record.matchedCode"
+              >
+                {{ record.matchedCode ? '导入编号 ' : ''
+                }}{{ record.code || '未填编号' }}
+              </span>
+              <Button
+                v-if="record.productId"
+                class="import-detail-link"
+                type="link"
+                size="small"
+                :disabled="busy"
+                @click="emit('detail', record.productId)"
+              >
+                {{
+                  record.matchedCode
+                    ? `目标档案 ${record.matchedCode}`
+                    : '查看档案'
+                }}
+              </Button>
+              <span v-else-if="record.matchedCode">
+                目标档案 {{ record.matchedCode }}
+              </span>
             </div>
             <div v-else-if="column.key === 'specification'">
               <div v-if="record.values?.model" class="import-muted">
@@ -568,10 +646,26 @@ async function downloadTemplate(productSource: ProductImportSource) {
                 <div v-if="record.message" class="import-row-message">
                   {{ record.message }}
                 </div>
+                <div v-if="record.matchedManufacturing" class="import-muted">
+                  目标制造结构
+                  {{ productNominalLayersText(record.matchedManufacturing) }}
+                  <span
+                    v-if="
+                      record.matchedManufacturing.layerRule ===
+                      COLOR_DERIVED_LAYER_RULE
+                    "
+                  >
+                    · 自动开片每层加 0.2 mm
+                  </span>
+                </div>
               </template>
             </template>
             <Button
-              v-else-if="column.key === 'action' && record.rawCells"
+              v-else-if="
+                column.key === 'action' &&
+                record.rawCells &&
+                (!completed || record.status === 'ERROR')
+              "
               type="link"
               size="small"
               :aria-label="`修改 Excel 第 ${record.rowNumber} 行`"
@@ -593,14 +687,27 @@ async function downloadTemplate(productSource: ProductImportSource) {
           {{ completed ? '完成' : '关闭' }}
         </Button>
         <Button
+          v-if="completed && failedRows.length"
+          type="primary"
+          :disabled="busy || Boolean(editing)"
+          :loading="previewing"
+          @click="preview(true)"
+        >
+          重新校验失败行（{{ failedRows.length }}）
+        </Button>
+        <Button
           v-if="!completed"
           :disabled="!file || busy || Boolean(editing)"
           :loading="previewing"
           :type="needsValidation || !result ? 'primary' : 'default'"
-          @click="preview"
+          @click="preview()"
         >
           {{ result ? '重新校验' : '校验并预览' }}
         </Button>
+        <span v-if="result && !completed" class="import-muted">
+          新增 {{ result.readyCount }} · 复用 {{ reusableCount }} · 待修正
+          {{ result.errorCount }}
+        </span>
         <Button
           v-if="result && !completed"
           type="primary"
@@ -610,7 +717,7 @@ async function downloadTemplate(productSource: ProductImportSource) {
           :loading="importing"
           @click="submit"
         >
-          导入 {{ importableCount }} 个有效产品
+          确认导入
         </Button>
       </Space>
     </template>
@@ -619,6 +726,8 @@ async function downloadTemplate(productSource: ProductImportSource) {
     :open="open && Boolean(editing)"
     :company-id="companyId"
     :product-source="editing?.productSource"
+    :required-fields-by-source="result?.requiredFieldsBySource"
+    :template-source="result?.templateSource ?? undefined"
     :row-number="editing?.rowNumber"
     :cells="editingCells"
     :row-message="editing?.status === 'ERROR' ? editing.message : undefined"
@@ -759,6 +868,11 @@ async function downloadTemplate(productSource: ProductImportSource) {
 .import-product span {
   font-size: 12px;
   color: hsl(var(--muted-foreground));
+}
+
+.import-detail-link {
+  align-self: start;
+  padding-inline: 0;
 }
 
 .import-row-message {

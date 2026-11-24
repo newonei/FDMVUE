@@ -484,6 +484,8 @@ vi.mock('ant-design-vue', () => {
   };
 });
 
+const orderSubject = '11 月瑜伽垫备货';
+
 function order() {
   return {
     id: 'po-a',
@@ -527,7 +529,12 @@ function detail(id = 'po-a') {
     contractId: 'contract-a',
     version: 1,
     order: { ...order(), id },
-    details: { status: 'DRAFT', version: 0, clauseIds: [] },
+    details: {
+      status: 'DRAFT',
+      version: 0,
+      clauseIds: [],
+      subject: orderSubject,
+    },
     allowedActions: [],
     blockReasons: [],
     history: [],
@@ -546,6 +553,7 @@ function row() {
     contractStatus: 'CONFIRMED',
     allowedActions: [],
     record: order(),
+    details: { subject: orderSubject },
     orderAmount: '100',
     paidAmount: '40',
     unpaidAmount: '60',
@@ -600,6 +608,7 @@ const overview = {
       reason: 'OVERDUE',
       days: 9,
       code: 'CG-OVERDUE',
+      subject: orderSubject,
       orderId: 'po-a',
       contractId: 'contract-a',
       contractCode: 'HT-1',
@@ -633,13 +642,52 @@ afterEach(() => {
 });
 
 describe('采购订单原页执行', () => {
+  it('输入采购主题查单并回到第一页', async () => {
+    const { host } = await mount('?page=2');
+    const search = host.querySelector<HTMLInputElement>('input')!;
+    expect(search.placeholder).toBe(
+      '搜索采购主题、内部单号、合同号、客户或供应商',
+    );
+    search.value = '瑜伽垫备货';
+    search.dispatchEvent(new Event('input'));
+    await nextTick();
+    search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    await settle();
+    expect(mocks.list).toHaveBeenLastCalledWith(
+      expect.objectContaining({ keyword: '瑜伽垫备货', pageNo: 1 }),
+    );
+  });
+  it('没有采购主题时仍可打开采购单，列表和详情显示未填写提示', async () => {
+    mocks.list.mockResolvedValue({
+      list: [{ ...row(), details: { subject: ' ' } }],
+      total: 1,
+    });
+    const value = detail();
+    mocks.detail.mockResolvedValue({
+      ...value,
+      details: { ...value.details, subject: ' ' },
+    });
+    const { host } = await mount();
+    button(host, '未填写采购主题').click();
+    await settle();
+    const drawer = host.querySelector('[data-drawer]')!;
+    expect(drawer.textContent).toContain('未填写采购主题');
+    expect(host.textContent).not.toContain('CG-001');
+  });
   it('打开和关闭执行侧栏不改变路由、筛选、分页或重新拉取列表', async () => {
     const { host, router } = await mount('?keyword=工厂&page=2');
     const original = router.currentRoute.value.fullPath;
     const count = mocks.list.mock.calls.length;
-    button(host, 'CG-001').click();
+    const record = host.querySelector<HTMLElement>('[data-record="po-a"]')!;
+    expect(record.textContent).not.toContain('CG-001');
+    button(record, orderSubject).click();
     await settle();
-    expect(host.querySelector<HTMLElement>('[data-drawer]')).not.toBeNull();
+    const drawer = host.querySelector<HTMLElement>('[data-drawer]')!;
+    expect(drawer.querySelector('.order-title-text')?.textContent?.trim()).toBe(
+      orderSubject,
+    );
+    expect(drawer.textContent).not.toContain('采购单号');
+    expect(drawer.textContent).not.toContain('CG-001');
     expect(host.querySelector<HTMLElement>('[data-table]')).not.toBeNull();
     expect(router.currentRoute.value.fullPath).toBe(original);
     button(host, '关闭执行详情').click();
@@ -662,7 +710,7 @@ describe('采购订单原页执行', () => {
   });
   it('登记入库打开采购入库并带出当前采购单，保存后刷新原页并保留选择', async () => {
     const { host, router } = await mount('?page=2');
-    button(host, 'CG-001').click();
+    button(host, orderSubject).click();
     await settle();
     button(host, '入库单').click();
     await settle();
@@ -717,7 +765,7 @@ describe('采购订单原页执行', () => {
   });
   it('登记付款带出服务端可付余额，报销也直接关联当前订单', async () => {
     const { host } = await mount();
-    button(host, 'CG-001').click();
+    button(host, orderSubject).click();
     await settle();
     button(host, '付款记录').click();
     await settle();
@@ -751,7 +799,7 @@ describe('采购订单原页执行', () => {
     mocks.list.mockRejectedValue(new Error('网络暂不可用'));
     button(host, '刷新').click();
     await settle();
-    expect(button(host, 'CG-001')).toBeDefined();
+    expect(button(host, orderSubject)).toBeDefined();
     expect(host.textContent).toContain('网络暂不可用');
   });
   it('保留原外部深链接和独立历史订单，关闭只移除详情标记', async () => {
@@ -772,7 +820,7 @@ describe('采购订单原页执行', () => {
     });
     button(host, '刷新').click();
     await settle();
-    button(host, 'CG-001').click();
+    button(host, orderSubject).click();
     await settle();
     expect(
       host.querySelector<HTMLElement>('[data-standalone]')?.dataset.standalone,
@@ -788,7 +836,7 @@ describe('采购订单原页执行', () => {
     mocks.detail.mockResolvedValue(complete);
     mocks.finance.mockResolvedValue({});
     const { host } = await mount();
-    button(host, 'CG-001').click();
+    button(host, orderSubject).click();
     await settle();
     expect(button(host, '入库单').disabled).toBe(true);
     expect(button(host, '付款记录').disabled).toBe(true);
@@ -796,7 +844,7 @@ describe('采购订单原页执行', () => {
   });
   it('付款页内的关联子表单打开时阻止关闭执行抽屉，关闭子表单后恢复', async () => {
     const { host } = await mount();
-    button(host, 'CG-001').click();
+    button(host, orderSubject).click();
     await settle();
     button(host, '付款页打开子表单').click();
     await settle();
@@ -823,9 +871,11 @@ describe('采购订单原页执行', () => {
     expect(mocks.list).toHaveBeenLastCalledWith(
       expect.objectContaining({ operation: 'IN_PROGRESS', pageNo: 1 }),
     );
-    const attention = [...host.querySelectorAll('button')].find((entry) =>
-      entry.textContent?.includes('CG-OVERDUE'),
+    const attention = host.querySelector<HTMLButtonElement>(
+      'section[aria-label="需要处理的采购单"] button',
     )!;
+    expect(attention.textContent).toContain(orderSubject);
+    expect(attention.textContent).not.toContain('CG-OVERDUE');
     expect(attention.textContent).toContain('超期 9 天');
     attention.click();
     await settle();
@@ -834,8 +884,17 @@ describe('采购订单原页执行', () => {
 
   it('附件上传忙碌时不能切走页签、关闭抽屉或换单，完成后恢复操作', async () => {
     const secondOrder = { ...order(), id: 'po-b', code: 'CG-002' };
+    const secondSubject = '12 月瑜伽垫备货';
     mocks.list.mockResolvedValue({
-      list: [row(), { ...row(), id: 'po-b', record: secondOrder }],
+      list: [
+        row(),
+        {
+          ...row(),
+          id: secondOrder.id,
+          record: secondOrder,
+          details: { subject: secondSubject },
+        },
+      ],
       total: 2,
     });
     mocks.contract.mockResolvedValue({
@@ -846,7 +905,7 @@ describe('采购订单原页执行', () => {
       async (_contractId: string, orderId: string) => detail(orderId),
     );
     const { host } = await mount();
-    button(host, 'CG-001').click();
+    button(host, orderSubject).click();
     await settle();
     button(host, '切换附件页签').click();
     await settle();
@@ -860,7 +919,7 @@ describe('采购订单原页执行', () => {
     const detailRequests = mocks.detail.mock.calls.length;
     button(host, '切换详情页签').click();
     button(host, '关闭执行详情').click();
-    button(host, 'CG-002').click();
+    button(host, secondSubject).click();
     await settle();
     expect(
       host.querySelector<HTMLElement>('[data-order-tab]')!.dataset.orderTab,
@@ -891,7 +950,7 @@ describe('采购订单原页执行', () => {
     };
     mocks.attachments.mockResolvedValue(attachments);
     const { host } = await mount();
-    button(host, 'CG-001').click();
+    button(host, orderSubject).click();
     await settle();
     button(host, '切换附件页签').click();
     await settle();

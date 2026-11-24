@@ -40,6 +40,7 @@ const mocks = vi.hoisted(() => ({
   fillSubmit: vi.fn(),
   factoryPage: vi.fn(),
   get: vi.fn(),
+  getPurchaseSheet: vi.fn().mockResolvedValue({ order: { lines: [] }, details: {} }),
   getRouteOptions: vi.fn().mockResolvedValue(routeOptions),
   lastRoute: vi.fn().mockResolvedValue(null),
   materialPlan: vi.fn(),
@@ -76,6 +77,7 @@ vi.mock('#/api/fdmgongchang/production-order', () => ({
   getMyProductionOrders: mocks.myPage,
   getOrderableFactories: mocks.factories,
   getProductionOrder: mocks.get,
+  getPurchaseSheet: mocks.getPurchaseSheet,
   getLastRoute: mocks.lastRoute,
   getMaterialPlan: mocks.materialPlan,
   getRecipeOptions: vi.fn().mockResolvedValue([{ recipeCode: 'REC-001', recipeName: '常规款（密度110）' }]),
@@ -892,6 +894,40 @@ describe('production order page', () => {
       { itemId: 91, routeId: 3, steps: ['SLICE', 'PUNCH', 'FOLD', 'PACK'] },
       { itemId: 92, routeId: 3, steps: ['SLICE', 'PUNCH', 'ENGRAVE'] },
     ] }));
+  });
+
+  it('shows each purchase line engraving requirement beside its independently selected route', async () => {
+    mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:handle');
+    const purchase: Api.Order = {
+      ...order,
+      sourceType: 'PURCHASE_ORDER',
+      items: [
+        { ...order.items[0]!, productCode: 'LASER-SKU', sourceLineId: 'laser' },
+        { ...order.items[0]!, id: 92, productCode: 'PLAIN-SKU', sourceLineId: 'plain' },
+      ],
+    };
+    mocks.factoryPage.mockResolvedValue({ list: [purchase], total: 1 });
+    mocks.get.mockResolvedValue(purchase);
+    mocks.getPurchaseSheet.mockResolvedValueOnce({
+      order: { lines: [
+        { id: 'plain', patternMode: 'NONE', frontColor: 'BLUE' },
+        { id: 'laser', patternMode: 'LASER', frontColor: 'RED' },
+      ] },
+      details: {},
+    });
+    unmount = mount();
+    await flush();
+    button('去接单').click();
+    await flush();
+
+    const laserRoute = document.querySelector('[aria-label="po-item-91 要走的工序"]')!;
+    const plainRoute = document.querySelector('[aria-label="po-item-92 要走的工序"]')!;
+    expect(laserRoute.closest('.rounded-md')?.textContent).toContain('激光雕刻');
+    expect(laserRoute.closest('.rounded-md')?.textContent).toContain('RED');
+    expect(plainRoute.closest('.rounded-md')?.textContent).toContain('无雕刻');
+    expect(plainRoute.closest('.rounded-md')?.textContent).toContain('BLUE');
+    expect([...laserRoute.querySelectorAll('button')].find((chip) => chip.textContent?.trim() === '雕刻')?.getAttribute('aria-pressed')).toBe('false');
+    expect(mocks.getPurchaseSheet).toHaveBeenCalledOnce();
   });
 
   it('blocks accepting stale route drafts after a saved configuration fails to refresh and allows retry', async () => {

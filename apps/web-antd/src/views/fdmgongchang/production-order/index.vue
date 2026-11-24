@@ -589,7 +589,15 @@ function progressPercent(o: Api.Order) {
       <CreateModal v-model:open="createOpen" :copy-from="copyFrom" :factories="orderable" @created="onCreated" />
       <ScheduleModal v-model:open="scheduleOpen" :orders="[...selected.values()]" @generated="onScheduled" />
       <OrderSplitModal :key="`split-${factory.factoryId.value ?? 'none'}`" v-model:open="releaseOpen" :orders="[...selected.values()]" @released="onSplitReleased" @changed="applyFreshOrder" />
-      <ItemProductionConfigModal v-if="configOrderId && configItemId" :key="factory.factoryId.value ?? 'none'" v-model:open="configOpen" :order-id="configOrderId" :item-id="configItemId" @saved="onConfigSaved" />
+      <ItemProductionConfigModal
+        v-if="configOrderId && configItemId"
+        :key="factory.factoryId.value ?? 'none'"
+        v-model:open="configOpen"
+        :order-id="configOrderId"
+        :item-id="configItemId"
+        :show-product-archive="hasAccessByCodes(['fdmplatform:products:query'])"
+        @saved="onConfigSaved"
+      />
       <BatchRouteModal
         v-if="batchRouteOrder"
         :key="`batch-route-${batchRouteOrder.factoryId}-${batchRouteOrder.id}`"

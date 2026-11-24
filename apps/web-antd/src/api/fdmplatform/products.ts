@@ -199,6 +199,11 @@ export interface ProductImportRow {
   status: 'ERROR' | 'IMPORTED' | 'READY' | 'REUSE' | 'REUSED' | 'SKIPPED';
   message: string;
   productId?: string;
+  matchedCode?: string;
+  matchedManufacturing?: Pick<
+    ProductAttributes,
+    'backThicknessMm' | 'constructionType' | 'frontThicknessMm' | 'layerRule'
+  >;
   baseSkuKey?: string;
   finishedSignature?: string;
   configurationReady?: boolean;
@@ -229,6 +234,8 @@ export interface ProductImportRow {
 export interface ProductImportResult {
   fileName: string;
   previewHash: string;
+  requiredFieldsBySource?: Partial<Record<ProductImportSource, string[]>>;
+  templateSource?: null | ProductImportSource;
   totalCount: number;
   readyCount: number;
   createdCount: number;
@@ -304,6 +311,7 @@ export function previewProductImport(
   file: File,
   companyId = 0,
   corrections?: ProductImportCorrections,
+  selectedRows?: number[],
 ) {
   return requestClient.upload<ProductImportResult>(
     `${base}/import-preview`,
@@ -311,6 +319,7 @@ export function previewProductImport(
       file,
       companyId,
       corrections: corrections && JSON.stringify(corrections),
+      selectedRows: selectedRows && JSON.stringify(selectedRows),
     },
     { timeout: 300_000 },
   );
@@ -321,11 +330,16 @@ export function importProducts(data: {
   file: File;
   idempotencyKey: string;
   previewHash: string;
+  selectedRows?: number[];
 }) {
-  const { corrections, ...request } = data;
+  const { corrections, selectedRows, ...request } = data;
   return requestClient.upload<ProductImportResult>(
     `${base}/import`,
-    { ...request, corrections: corrections && JSON.stringify(corrections) },
+    {
+      ...request,
+      corrections: corrections && JSON.stringify(corrections),
+      selectedRows: selectedRows && JSON.stringify(selectedRows),
+    },
     { timeout: 300_000 },
   );
 }

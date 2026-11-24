@@ -76,7 +76,7 @@ const props = defineProps<{
   /** 复制这张采购单：带出合同、供应商、表头和明细，另存为新单 */
   copyFrom?: { contractId: string; orderId: string };
   /** 编辑已有采购草稿。 */
-  editOf?: { code?: string; contractId: string; orderId: string };
+  editOf?: { contractId: string; orderId: string; title?: string };
   open: boolean;
   /** 从采购申请开单时带出申请明细与可转数量。 */
   requestId?: string;
@@ -743,7 +743,9 @@ async function save(submit = false) {
     :open="open"
     :title="
       editOf
-        ? `修改采购单 ${editOf.code ?? ''}`.trim()
+        ? editOf.title
+          ? `修改采购单「${editOf.title}」`
+          : '修改采购单'
         : copyFrom
           ? '复制采购单'
           : '新建采购单'

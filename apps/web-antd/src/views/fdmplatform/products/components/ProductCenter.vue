@@ -168,6 +168,7 @@ const priceForm = reactive({
 });
 let sequence = 0;
 let detailRefreshSequence = 0;
+let importDetailId: string | undefined;
 let activatedOnce = false;
 const hasFilters = computed(() =>
   Boolean(
@@ -333,6 +334,7 @@ const entityDetail = useEntityDetail(
   },
 );
 function openProductDetail(id: string) {
+  importDetailId = undefined;
   if (route.query.productId === id) {
     entityDetail.open(id);
     return;
@@ -352,6 +354,18 @@ function openProductDetail(id: string) {
       catalogCodeOrder: codeOrder.value,
     },
   });
+}
+function openImportedProductDetail(id: string) {
+  importOpen.value = false;
+  openProductDetail(id);
+  importDetailId = id;
+}
+function closeProductDetail() {
+  const fromImport =
+    importDetailId === selectedProduct.value?.id && Boolean(importDetailId);
+  importDetailId = undefined;
+  entityDetail.close();
+  if (fromImport) openImport();
 }
 function openProduct(product?: Product) {
   detailRefreshSequence++;
@@ -607,12 +621,13 @@ async function savePrice() {
         :open="importOpen"
         :company-id="companyId"
         @close="importOpen = false"
+        @detail="openImportedProductDetail"
         @imported="productsImported"
       />
       <ProductDetailDrawer
         :open="detailOpen"
         :product="selectedProduct"
-        @close="entityDetail.close"
+        @close="closeProductDetail"
         @edit="openProduct"
         @remove="confirmDelete"
         @refresh="refreshProductDetail"

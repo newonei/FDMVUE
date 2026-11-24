@@ -553,6 +553,7 @@ export interface ProcurementOrdersOverview {
     dueDate?: string;
     orderId: string;
     reason: OrderAttentionReason;
+    subject?: null | string;
     supplierName: string;
     unpaid?: Decimal;
   }[];

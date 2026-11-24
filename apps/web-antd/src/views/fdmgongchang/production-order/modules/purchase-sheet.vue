@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { RoutePurchaseReference } from './route-purchase-reference';
+
 import type { FdmgongchangProductionOrderApi as Api, FdmgongchangSupplyMatchApi as MatchApi } from '#/api/fdmgongchang/production-order';
 
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
@@ -11,12 +13,14 @@ import ProductStructureDetails from '#/views/fdmplatform/products/components/Pro
 import { num } from '../shared';
 import ProductionSpecComparison from './production-spec-comparison.vue';
 import { purchaseSheetImageIds, purchaseSheetStructure } from './purchase-sheet-structure';
+import { routePurchaseReferencesFromSheet } from './route-purchase-reference';
 
 /**
  * 采购单生成的工厂订单的生产要求：产品结构读取该行采购资料与下单快照，补充说明实时读取采购资料，
  * 按采购单打印出来的顺序列出每行的定制说明、包装要求、明细备注，整单的共用说明、辅料和包装步骤。
  */
 const props = defineProps<{ items?: Api.Item[]; orderId: number; }>();
+const emit = defineEmits<{ reference: [reference: RoutePurchaseReference] }>();
 
 const sheet = ref<Api.PurchaseSheet>();
 const targetOptions = ref<MatchApi.TargetOptions>();
@@ -58,14 +62,19 @@ async function load() {
   const orderId = props.orderId;
   loading.value = true;
   failed.value = false;
+  emit('reference', 'loading');
   try {
     const [freshSheet, options] = await Promise.all([getPurchaseSheet(orderId), getTargetOptions().catch(() => undefined)]);
     if (current !== version) return;
     sheet.value = freshSheet;
     targetOptions.value = options;
+    emit('reference', routePurchaseReferencesFromSheet(freshSheet, options));
     await loadImages(orderId, current);
   } catch {
-    if (current === version) failed.value = true;
+    if (current === version) {
+      failed.value = true;
+      emit('reference', 'unavailable');
+    }
   } finally {
     if (current === version) loading.value = false;
   }

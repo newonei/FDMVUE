@@ -364,7 +364,7 @@ async function loadCopyRows(reset = false) {
   copyError.value = '';
   try {
     const result = await getProcurementOrders({
-      keyword: copyKeyword.value || undefined,
+      keyword: copyKeyword.value.trim() || undefined,
       pageNo: copyPage.value,
       pageSize: 10,
     });
@@ -1232,7 +1232,7 @@ defineExpose({
       <Space direction="vertical" style="width: 100%">
         <Input.Search
           v-model:value="copyKeyword"
-          placeholder="搜索采购单号、内部单号、合同号或供应商"
+          placeholder="搜索采购主题、内部单号、合同号或供应商"
           @search="loadCopyRows(true)"
         />
         <Alert v-if="copyError" type="error" :message="copyError" />
@@ -1243,7 +1243,7 @@ defineExpose({
           :row-key="(row: ProcurementOrderRow) => row.standaloneId ?? row.id"
           :pagination="{ current: copyPage, pageSize: 10, total: copyTotal }"
           :columns="[
-            { title: '采购单', key: 'code' },
+            { title: '采购主题', key: 'subject' },
             { title: '供应商', key: 'supplier' },
             { title: '附加资料', key: 'extras', width: 110 },
             { title: '', key: 'action', width: 80 },
@@ -1256,8 +1256,8 @@ defineExpose({
           "
         >
           <template #bodyCell="{ column, record }">
-            <span v-if="column.key === 'code'">
-              {{ purchaseRowLabels(record as BusinessRecord).order }}
+            <span v-if="column.key === 'subject'">
+              {{ purchaseRowLabels(record as BusinessRecord).title }}
             </span>
             <span v-else-if="column.key === 'supplier'">
               {{ purchaseRowLabels(record as BusinessRecord).supplier }}

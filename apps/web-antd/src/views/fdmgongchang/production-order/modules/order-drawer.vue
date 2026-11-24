@@ -2,11 +2,12 @@
 import type { Dayjs } from 'dayjs';
 
 import type { RouteDraft } from '../shared';
+import type { RoutePurchaseReference } from './route-purchase-reference';
 
 import type { FdmgongchangRouteApi as RouteApi } from '#/api/fdmgongchang/factory';
 import type { FdmgongchangProductionOrderApi as Api } from '#/api/fdmgongchang/production-order';
 
-import { computed, ref, watch } from 'vue';
+import { computed, ref, shallowRef, watch } from 'vue';
 
 import { useAccess } from '@vben/access';
 
@@ -37,6 +38,8 @@ import ItemProductionConfigModal from './item-production-config-modal.vue';
 import MaterialPlan from './material-plan.vue';
 import PurchaseSheet from './purchase-sheet.vue';
 import RoutePicker from './route-picker.vue';
+import RouteProductReference from './route-product-reference.vue';
+import { routePurchaseReferenceProps } from './route-purchase-reference';
 import RouteSupplementModal from './route-supplement-modal.vue';
 import SourcePurchaseLink from './source-purchase-link.vue';
 import SupplyMatch from './supply-match.vue';
@@ -54,6 +57,7 @@ const emit = defineEmits<{ changed: []; copy: [order: Api.Order] }>();
 const open = defineModel<boolean>('open', { required: true });
 const { hasAccessByCodes } = useAccess();
 const canHandleOrder = computed(() => hasAccessByCodes(['fdmgongchang:production-order:handle']));
+const canViewProductArchive = computed(() => hasAccessByCodes(['fdmplatform:products:query']));
 
 const order = ref<Api.Order>();
 const loading = ref(false);
@@ -112,6 +116,7 @@ const canSupplementRoute = computed(() => props.mode === 'factory' && order.valu
 /** 多个产品待定工艺时才显示批量设置。 */
 const canBatchRoute = computed(() => factoryRoute.value && canHandle.value && activeItems.value.length > 1);
 const canPlan = computed(() => props.mode === 'factory' && (canHandle.value || canProgress.value));
+const purchaseReference = shallowRef<RoutePurchaseReference>();
 const materialSaving = computed(() => !!materialPlan.value?.saving);
 const overlayProps = computed(() => acceptInModal.value ? {
   centered: true,
@@ -274,6 +279,7 @@ watch(() => [open.value, props.orderId] as const, ([value]) => {
   ++loadVersion;
   ++targetRefreshVersion;
   order.value = undefined;
+  purchaseReference.value = undefined;
   routeOptions.value = undefined;
   drafts.value = {};
   batchDraft.value = { steps: [] };
@@ -524,7 +530,7 @@ function producedQty(item: Api.Item) {
               </Checkbox>
               <Checkbox.Group v-model:value="batchIds">
                 <Checkbox v-for="i in activeItems" :key="i.id" :value="i.id">
-                  {{ i.productName }}<span class="text-muted-foreground"> {{ specText(i) }}</span>
+                  {{ i.productCode || i.productName }}<span class="text-muted-foreground"> · {{ specText(i) }}</span>
                 </Checkbox>
               </Checkbox.Group>
             </div>
@@ -545,6 +551,13 @@ function producedQty(item: Api.Item) {
                 >补工序</Button>
               </span>
               <span v-if="canHandle && savedProductionConfigProblems(i).length > 0" class="text-xs text-orange-600">{{ savedProductionConfigProblems(i).join('；') }}</span>
+              <RouteProductReference
+                v-if="canPlan && num(i.quantity) > 0"
+                class="my-1"
+                v-bind="routePurchaseReferenceProps(purchaseReference, i.sourceLineId)"
+                :product-id="canViewProductArchive ? i.productId : undefined"
+                :folding-type="i.suggestedFoldingType"
+              />
               <div v-if="canHandle && i.targetConfirmedAt" class="my-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                 <span>{{ colorModeText(i.targetColorMode) }} · 成品总厚 {{ thicknessText(i.targetThickness) }}</span>
                 <span>正面 {{ parameterText(i.targetFrontColor) }} · {{ thicknessText(i.targetFrontThickness) }} · {{ textureText(i, 'FRONT') }}</span>
@@ -629,7 +642,7 @@ function producedQty(item: Api.Item) {
         </section>
 
         <div v-if="fromPurchase" v-show="!canHandle || acceptView === 'purchase'" class="flex flex-col gap-4">
-          <PurchaseSheet :order-id="order.id" :items="order.items" />
+          <PurchaseSheet :order-id="order.id" :items="order.items" @reference="purchaseReference = $event" />
           <AuxPanel
             v-if="mode === 'factory'"
             :key="`aux-${order.id}-${order.items.map((i) => (i.processes ?? []).join(',')).join('|')}`"
@@ -762,7 +775,15 @@ function producedQty(item: Api.Item) {
       </div>
     </template>
   </component>
-  <ItemProductionConfigModal v-if="order && configItemId" v-model:open="configOpen" :order-id="order.id" :item-id="configItemId" @saved="onTargetChanged" />
+  <ItemProductionConfigModal
+    v-if="order && configItemId"
+    v-model:open="configOpen"
+    :order-id="order.id"
+    :item-id="configItemId"
+    :purchase-reference="purchaseReference"
+    :show-product-archive="canViewProductArchive"
+    @saved="onTargetChanged"
+  />
   <RouteSupplementModal
     v-if="order && supplementItem"
     v-model:open="supplementOpen" :factory-id="order.factoryId" :item="supplementItem" :order-no="order.orderNo"

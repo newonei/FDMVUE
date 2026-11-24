@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { RouteDraft } from '../shared';
 import type { ProductionBatchField, ProductionConfigDraft } from './item-production-config';
+import type { RoutePurchaseReference } from './route-purchase-reference';
 
 import type { FdmgongchangRouteApi as RouteApi } from '#/api/fdmgongchang/factory';
 import type { FdmgongchangProductionOrderApi as Api, FdmgongchangSupplyMatchApi as MatchApi } from '#/api/fdmgongchang/production-order';
@@ -15,12 +16,25 @@ import { COLOR_DERIVED_LAYER_RULE, productSliceThicknessText, productThicknessPr
 import { num, routeLabel, routeProblem, sortSteps } from '../shared';
 import { productionBatchConfig, productionBatchDraft, productionBatchFields, productionConfigDraft, productionConfigLayers, productionConfigProblems, productionConfigTarget, productionRouteProblems, productionThicknessRouteNotice, unfinishedProductionParameters } from './item-production-config';
 import RoutePicker from './route-picker.vue';
+import RouteProductReference from './route-product-reference.vue';
+import { routePurchaseReferenceProps, useRoutePurchaseReference } from './route-purchase-reference';
 
-const props = defineProps<{ itemId: number; orderId: number }>();
+const props = defineProps<{
+  itemId: number;
+  orderId: number;
+  purchaseReference?: RoutePurchaseReference;
+  showProductArchive?: boolean;
+}>();
 const emit = defineEmits<{ saved: [] }>();
 const open = defineModel<boolean>('open', { required: true });
 const order = ref<Api.Order>();
 const item = ref<Api.Item>();
+const standalonePurchaseReference = useRoutePurchaseReference(
+  () => open.value && !props.purchaseReference && order.value?.sourceType === 'PURCHASE_ORDER'
+    ? order.value.id
+    : undefined,
+);
+const purchaseReference = computed(() => props.purchaseReference ?? standalonePurchaseReference.value);
 const form = ref<ProductionConfigDraft>({ colorMode: 'UNKNOWN', constructionType: 'UNKNOWN' });
 const route = ref<RouteDraft>({ steps: [] });
 const targetOptions = ref<MatchApi.TargetOptions>();
@@ -230,6 +244,12 @@ const constructionTypes = [{ label: '待核实', value: 'UNKNOWN' }, { label: '�
           <p v-else class="mt-3 text-xs text-muted-foreground">这里填写冲裁后的成品尺寸。颜色方式与制造结构分别确认，单色也可双层贴合；双层正反面按实际层厚填写，两层之和必须等于成品总厚。压花至少选择一面纹路，另一面可不压花。</p>
           <div class="mt-4 border-t pt-3">
             <div class="mb-2 font-medium">实际生产工艺</div>
+            <RouteProductReference
+              class="mb-2"
+              v-bind="routePurchaseReferenceProps(purchaseReference, item.sourceLineId)"
+              :product-id="showProductArchive ? item.productId : undefined"
+              :folding-type="item.suggestedFoldingType"
+            />
             <RoutePicker id="production-config" v-model="route" :options="routeOptions" />
             <p v-if="route.steps.includes('ENGRAVE') && order?.sourceType === 'PURCHASE_ORDER'" class="mt-2 text-sm text-muted-foreground">雕刻按采购单附件中的图纸执行。</p>
             <label v-if="route.steps.includes('FOLD')" for="config-folding" class="mt-3 flex flex-col gap-1 text-sm">

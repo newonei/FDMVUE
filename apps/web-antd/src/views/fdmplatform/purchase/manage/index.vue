@@ -58,7 +58,6 @@ import {
   newIdempotencyKey,
 } from '#/api/fdmplatform';
 import {
-  createdOrdersText,
   deleteProcurementFile,
   deleteProcurementOrder,
   downloadProcurementFile,
@@ -144,6 +143,7 @@ import {
   canRecordOrderArrival,
   canReturnOrderArrival,
   downloadBlob,
+  EMPTY_PURCHASE_SUBJECT,
   orderArrivalProgress,
   orderCopySource,
   orderDetailsPayload,
@@ -545,9 +545,9 @@ const editorOpen = ref(false);
 const copySource = ref<{ contractId: string; orderId: string }>();
 /** 修改撤回为草稿的采购单时的这张单；新建、复制时为空 */
 const editSource = ref<{
-  code?: string;
   contractId: string;
   orderId: string;
+  title: string;
 }>();
 function openEditor(source?: { contractId: string; orderId: string }) {
   if (childOpen.value) return;
@@ -561,9 +561,9 @@ async function editCurrentOrder() {
   if (!(await allowLeaveDetails())) return;
   copySource.value = undefined;
   editSource.value = {
-    code: String(current.order.code ?? ''),
     contractId: current.contractId,
     orderId: current.id,
+    title: purchaseRowLabels({ ...current }).title,
   };
   editorOpen.value = true;
 }
@@ -718,7 +718,7 @@ function withdrawCurrentOrder() {
   }
   let reason = '';
   Modal.confirm({
-    title: `撤回采购单 ${String(current.order.code ?? '')} 为草稿？`,
+    title: `撤回采购单「${purchaseRowLabels({ ...current }).title}」为草稿？`,
     content: () =>
       h('div', [
         h(
@@ -757,7 +757,7 @@ function withdrawCurrentApproval() {
   const current = view.value;
   if (!current || childOpen.value) return;
   Modal.confirm({
-    title: `撤回采购单 ${String(current.order.code ?? '')} 的钉钉审批？`,
+    title: `撤回采购单「${purchaseRowLabels({ ...current }).title}」的钉钉审批？`,
     content: '撤回后回到草稿，钉钉里的审批单会被撤销。修改后可以重新提交。',
     okText: '撤回审批',
     onOk: async () => {
@@ -781,7 +781,7 @@ function endCurrentOrder() {
   if (!current || childOpen.value) return;
   let reason = '';
   Modal.confirm({
-    title: `结束采购单 ${purchaseRowLabels({ ...current, record: current.order }).order}？`,
+    title: `结束采购单「${purchaseRowLabels({ ...current }).title}」？`,
     content: () =>
       h('div', [
         h(
@@ -854,7 +854,7 @@ function deleteCurrentOrder() {
     return;
   let reason = '';
   Modal.confirm({
-    title: `删除已终止采购单 ${String(current.order.code ?? '')}？`,
+    title: `删除已终止采购单「${purchaseRowLabels({ ...current }).title}」？`,
     content: () =>
       h('div', [
         h(
@@ -902,21 +902,25 @@ function editorSaved(
 ) {
   editorOpen.value = false;
   if (mode && editSource.value) {
-    let text = `已保存草稿 ${value.code}，记得提交`;
+    let text = '已保存采购草稿，记得提交';
     if (mode === 'submitted')
       text = value.pendingApproval
-        ? `采购单 ${value.code} 已提交钉钉审批，通过后变成已下单`
-        : `采购单 ${value.code} 已下单`;
+        ? '采购单已提交钉钉审批，通过后变成已下单'
+        : '采购单已下单';
     message.success(text);
     void loadList();
     void Promise.all([loadDetail(), refreshFacts()]);
     return;
   }
-  let successText = createdOrdersText(value);
-  if (mode === 'draft')
-    successText = `${createdOrdersText(value, '已保存采购草稿')}，可继续完善下单资料`;
-  else if (value.pendingApproval)
+  const count = value.orders?.length ?? 0;
+  let successText =
+    count > 1 ? `已按供应商拆成 ${count} 张采购单` : '已新建采购单';
+  if (mode === 'draft') {
+    if (count <= 1) successText = '已保存采购草稿';
+    successText = `${successText}，可继续完善下单资料`;
+  } else if (value.pendingApproval) {
     successText = `${successText}，已提交钉钉审批，通过后变成已下单`;
+  }
   message.success(successText);
   void loadList();
   localTab.value = 'details';
@@ -1163,7 +1167,7 @@ async function loadList() {
     contractId: contractId.value,
     pageNo: page.value,
     pageSize: 10,
-    keyword: keyword.value || undefined,
+    keyword: keyword.value.trim() || undefined,
     status: status.value,
     operation: operation.value,
     mine: mine.value || undefined,
@@ -1731,7 +1735,7 @@ watch(financeType, (value, previous) => {
           :class="attentionClass[row.reason]"
           @click="openAttention(row)"
         >
-          <b>{{ row.code }}</b>
+          <b>{{ row.subject?.trim() || EMPTY_PURCHASE_SUBJECT }}</b>
           <span>{{ row.supplierName }}</span>
           <em>{{
             row.reason === 'OVERDUE'
@@ -1772,7 +1776,7 @@ watch(financeType, (value, previous) => {
           <Input.Search
             v-model:value="keyword"
             allow-clear
-            placeholder="搜索采购单号、内部单号、合同号、客户或供应商"
+            placeholder="搜索采购主题、内部单号、合同号、客户或供应商"
             class="order-search"
             @search="
               page = 1;
@@ -1930,7 +1934,7 @@ watch(financeType, (value, previous) => {
                 >{{ flag.text }}</i>
             </span>
             <div v-else-if="column.key === 'supplier'" class="order-cell">
-              <span class="order-code-line">
+              <span class="order-title-line">
                 <button
                   type="button"
                   class="order-record-link"
@@ -1941,17 +1945,6 @@ watch(financeType, (value, previous) => {
                 <ProcurementStatusBadge
                   :status="String(record.record.status ?? '')"
                 />
-              </span>
-              <span
-                v-if="
-                  purchaseRowLabels(record as ProcurementOrderRow).title !==
-                  purchaseRowLabels(record as ProcurementOrderRow).order
-                "
-                class="procurement-muted order-number"
-              >
-                单号：{{
-                  purchaseRowLabels(record as ProcurementOrderRow).order
-                }}
               </span>
               <RelatedLink
                 class="procurement-muted"
@@ -2138,7 +2131,7 @@ watch(financeType, (value, previous) => {
         <div v-if="view" class="order-title">
           <Tag color="blue">采购单</Tag>
           <span class="order-title-text">{{
-            purchaseRowLabels({ ...view, record: view.order }).title
+            purchaseRowLabels({ ...view }).title
           }}</span>
           <ProcurementStatusBadge :status="String(view.order.status ?? '')" />
           <Button
@@ -2322,15 +2315,9 @@ watch(financeType, (value, previous) => {
             <section class="order-info">
               <dl>
                 <dt>采购主题</dt>
-                <dd>{{ view.details.subject || '未填写' }}</dd>
+                <dd>{{ purchaseRowLabels({ ...view }).title }}</dd>
                 <dt>供应商</dt>
-                <dd>
-                  {{
-                    purchaseRowLabels({ ...view, record: view.order }).supplier
-                  }}
-                </dd>
-                <dt>采购单号</dt>
-                <dd>{{ String(view.order.code ?? '—') }}</dd>
+                <dd>{{ purchaseRowLabels({ ...view }).supplier }}</dd>
                 <dt>采购金额</dt>
                 <dd class="procurement-number">
                   {{
@@ -2941,17 +2928,11 @@ watch(financeType, (value, previous) => {
   border: 0;
 }
 
-.order-code-line {
+.order-title-line {
   display: inline-flex;
   flex-wrap: wrap;
   gap: 6px;
   align-items: center;
-}
-
-.order-number {
-  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-  font-size: 12px;
-  overflow-wrap: anywhere;
 }
 
 .order-ellipsis {

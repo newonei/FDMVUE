@@ -438,6 +438,7 @@ function nativeRows() {
     record: {
       id: `po-${index + 1}`,
       code: `CG-${index + 1}`,
+      subject: `历史采购主题 ${index + 1}`,
       status: 'NEEDS_COMPLETION',
       lines: [],
     },
@@ -564,6 +565,7 @@ describe('unified native purchase workspace', () => {
     );
     expect(host.querySelectorAll('[data-order-id]')).toHaveLength(6);
     expect(host.textContent).toContain('温州供应商');
+    expect(host.textContent).not.toContain('CG-3');
     const supplierLink = host.querySelector('a[href*="supplierId=supplier-1"]');
     expect(supplierLink?.textContent).toBe('温州供应商');
     expect(
@@ -573,11 +575,7 @@ describe('unified native purchase workspace', () => {
         )
         .every((link) => link.textContent?.trim()),
     ).toBe(true);
-    const button = [...host.querySelectorAll('button')].find((item) =>
-      item.textContent?.includes('CG-3'),
-    );
-    expect(button).toBeDefined();
-    button!.click();
+    click(host, '历史采购主题 3');
     await settle();
     expect(router.currentRoute.value.query).toMatchObject({
       contractId: 'jz-contract-9676',

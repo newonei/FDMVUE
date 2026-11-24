@@ -54,7 +54,7 @@ import LineTable from '../components/LineTable.vue';
 import RecordTable from '../components/RecordTable.vue';
 import RenameFileDialog from '../components/RenameFileDialog.vue';
 import { errorText, label, money, rows } from '../data';
-import { downloadBlob } from '../purchase/manage/model';
+import { downloadBlob, purchaseRowLabels } from '../purchase/manage/model';
 import { standaloneAiCheckType } from './ai-check-types';
 import {
   businessDocumentActionDefinition,
@@ -138,11 +138,19 @@ const lineColumns: LineColumn[] = [
   { key: 'requiredDate', title: '需求日期', width: 120, optional: true },
   { key: 'remark', title: '备注', width: 200, optional: true },
 ];
-const title = computed(() =>
-  view.value
-    ? `${nativeTypeLabels[view.value.type] ?? '业务单据'} · ${view.value.code || view.value.name || view.value.record.name || ''}`
-    : '单据详情',
+const purchaseTitle = computed(() =>
+  view.value?.type === 'PURCHASE_ORDER'
+    ? purchaseRowLabels({ ...view.value }).title
+    : undefined,
 );
+const title = computed(() => {
+  const detail = view.value;
+  if (!detail) return '单据详情';
+  const name =
+    purchaseTitle.value ??
+    (detail.code || detail.name || detail.record.name || '');
+  return `${nativeTypeLabels[detail.type] ?? '业务单据'} · ${name}`;
+});
 const actions = computed(
   () =>
     view.value?.allowedActions.filter((action) =>
@@ -556,12 +564,17 @@ async function submit(
           </Space>
           <Card size="small" title="单据概要">
             <Descriptions :column="3" size="small">
-              <Descriptions.Item label="单号">
-                {{ view.code || record?.code || '未注明' }}
+              <Descriptions.Item v-if="purchaseTitle" label="采购主题">
+                {{ purchaseTitle }}
               </Descriptions.Item>
-              <Descriptions.Item label="单据名称">
-                {{ view.name || record?.name || '未注明' }}
-              </Descriptions.Item>
+              <template v-else>
+                <Descriptions.Item label="单号">
+                  {{ view.code || record?.code || '未注明' }}
+                </Descriptions.Item>
+                <Descriptions.Item label="单据名称">
+                  {{ view.name || record?.name || '未注明' }}
+                </Descriptions.Item>
+              </template>
               <Descriptions.Item label="当前状态">
                 <Tag>{{ label(record?.status) }}</Tag>
               </Descriptions.Item>

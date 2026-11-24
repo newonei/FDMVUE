@@ -9,6 +9,9 @@ import BigNumber from 'bignumber.js';
 
 import { money } from '../../data';
 import { contractReferenceText } from '../../documents/migration-display';
+
+export const EMPTY_PURCHASE_SUBJECT = '未填写采购主题';
+
 export function purchaseRowLabels(row: BusinessRecord) {
   const record = (row.record ?? row.order ?? row) as Record<string, unknown>;
   const first = (...values: unknown[]) =>
@@ -22,7 +25,7 @@ export function purchaseRowLabels(row: BusinessRecord) {
   const subject = first(details.subject, record.subject, row.subject);
   return {
     order,
-    title: subject?.trim() || order,
+    title: subject?.trim() || EMPTY_PURCHASE_SUBJECT,
     supplier: first(record.supplierName, row.supplierName) || '供应商未注明',
     supplierId: first(record.supplierId, row.supplierId),
     contract: contractReferenceText(

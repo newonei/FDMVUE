@@ -3,12 +3,14 @@ import type {
   ProductAttributeOption,
   ProductAttributeOptions,
   ProductCategory,
+  ProductImportSource,
 } from '#/api/fdmplatform/products';
 
 import { computed, ref, watch } from 'vue';
 
 import {
   Alert,
+  AutoComplete,
   Button,
   Form,
   Input,
@@ -31,8 +33,10 @@ const props = defineProps<{
   companyId: number;
   open: boolean;
   productSource?: string;
+  requiredFieldsBySource?: Partial<Record<ProductImportSource, string[]>>;
   rowMessage?: string;
   rowNumber?: number;
+  templateSource?: ProductImportSource;
 }>();
 const emit = defineEmits<{
   close: [];
@@ -153,9 +157,45 @@ const stageAliases = new Map([
 const activeSection = ref('product');
 const original = ref<Record<string, string>>({});
 const draft = ref<Record<string, string>>({});
-const external = computed(
-  () => (draft.value['产品来源'] ?? props.productSource)?.trim() === '外采',
+const source = computed(() =>
+  (
+    props.templateSource ??
+    draft.value['产品来源'] ??
+    props.productSource
+  )?.trim(),
 );
+const external = computed(() => source.value === '外采');
+const requiredFields = computed(() => {
+  if (external.value) {
+    return new Set(
+      props.requiredFieldsBySource?.外采 ?? [
+        '产品名称',
+        '产品型号',
+        '产品规格',
+        '产品类别',
+        '单位',
+      ],
+    );
+  }
+  if (source.value === '自产') {
+    return new Set(
+      props.requiredFieldsBySource?.自产 ?? [
+        '产品编号',
+        '产品名称',
+        '产品类别',
+        '材质',
+        '长度(mm)',
+        '宽度(mm)',
+        '成品厚度(mm)',
+        '颜色模式',
+        '正面压花',
+        '反面压花',
+        '雕刻状态',
+      ],
+    );
+  }
+  return new Set(['产品名称', '产品编号']);
+});
 const categories = ref<ProductCategory[]>();
 const attributes = ref<ProductAttributeOptions>();
 const loading = ref(false);
@@ -396,19 +436,30 @@ function save() {
               :key="field.key"
               :class="{ 'wide-field': field.multiline }"
               :label="field.label ?? field.key"
-              :required="['产品编号', '产品名称'].includes(field.key)"
+              :required="requiredFields.has(field.key)"
               :validate-status="field.unmatched ? 'warning' : undefined"
             >
+              <Input
+                v-if="field.key === '产品来源' && templateSource"
+                :value="templateSource"
+                aria-label="产品来源"
+                readonly
+              />
+              <AutoComplete
+                v-else-if="field.choices === 'colors'"
+                :value="draft[field.key]"
+                :options="options.colors"
+                :aria-label="field.label ?? field.key"
+                :filter-option="filterProductColorOption"
+                placeholder="选择色号或填写新色号"
+                allow-clear
+                @update:value="(value) => updateChoice(field.key, value)"
+              />
               <Select
-                v-if="field.choices"
+                v-else-if="field.choices"
                 :value="field.selection"
                 :options="field.options"
                 :aria-label="field.label ?? field.key"
-                :filter-option="
-                  field.choices === 'colors'
-                    ? filterProductColorOption
-                    : undefined
-                "
                 :placeholder="loading ? '正在加载可选项…' : '请选择'"
                 option-filter-prop="label"
                 show-search
