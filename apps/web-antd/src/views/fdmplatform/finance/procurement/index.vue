@@ -254,6 +254,9 @@ const columns = computed(() =>
 function moneyText(record: ProcurementFinanceRecord) {
   return money(record.amount, record.currency, '未注明');
 }
+function paymentOrderSubjectText(record: ProcurementFinanceRecord) {
+  return record.orderSubject || record.invoice?.orderSubjects?.join('、') || '';
+}
 function payerText(record: ProcurementFinanceRecord) {
   if (isPayment.value)
     return (
@@ -556,12 +559,29 @@ watch(
             </TableSummary>
           </template>
           <template #bodyCell="{ column, record }">
-            <span v-if="column.key === 'name'" class="name-cell"><Button
+            <span v-if="column.key === 'name'" class="name-cell">
+              <span
+                v-if="
+                  isPayment &&
+                  paymentOrderSubjectText(record as ProcurementFinanceRecord)
+                "
+                class="fdm-cell-line order-subject"
+                :title="
+                  paymentOrderSubjectText(record as ProcurementFinanceRecord)
+                "
+              >
+                {{
+                  paymentOrderSubjectText(record as ProcurementFinanceRecord)
+                }}
+              </span>
+              <Button
                 type="link"
                 :title="documentLabel(record, '查看单据')"
                 @click="show(record as ProcurementFinanceRecord)"
               >
-                {{ documentLabel(record, '查看单据') }} </Button><Button
+                {{ documentLabel(record, '查看单据') }}
+              </Button>
+              <Button
                 v-if="record.invoiceId"
                 type="link"
                 size="small"
@@ -573,7 +593,9 @@ watch(
                     ? `集中收票-查看来源（${record.invoice?.orderCount} 个采购单）`
                     : `付款发票${record.invoice?.invoiceNo ? ` ${record.invoice.invoiceNo}` : ''} · 查看来源`
                 }}
-              </Button></span><span
+              </Button>
+            </span>
+            <span
               v-else-if="column.key === 'payer'"
               class="fdm-cell-line"
               :title="payerText(record as ProcurementFinanceRecord)"
@@ -696,6 +718,10 @@ watch(
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+}
+
+.name-cell .order-subject {
+  padding-inline: 6px;
 }
 
 .name-cell .source-link {

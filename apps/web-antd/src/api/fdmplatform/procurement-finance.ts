@@ -49,6 +49,7 @@ export interface ProcurementFinanceRecord extends BusinessRecord {
     id: string;
     invoiceNo?: string;
     orderCount: number;
+    orderSubjects?: string[];
     status?: string;
     supplierName?: string;
   };

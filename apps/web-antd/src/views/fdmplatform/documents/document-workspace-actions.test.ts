@@ -1,6 +1,7 @@
 /* eslint-disable vue/one-component-per-file -- UI adapters exercise real workspace routing and modal state. */
 import type { PropType } from 'vue';
 
+import type { SalesChannel } from '../sales-channel';
 import type { DocumentKind } from './model';
 
 import type { Contract, DocumentRow } from '#/api/fdmplatform';
@@ -210,6 +211,7 @@ const disposals: (() => void)[] = [];
 async function mountWorkspace(
   kind: DocumentKind = 'tasks',
   query = '?queue=tasks',
+  salesChannel?: SalesChannel,
 ) {
   const router = createRouter({
     history: createMemoryHistory(),
@@ -222,7 +224,9 @@ async function mountWorkspace(
   await router.isReady();
   const host = document.createElement('div');
   document.body.append(host);
-  const app = createApp({ render: () => h(DocumentWorkspace, { kind }) });
+  const app = createApp({
+    render: () => h(DocumentWorkspace, { kind, salesChannel }),
+  });
   app.use(router);
   app.mount(host);
   disposals.push(() => {
@@ -269,6 +273,44 @@ afterEach(() => {
 });
 
 describe('document list shortcuts and retained context', () => {
+  it('shows the contract creator as the salesperson even with saved column settings', async () => {
+    const settingsKey =
+      'fdm-list-table:documents:purchase-requests:FOREIGN::anonymous';
+    localStorage.setItem(
+      settingsKey,
+      JSON.stringify({ keys: ['contract', 'ownerUserId'] }),
+    );
+    disposals.push(() => localStorage.removeItem(settingsKey));
+    mocks.directory.mockResolvedValue({
+      users: [
+        { id: 1, nickname: '合同负责人' },
+        { id: 2, nickname: '采购经办人' },
+      ],
+      departments: [],
+      companies: [],
+    });
+    const request = {
+      ...row(),
+      contractOwnerUserId: 1,
+      record: { id: 'request', createdBy: 1, ownerUserId: 2 },
+    };
+    mocks.page.mockResolvedValue({
+      list: [
+        { ...request, id: 'known-creator', contractCreatorName: '合同创建人' },
+        { ...request, id: 'missing-creator' },
+      ],
+      total: 2,
+    });
+
+    const { host } = await mountWorkspace('requests', '', 'FOREIGN');
+    const known = host.querySelector('[data-record="known-creator"]');
+    const missing = host.querySelector('[data-record="missing-creator"]');
+    expect(known?.querySelector('[title="合同创建人"]')).not.toBeNull();
+    expect(known?.querySelector('[title="采购经办人"]')).not.toBeNull();
+    expect(missing?.querySelector('[title="—"]')).not.toBeNull();
+    expect(host.textContent).not.toContain('合同负责人');
+  });
+
   it('shows the internal contract number for a legacy purchase request and retains a manual subject', async () => {
     const systemNumber = 'HT-20261125-000004';
     const internalNumber = 'FYY18020261123-1Y';

@@ -223,6 +223,7 @@ export interface DocumentRow extends BusinessRecord {
   migration?: MigrationInfo;
   blockReasons?: string[];
   contractId: string;
+  contractCreatorName?: null | string;
   customerId?: string;
   customerName?: string;
   contractCode: string;

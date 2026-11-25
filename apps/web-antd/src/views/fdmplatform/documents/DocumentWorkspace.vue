@@ -307,6 +307,17 @@ const documentColumns = computed(() => [
   ...(reviewDocType.value || reviewTargets.value.some(({ docType }) => docType)
     ? [{ title: 'AI 审核', key: 'aiReview', width: 180, locked: true }]
     : []),
+  ...(props.kind === 'requests' && props.salesChannel === 'FOREIGN'
+    ? [
+        {
+          title: '业务员',
+          key: 'contractCreatorName',
+          width: 120,
+          ellipsis: true,
+          locked: true,
+        },
+      ]
+    : []),
   { title: '客户', key: 'customer', width: 190, ellipsis: true },
   { title: '订单所属公司', key: 'company', width: 180 },
   ...config.value.fields.map((pair) => {
@@ -439,6 +450,7 @@ function lineCell(row: DocumentRow, key: string) {
   return undefined;
 }
 function cell(row: DocumentRow, key: string) {
+  if (key === 'contractCreatorName') return row.contractCreatorName || '—';
   if (key === 'transferStatus')
     return transferStatusLabel(row.record.transferStatus);
   if (effectiveKind.value === 'receipts' && key === 'status')
