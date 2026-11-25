@@ -27,6 +27,7 @@ import TaskMaterials from './task-materials.vue';
  */
 const props = defineProps<{ factoryId: number }>();
 const emit = defineEmits<{ openSchedule: [id: number] }>();
+const orderNo = defineModel<string>('orderNo');
 
 const { hasAccessByCodes } = useAccess();
 const canEdit = computed(() => hasAccessByCodes(['fdmgongchang:schedule:confirm']));
@@ -40,6 +41,7 @@ const tasks = ref<Api.Task[]>([]);
 const workers = ref<FdmgongchangFactoryApi.Worker[]>([]);
 const loading = ref(false);
 const selected = ref<number[]>([]);
+let loadVersion = 0;
 
 const processOptions = Object.entries(PROCESS_LABELS).map(([value, label]) => ({ label, value }));
 const statusOptions = Object.entries(TASK_STATUS).map(([value, s]) => ({ label: s.label, value }));
@@ -48,7 +50,7 @@ const workerOptions = computed(() => workers.value.map((w) => ({ label: workerLa
 const groups = computed(() => {
   const grouped = new Map<string, { contractCode: string; key: string; tasks: Api.Task[] }>();
   for (const task of tasks.value) {
-    const contractCode = task.contractCode?.trim() ?? '';
+    const contractCode = orderNo.value ?? task.contractCode?.trim() ?? '';
     const key = contractCode ? `order:${contractCode}` : `task:${task.id}`;
     const group = grouped.get(key) ?? { contractCode, key, tasks: [] };
     group.tasks.push(task);
@@ -69,19 +71,27 @@ const manageable = (t: Api.Task) => t.status === 'OPEN' || t.status === 'CLAIMED
 const returnable = computed(() => selectedTasks.value.filter((t) => idsOf(t).length > 0 && !t.orderCount));
 
 async function load() {
+  const version = ++loadVersion;
   loading.value = true;
   try {
-    tasks.value = await listScheduleTasks({
-      from: range.value[0].format('YYYY-MM-DD'),
-      keyword: keyword.value.trim() || undefined,
+    const search = orderNo.value
+      ? { orderNo: orderNo.value }
+      : {
+          from: range.value[0].format('YYYY-MM-DD'),
+          keyword: keyword.value.trim() || undefined,
+          to: range.value[1].format('YYYY-MM-DD'),
+        };
+    const result = await listScheduleTasks({
+      ...search,
       process: process.value,
       status: status.value,
-      to: range.value[1].format('YYYY-MM-DD'),
       workerId: workerId.value,
     });
+    if (version !== loadVersion) return;
+    tasks.value = result;
     selected.value = selected.value.filter((id) => tasks.value.some((t) => t.id === id && manageable(t)));
   } finally {
-    loading.value = false;
+    if (version === loadVersion) loading.value = false;
   }
 }
 
@@ -92,10 +102,12 @@ async function loadWorkers() {
 onMounted(() => Promise.all([load(), loadWorkers()]));
 watch([range, process, status, workerId], load);
 watch(
-  () => props.factoryId,
-  () => {
+  [() => props.factoryId, orderNo],
+  ([factoryId], [previousFactoryId]) => {
     selected.value = [];
-    void Promise.all([load(), loadWorkers()]);
+    tasks.value = [];
+    void load();
+    if (factoryId !== previousFactoryId) void loadWorkers();
   },
 );
 
@@ -178,7 +190,11 @@ function returnToHall() {
 <template>
   <div class="flex flex-col gap-3">
     <div class="flex flex-wrap items-center gap-2">
-      <DatePicker.RangePicker v-model:value="range" :allow-clear="false" aria-label="日期范围" class="w-64" size="small" />
+      <template v-if="orderNo">
+        <Tag color="blue" class="m-0">{{ orderNo }} · 全部日期</Tag>
+        <Button size="small" type="link" @click="orderNo = undefined">清除订单筛选</Button>
+      </template>
+      <DatePicker.RangePicker v-else v-model:value="range" :allow-clear="false" aria-label="日期范围" class="w-64" size="small" />
       <Select
         v-model:value="process"
         :options="processOptions"
@@ -209,6 +225,7 @@ function returnToHall() {
         size="small"
       />
       <Input.Search
+        v-if="!orderNo"
         v-model:value="keyword"
         aria-label="订单号或产品"
         class="w-52"
@@ -225,7 +242,7 @@ function returnToHall() {
     </div>
 
     <Spin :spinning="loading">
-      <Empty v-if="tasks.length === 0" description="这段时间没有已下发的任务" />
+      <Empty v-if="tasks.length === 0" :description="orderNo ? '没有符合当前筛选的已下发任务' : '这段时间没有已下发的任务'" />
       <p v-if="groups.length" class="mb-3 text-xs text-muted-foreground">
         同订单合并展示，进度累计该订单全部已下发有效任务的良品数量；各已下发工序分别达标后，订单显示已完成。下方任务明细保留当前筛选范围。
       </p>
@@ -280,7 +297,7 @@ function returnToHall() {
           <p v-if="group.progress.note" class="mb-1 mt-2 text-xs text-warning">{{ group.progress.note }}</p>
         </div>
 
-        <details class="border-t border-border" :open="!group.progress">
+        <details class="border-t border-border" :open="!!orderNo || !group.progress">
           <summary class="cursor-pointer px-3 py-2 text-xs font-medium text-muted-foreground">任务明细（{{ group.tasks.length }}） · 查看领料、人员和来源排单</summary>
           <div class="overflow-x-auto">
             <table class="w-full min-w-[1000px] text-sm">

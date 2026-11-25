@@ -32,6 +32,11 @@ export function num(value: null | number | string | undefined) {
   return Number.isFinite(n) ? n : 0;
 }
 
+/** 订单数量和净入库/交货量都保留三位小数。 */
+export function remainingOrderItemQuantity(item: Pick<Api.Item, 'completedQuantity' | 'quantity'>) {
+  return Math.max(0, Number((num(item.quantity) - num(item.completedQuantity)).toFixed(3)));
+}
+
 /** 规格一行：尺寸 · 材质 · 颜色，没有时用规格原文。 */
 export function specText(p: ProductAttributeSource & {
   material?: null | string;

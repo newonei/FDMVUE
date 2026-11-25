@@ -155,6 +155,17 @@ export function customerSourceOptions(values: string[], current = '') {
   return options;
 }
 
+export function foreignCustomerSourceOptions(values: string[]) {
+  return customerSourceOptions([
+    ...new Set([
+      ...values,
+      '阿里巴巴国际站-月迦',
+      '阿里巴巴国际站-顶铭',
+      '阿里巴巴国际站-飞德慕',
+    ]),
+  ]);
+}
+
 export function customerMissingFields(
   customer: Partial<Record<string, unknown>>,
 ) {

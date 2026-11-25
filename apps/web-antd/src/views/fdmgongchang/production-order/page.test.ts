@@ -26,6 +26,8 @@ const routeOptions = vi.hoisted(() => ({
 
 const mocks = vi.hoisted(() => ({
   accept: vi.fn(),
+  confirmSchedule: vi.fn(),
+  createManualSchedule: vi.fn(),
   generate: vi.fn(),
   getSchedule: vi.fn(),
   getSchedules: vi.fn().mockResolvedValue([]),
@@ -46,8 +48,10 @@ const mocks = vi.hoisted(() => ({
   materialPlan: vi.fn(),
   previewSupplement: vi.fn(),
   releaseSupplement: vi.fn(),
+  saveScheduleTask: vi.fn(),
   saveMaterial: vi.fn(),
   saveTarget: vi.fn(),
+  showShortageDispatch: vi.fn(),
   supplyMatch: vi.fn().mockResolvedValue([]),
   myFactories: vi.fn().mockResolvedValue({
     canSeeAll: false,
@@ -101,6 +105,8 @@ vi.mock('#/api/fdmgongchang/factory', () => ({
   setCurrentFactoryId: mocks.setFactory,
 }));
 vi.mock('#/api/fdmgongchang/schedule', () => ({
+  confirmSchedule: mocks.confirmSchedule,
+  createManualSchedule: mocks.createManualSchedule,
   generateSchedule: mocks.generate,
   getSchedule: mocks.getSchedule,
   getSchedules: mocks.getSchedules,
@@ -111,6 +117,7 @@ vi.mock('#/api/fdmgongchang/schedule', () => ({
   releaseOrderSplit: vi.fn(),
   previewRouteSupplement: mocks.previewSupplement,
   releaseRouteSupplement: mocks.releaseSupplement,
+  saveScheduleTask: mocks.saveScheduleTask,
 }));
 vi.mock('vue-router', () => ({
   useRoute: () => ({ query: {} }),
@@ -128,6 +135,17 @@ vi.mock('../schedule/modules/product-picker-modal.vue', () => ({
     setup: (props, { emit }) => () => props.open ? h('button', {
       onClick: () => emit('selectedMany', [product, { ...product, id: 'p2' }, product]),
     }, '批量加入选中的产品') : null,
+  }),
+}));
+vi.mock('../schedule/modules/shortage-dispatch-modal.vue', () => ({
+  default: defineComponent({
+    props: ['open', 'seed', 'factoryId'],
+    emits: ['dispatched', 'update:open'],
+    setup: (props) => () => {
+      if (!props.open) return null;
+      mocks.showShortageDispatch(props.seed, props.factoryId);
+      return h('div', { role: 'dialog', 'aria-label': '补派工表单' });
+    },
   }),
 }));
 vi.mock('@vben/access', () => ({
@@ -844,7 +862,9 @@ describe('production order page', () => {
     expect(text).toContain('入库单 RK20261013001');
     expect(text.replaceAll(/\s/g, '')).toContain('已交货100');
 
-    button('交货').click();
+    const guide = document.querySelector<HTMLElement>('#factory-order-fulfillment-panel')!;
+    expect(guide?.textContent).toContain('已交货');
+    button('交货', guide).click();
     await flush();
     expect(mocks.stockPage).toHaveBeenCalledWith(expect.objectContaining({ stage: 'PUNCHED' }));
     expect(document.body.textContent).toContain('交货按 1 件 = 1 条 计');
@@ -865,6 +885,152 @@ describe('production order page', () => {
     expect(mocks.delivery).toHaveBeenCalledWith(
       expect.objectContaining({ lines: [{ quantity: 400, stockId: 8 }], productionOrderItemId: 91, warehouseId: 'w1' }),
     );
+  });
+
+  it('shows which purchase lines still need production and opens actions for the selected line', async () => {
+    mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:handle');
+    const accepted: Api.Order = {
+      ...order,
+      completedQuantity: 488,
+      items: [
+        { ...order.items[0]!, completedQuantity: 199, deliveryStage: 'PACKED', productCode: 'DZ2400010', quantity: 200 },
+        { ...order.items[0]!, completedQuantity: 100, id: 92, productCode: 'DZ2400008', quantity: 100 },
+        { ...order.items[0]!, completedQuantity: 99, id: 93, productCode: 'DZ2400009', quantity: 100 },
+        { ...order.items[0]!, completedQuantity: 90, deliveryStage: 'PUNCHED', id: 94, productCode: 'DZ2400011', productName: '需补产的十条瑜伽垫', quantity: 100 },
+      ],
+      sourceType: 'PURCHASE_ORDER',
+      status: 'ACCEPTED',
+      statusLabel: '生产中',
+    };
+    mocks.factoryPage.mockResolvedValue({ list: [accepted], total: 1 });
+    mocks.get.mockResolvedValue(accepted);
+    mocks.materialPlan.mockResolvedValue({ items: [], orderId: 9, orderNo: order.orderNo, shortage: false, totals: [] });
+    mocks.stockPage.mockResolvedValue({ list: [], total: 0 });
+    mocks.supplyMatch.mockResolvedValue([
+      {
+        covered: 1, itemId: 91, newProduction: 0, notes: [], processes: [], productName: '任务预计覆盖', remaining: 1, targetConfirmed: true,
+        lines: [{ code: 'TASK-1', covers: 1, nextProcesses: [], perUnit: 1, source: 'TASK', stage: 'PACKED', stageLabel: '包装成品', unit: '条', used: 1 }],
+      },
+      {
+        covered: 1, itemId: 93, newProduction: 0, notes: [], processes: [], productName: '物料库存覆盖', remaining: 1, targetConfirmed: true,
+        lines: [{ code: 'YH-1', covers: 1, nextProcesses: ['冲裁', '包装'], perUnit: 1, source: 'STOCK', stage: 'EMBOSSED', stageLabel: '压花半成品', unit: '片', used: 1 }],
+      },
+    ]);
+    unmount = mount();
+    await flush();
+    button('补产指引·待补3款', document.querySelector('tr[data-row-key="9"]')!).click();
+    await flush();
+
+    const panel = document.querySelector<HTMLElement>('#factory-order-fulfillment-panel')!;
+    expect(panel?.textContent).toContain('补产指引');
+    expect(panel.textContent).toContain('应做');
+    expect(panel.textContent).toContain('已入库');
+    expect(panel.textContent).toContain('还差');
+    expect(panel.textContent).not.toContain('DZ2400008');
+    const rows = [...panel.querySelectorAll('tbody tr')];
+    expect(rows).toHaveLength(3);
+    for (const [code, expected] of [
+      ['DZ2400010', [200, 199, 1]],
+      ['DZ2400009', [100, 99, 1]],
+      ['DZ2400011', [100, 90, 10]],
+    ] as const) {
+      const row = rows.find((element) => element.textContent?.includes(code))!;
+      expect(row).toBeDefined();
+      const values = [...row.querySelectorAll('dd')].map((cell) => cell.textContent?.replaceAll(/\s/g, ''));
+      expect(values).toEqual(expected.map((quantity) => `${quantity}条`));
+    }
+
+    const taskOnlyRow = rows.find((row) => row.textContent?.includes('DZ2400010'))!;
+    expect(taskOnlyRow.textContent).toContain('暂未匹配到可用现货');
+    button('核对库存', taskOnlyRow).click();
+    await flush();
+    expect(taskOnlyRow.textContent).not.toContain('TASK-1');
+
+    const stockRow = rows.find((row) => row.textContent?.includes('DZ2400009'))!;
+    expect(stockRow.textContent).toContain('从「冲裁」接做');
+    button('核对库存', stockRow).click();
+    await flush();
+    expect(stockRow.textContent).toContain('YH-1');
+    expect(stockRow.textContent).toContain('冲裁 → 包装');
+
+    const lastRow = rows.find((element) => element.textContent?.includes('DZ2400011'))!;
+    expect(button('核对库存', lastRow)).toBeDefined();
+    button('生产入库', lastRow).click();
+    await flush();
+    expect(mocks.stockPage).toHaveBeenCalledWith(expect.objectContaining({ stage: 'PUNCHED' }));
+    expect(document.body.textContent).toContain('生产入库 · 需补产的十条瑜伽垫');
+  });
+
+  it('shows that an accepted order can be closed when all of its lines are filled', async () => {
+    mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:handle');
+    const accepted: Api.Order = {
+      ...order,
+      completedQuantity: 500,
+      items: [{ ...order.items[0]!, completedQuantity: 500, productCode: 'DZ2400010' }],
+      status: 'ACCEPTED',
+      statusLabel: '生产中',
+    };
+    mocks.factoryPage.mockResolvedValue({ list: [accepted], total: 1 });
+    mocks.get.mockResolvedValue(accepted);
+    mocks.materialPlan.mockResolvedValue({ items: [], orderId: 9, orderNo: order.orderNo, shortage: false, totals: [] });
+    mocks.supplyMatch.mockResolvedValue([]);
+    unmount = mount();
+    await flush();
+    expect(document.querySelector('tr[data-row-key="9"]')?.textContent).not.toContain('补产指引');
+    button('查看').click();
+    await flush();
+
+    const panel = document.querySelector<HTMLElement>('#factory-order-fulfillment-panel')!;
+    expect(panel?.textContent).toContain('全部明细已达量，可以结束这张单。');
+    expect(panel.textContent).not.toContain('DZ2400010');
+    expect(button('结束这张单')).toBeDefined();
+  });
+
+  it('opens supplementation for the selected shortfall using the next available stock process', async () => {
+    mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:handle', 'fdmgongchang:schedule:query', 'fdmgongchang:schedule:confirm');
+    const accepted: Api.Order = {
+      ...order,
+      completedQuantity: 16,
+      items: [
+        { ...order.items[0]!, completedQuantity: 10, productCode: 'SHORT-A', quantity: 20 },
+        { ...order.items[0]!, completedQuantity: 6, id: 93, processes: ['PUNCH', 'PACK'], productCode: 'SHORT-B', productName: '按本行补派工的产品', quantity: 10 },
+      ],
+      orderNo: 'GD-SHORTFALL',
+      sourceType: 'PURCHASE_ORDER',
+      status: 'ACCEPTED',
+      statusLabel: '生产中',
+      totalQuantity: 30,
+    };
+    mocks.factoryPage.mockResolvedValue({ list: [accepted], total: 1 });
+    mocks.get.mockResolvedValue(accepted);
+    mocks.materialPlan.mockResolvedValue({ items: [], orderId: accepted.id, orderNo: accepted.orderNo, shortage: false, totals: [] });
+    mocks.supplyMatch.mockResolvedValue([{
+      covered: 3, itemId: 93, newProduction: 1, notes: [], productName: '按本行补派工的产品', remaining: 4, targetConfirmed: true,
+      lines: [{ code: 'EMB-STOCK', covers: 3, nextProcesses: ['冲裁', '包装'], perUnit: 1, source: 'STOCK', stage: 'EMBOSSED', stageLabel: '压花半成品', unit: '片', used: 3 }],
+      processes: [{ label: '包装', process: 'PACK', quantity: 4 }, { label: '冲裁', process: 'PUNCH', quantity: 4 }],
+    }]);
+
+    unmount = mount();
+    await flush();
+    button('查看').click();
+    await flush();
+    const panel = document.querySelector<HTMLElement>('#factory-order-fulfillment-panel')!;
+    const row = [...panel.querySelectorAll('tbody tr')].find((element) => element.textContent?.includes('SHORT-B'))!;
+    button('补派工', row).click();
+    await flush();
+    expect(document.querySelector('[aria-label="补派工表单"]')).not.toBeNull();
+    expect(mocks.showShortageDispatch).toHaveBeenLastCalledWith(expect.objectContaining({
+      orderId: 9,
+      orderNo: 'GD-SHORTFALL',
+      itemId: 93,
+      remaining: 4,
+      suggestedProcess: 'PUNCH',
+      suggestedQuantity: 3,
+    }), 1);
+    expect(document.querySelector('.ant-tabs-tab-active')?.textContent).toContain('本厂订单');
+    expect(mocks.createManualSchedule).not.toHaveBeenCalled();
+    expect(mocks.confirmSchedule).not.toHaveBeenCalled();
+    expect(mocks.saveScheduleTask).not.toHaveBeenCalled();
   });
 
   it('lets the factory pick accepted orders and hand only those to AI scheduling', async () => {

@@ -12,6 +12,7 @@ import { computed, reactive, ref, watch } from 'vue';
 
 import {
   Alert,
+  AutoComplete,
   Button,
   Checkbox,
   Collapse,
@@ -44,6 +45,7 @@ import {
   domesticCustomerFields,
   domesticMissingFields,
   domesticRequiredFields,
+  foreignCustomerSourceOptions,
   invoiceFields,
   invoiceForm,
   invoiceMissingFields,
@@ -109,9 +111,6 @@ function requiredField(key: string) {
       (domesticRequiredFields as readonly string[]).includes(key))
   );
 }
-const sourceOptions = computed(() =>
-  customerSourceOptions(sources.value, form.customerSource),
-);
 const typeOptions = computed(() =>
   customerSourceOptions(types.value, form.customerType),
 );
@@ -134,6 +133,11 @@ const channel = computed<SalesChannel>(() =>
 );
 /** 内销客户国家固定为中国，不显示国家选择；外贸客户只填国家，不填省 / 州和城市 */
 const domestic = computed(() => channel.value === 'DOMESTIC');
+const sourceOptions = computed(() =>
+  domestic.value
+    ? customerSourceOptions(sources.value, form.customerSource)
+    : foreignCustomerSourceOptions(sources.value),
+);
 const visibleFields = computed(() =>
   customerFields.filter(
     ([field]) =>
@@ -201,7 +205,7 @@ watch(
     if (!props.customer && props.initialName) form.name = props.initialName;
     sourceDetail.value = '';
     productCategories.value = [...(props.customer?.productCategories ?? [])];
-    if (form.customerSource?.startsWith('其他：')) {
+    if (domestic.value && form.customerSource?.startsWith('其他：')) {
       sourceDetail.value = form.customerSource.slice(3);
       form.customerSource = '其他';
     }
@@ -249,9 +253,11 @@ async function save() {
       customerType: domestic.value ? (form.customerType ?? '') : undefined,
       industry: domestic.value ? (form.industry ?? '') : undefined,
       customerSource:
-        form.customerSource === '其他' && sourceDetail.value.trim()
+        domestic.value &&
+        form.customerSource === '其他' &&
+        sourceDetail.value.trim()
           ? `其他：${sourceDetail.value.trim()}`
-          : form.customerSource,
+          : (form.customerSource?.trim() ?? ''),
       salesChannel: channel.value,
       // 外贸客户不填开票信息；不传表示保持原值
       invoice: domestic.value ? { ...invoice } : undefined,
@@ -313,13 +319,28 @@ async function save() {
             key === 'code'
               ? '首次保存时由系统自动生成，已有编号保持不变。'
               : key === 'customerSource'
-                ? '选择获客渠道，与 OKKI / 金智等资料同步来源分别记录。'
+                ? '记录获客渠道，与 OKKI / 金智等资料同步来源分别记录。'
                 : undefined
           "
           :class="{ wide: key === 'address' }"
         >
           <template v-if="key === 'customerSource'">
+            <AutoComplete
+              v-if="!domestic"
+              v-model:value="form.customerSource"
+              :options="sourceOptions"
+              :default-active-first-option="false"
+              filter-option
+              option-filter-prop="label"
+              allow-clear
+              :disabled="saving"
+              placeholder="选择或填写客户来源"
+              @dropdown-visible-change="selectOpen = $event"
+            >
+              <input :aria-label="title" maxlength="200" />
+            </AutoComplete>
             <Select
+              v-else
               v-model:value="form.customerSource"
               :options="sourceOptions"
               show-search
@@ -330,7 +351,7 @@ async function save() {
               @dropdown-visible-change="selectOpen = $event"
             />
             <Input
-              v-if="form.customerSource === '其他'"
+              v-if="domestic && form.customerSource === '其他'"
               v-model:value="sourceDetail"
               :maxlength="197"
               :disabled="saving"

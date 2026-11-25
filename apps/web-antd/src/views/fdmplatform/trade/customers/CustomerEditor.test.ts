@@ -49,7 +49,7 @@ vi.mock('ant-design-vue', () => {
         context.slots.default?.(),
       ]),
   });
-  function input(tag: 'input' | 'textarea') {
+  function input(tag: 'input' | 'textarea', emptyAsUndefined = false) {
     return defineComponent({
       props: { value: String, disabled: Boolean },
       emits: ['update:value'],
@@ -57,11 +57,13 @@ vi.mock('ant-design-vue', () => {
         h(tag, {
           value: props.value,
           disabled: props.disabled,
-          onInput: (event: Event) =>
+          onInput: (event: Event) => {
+            const value = (event.target as HTMLInputElement).value;
             context.emit(
               'update:value',
-              (event.target as HTMLInputElement).value,
-            ),
+              emptyAsUndefined ? value || undefined : value,
+            );
+          },
         }),
     });
   }
@@ -70,6 +72,7 @@ vi.mock('ant-design-vue', () => {
       props: { message: String },
       setup: (props) => () => h('p', props.message),
     }),
+    AutoComplete: input('input', true),
     Button: defineComponent({
       props: { disabled: Boolean },
       emits: ['click'],
@@ -273,6 +276,49 @@ beforeEach(() => {
   );
 });
 afterEach(() => disposals.splice(0).forEach((dispose) => dispose()));
+
+describe('外贸客户来源', () => {
+  it('新建时直接填写来源并保存客户', async () => {
+    const { host } = await mount(undefined, 'FOREIGN');
+    await fill(host, '客户全称', '测试外贸客户');
+    await select(host, '国家 / 地区', 'CN');
+    await fill(host, '客户来源', '  海外行业协会介绍  ');
+    click(host, '保存客户');
+    await vi.waitFor(() =>
+      expect(api.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          customerSource: '海外行业协会介绍',
+          salesChannel: 'FOREIGN',
+        }),
+      ),
+    );
+  });
+
+  it('维护时回显完整历史来源，清空后发送空字符串', async () => {
+    const { host } = await mount({
+      ...customer,
+      salesChannel: 'FOREIGN',
+      customerSource: '其他：海外经销商转介绍',
+    });
+    const input = host.querySelector<HTMLInputElement>(
+      '[data-field="客户来源"] input',
+    );
+    expect(input?.value).toBe('其他：海外经销商转介绍');
+    click(host, '保存客户');
+    await vi.waitFor(() =>
+      expect(api.save).toHaveBeenLastCalledWith(
+        expect.objectContaining({ customerSource: '其他：海外经销商转介绍' }),
+      ),
+    );
+    await fill(host, '客户来源', '');
+    click(host, '保存客户');
+    await vi.waitFor(() =>
+      expect(api.save).toHaveBeenLastCalledWith(
+        expect.objectContaining({ customerSource: '' }),
+      ),
+    );
+  });
+});
 
 describe('内销客户类型与所在行业', () => {
   it('填写中的资料可继续编辑，明确放弃才关闭，未改动的档案直接关闭', async () => {

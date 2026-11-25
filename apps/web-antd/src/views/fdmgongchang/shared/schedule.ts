@@ -4,6 +4,17 @@ import type { FdmgongchangStageStockApi } from '#/api/fdmgongchang/stage-stock';
 import { attrSummary, makeLabels, normalizeForStage } from '../stage-stock/model';
 import { dimensionTextInMm } from './dimensions';
 
+export interface ShortageDispatchSeed {
+  itemId: number;
+  orderId: number;
+  orderNo: string;
+  processes?: string[];
+  remaining: number;
+  suggestedProcess?: string;
+  suggestedQuantity?: number;
+  unit?: null | string;
+}
+
 /** 工序名称，和后端 FactoryProcess 一致。 */
 export const PROCESS_LABELS: Record<string, string> = {
   CUT: '立切',

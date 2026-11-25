@@ -186,6 +186,7 @@ export namespace FdmgongchangStageStockApi {
   }
 
   export interface StockPageReq extends PageParam {
+    stockId?: number;
     keyword?: string;
     showZero?: boolean;
     stage: string;

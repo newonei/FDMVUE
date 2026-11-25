@@ -10,6 +10,7 @@ import {
   customerRegion,
   customerSourceLabel,
   customerSourceOptions,
+  foreignCustomerSourceOptions,
   invoiceForm,
   invoiceMissingFields,
   mergeOkkiCustomers,
@@ -29,6 +30,19 @@ describe('oKKI customer preview and local maintenance', () => {
     ]);
     expect(customerSourceOptions(configured, '展会')).toHaveLength(2);
     expect(configured).toEqual(['展会', '其他']);
+  });
+  it('adds the three foreign sources once and retains tenant options', () => {
+    const configured = ['展会', '阿里巴巴国际站-顶铭', '其他'];
+    expect(
+      foreignCustomerSourceOptions(configured).map(({ value }) => value),
+    ).toEqual([
+      '展会',
+      '阿里巴巴国际站-顶铭',
+      '其他',
+      '阿里巴巴国际站-飞德慕',
+      '阿里巴巴国际站-月迦',
+    ]);
+    expect(configured).toEqual(['展会', '阿里巴巴国际站-顶铭', '其他']);
   });
   it('flags contact and delivery gaps without demanding both email and phone', () => {
     expect(

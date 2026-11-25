@@ -1,6 +1,6 @@
 import type { FdmgongchangScheduleApi as Api } from '#/api/fdmgongchang/schedule';
 
-import { createApp, nextTick } from 'vue';
+import { createApp, h, nextTick, ref } from 'vue';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -72,11 +72,19 @@ const progress = (
 describe('schedule task management', () => {
   let unmount: (() => void) | undefined;
 
-  async function mount() {
+  async function mount(initialOrderNo?: string) {
     const host = document.createElement('div');
     document.body.append(host);
     const opened: number[] = [];
-    const app = createApp(TaskManage, { factoryId: 1, onOpenSchedule: (id: number) => opened.push(id) });
+    const orderNo = ref(initialOrderNo);
+    const app = createApp({
+      setup: () => () => h(TaskManage, {
+        factoryId: 1,
+        'onUpdate:orderNo': (value) => { orderNo.value = value; },
+        onOpenSchedule: (id: number) => opened.push(id),
+        orderNo: orderNo.value,
+      }),
+    });
     app.mount(host);
     unmount = () => app.unmount();
     await flush();
@@ -132,6 +140,32 @@ describe('schedule task management', () => {
 
     buttons('PB20261020-001')[0]!.click();
     expect(opened).toEqual([9]);
+  });
+
+  it('opens all dates for a focused order and restores the date filter when cleared', async () => {
+    mocks.list.mockResolvedValueOnce([
+      task({ orderProgress: progress() }),
+      task({ contractCode: null, id: 5, process: 'MIX', scheduleId: 10, scheduleNo: 'PB20261021-002' }),
+    ]);
+    await mount('HT-001');
+
+    const focusedParams = mocks.list.mock.lastCall?.[0];
+    expect(focusedParams).toMatchObject({ orderNo: 'HT-001' });
+    expect(focusedParams).not.toHaveProperty('from');
+    expect(focusedParams).not.toHaveProperty('to');
+    expect(document.body.textContent).toContain('HT-001 · 全部日期');
+    expect(orderCards()).toHaveLength(1);
+    expect(orderCards()[0]?.querySelector('details')?.open).toBe(true);
+    expect(orderCards()[0]?.querySelectorAll('details tbody tr')).toHaveLength(2);
+    expect(orderCards()[0]?.textContent).toContain('PB20261021-002');
+
+    buttons('清除订单筛选')[0]!.click();
+    await flush();
+
+    const dateParams = mocks.list.mock.lastCall?.[0];
+    expect(dateParams).toMatchObject({ from: expect.any(String), to: expect.any(String) });
+    expect(dateParams).not.toHaveProperty('orderNo');
+    expect(buttons('清除订单筛选')).toHaveLength(0);
   });
 
   it('checks shared output dimensions once and keeps dispatch available when prices are ambiguous', async () => {

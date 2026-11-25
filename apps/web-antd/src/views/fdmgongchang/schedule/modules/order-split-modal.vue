@@ -11,24 +11,35 @@ import { useAccess } from '@vben/access';
 import { Alert, Button, Input, Modal, Select, Table, Tag } from 'ant-design-vue';
 
 import { getOpenProductionOrders, getProductionOrder } from '#/api/fdmgongchang/production-order';
-import { previewOrderSplit, releaseOrderSplit } from '#/api/fdmgongchang/schedule';
+import { getOrderSplitAdviceResult, previewOrderSplit, releaseOrderSplit, requestOrderSplitAdvice } from '#/api/fdmgongchang/schedule';
 
 import { colorModeText, parameterText, thicknessText } from '../../production-order/manufacturing';
 import ItemProductionConfigModal from '../../production-order/modules/item-production-config-modal.vue';
 import OrderItemsTable from '../../production-order/modules/order-items-table.vue';
 import { dateText, num, specText } from '../../production-order/shared';
+import { businessError } from '../../shared/business-error';
 import { dimensionTextInMm } from '../../shared/dimensions';
 import { materialText, PROCESS_LABELS } from '../../shared/schedule';
 import { finishedSpecText, orderQuantityText } from './order-split-display';
 import OrderSplitSpecsTable from './order-split-specs-table.vue';
+import OrderSplitStockPanel from './order-split-stock-panel.vue';
 
-const props = defineProps<{ orders?: OrderApi.Order[] }>();
-const emit = defineEmits<{ changed: [order: OrderApi.Order]; released: [scheduleId: number] }>();
+const props = defineProps<{
+  deliveredStock?: { itemId: number; revision: number; stockId: number };
+  orders?: OrderApi.Order[];
+}>();
+const emit = defineEmits<{
+  changed: [order: OrderApi.Order];
+  manualDelivery: [stock: { itemId: number; orderId: number; quantity: number; stockId: number }];
+  released: [scheduleId: number];
+}>();
 const open = defineModel<boolean>('open', { required: true });
 const { hasAccessByCodes } = useAccess();
 const canEdit = computed(() => hasAccessByCodes(['fdmgongchang:production-order:handle']));
 
 const MAX = 50;
+const ADVICE_POLL_DELAY = 1500;
+const ADVICE_TIMEOUT = 40_000;
 const loadedOrders = ref<OrderApi.Order[]>([]);
 const selectedIds = ref<number[]>([]);
 const loading = ref(false);
@@ -43,6 +54,14 @@ const status = ref<string>();
 const selectedItemId = ref<number>();
 const preview = ref<SplitApi.Preview>();
 const previewIds = ref<number[]>([]);
+const stockPicks = ref<Array<{ candidate: SplitApi.StockCandidate; quantity: null | number }>>([]);
+const previewStockSelections = ref<SplitApi.StockSelection[]>([]);
+const needsRepreview = ref(false);
+const previewError = ref(false);
+const advice = ref<SplitApi.StockAdvice>();
+const adviceLoading = ref(false);
+const adviceFeedback = ref('');
+const refreshedAfterDelivery = ref(false);
 const requestId = ref('');
 const submittedRequest = ref<SplitApi.ReleaseRequest>();
 const configOpen = ref(false);
@@ -50,6 +69,10 @@ const configOrderId = ref<number>();
 const configItemId = ref<number>();
 const refreshError = ref(false);
 let version = 0;
+let stockPicksVersion = 0;
+let adviceRequest: AbortController | undefined;
+let advicePollTimer: ReturnType<typeof setTimeout> | undefined;
+let adviceDeadline: ReturnType<typeof setTimeout> | undefined;
 
 const orderColumns: TableColumnsType<OrderApi.Order> = [
   { key: 'order', title: '订单 / 客户', width: 205 },
@@ -69,18 +92,150 @@ const taskColumns: TableColumnsType<SplitApi.Row> = [
 ];
 const statusLabels = { BLOCKED: '待补配置 / 暂不能下发', DONE: '已完成，无需下发', READY: '配置通过' };
 const statusOptions = Object.entries(statusLabels).map(([value, label]) => ({ value, label }));
-const canPreview = computed(() => selectedIds.value.length > 0 && selectedIds.value.length <= MAX && !loading.value && !configOpen.value);
-const canRelease = computed(() => !configOpen.value && !previewing.value && !!preview.value?.canRelease && preview.value.taskCount > 0
+function validStockPick({ candidate, quantity }: (typeof stockPicks.value)[number]) {
+  const current = preview.value?.stockCandidates?.find((stock) => stock.itemId === candidate.itemId && stock.stockId === candidate.stockId);
+  return Number.isFinite(quantity) && (quantity ?? 0) > 0 && (quantity ?? 0) <= num((current ?? candidate).available)
+    && (!preview.value || (!!current && current.deliverable === candidate.deliverable));
+}
+const invalidStockPicks = computed(() => stockPicks.value.some((pick) => !validStockPick(pick)));
+const hasFinishedGoodsPick = computed(() => stockPicks.value.some(({ candidate }) => candidate.deliverable));
+const canPreview = computed(() => selectedIds.value.length > 0 && selectedIds.value.length <= MAX && !loading.value
+  && !configOpen.value);
+const canRelease = computed(() => !configOpen.value && !previewing.value && !needsRepreview.value && !invalidStockPicks.value
+  && !hasFinishedGoodsPick.value && !!preview.value?.canRelease && preview.value.taskCount > 0
   && preview.value.errors.length === 0 && !preview.value.rows.some((row) => row.status === 'BLOCKED'));
+const canRequestAdvice = computed(() => !!preview.value && !needsRepreview.value && !invalidStockPicks.value
+  && !previewing.value && !submitting.value && !configOpen.value && !adviceLoading.value);
 const productSpecs = computed(() => [...new Map((preview.value?.rows ?? [])
   .map((row) => [row.itemId, row])).values()]);
 const productOptions = computed(() => productSpecs.value.map((row) => ({
   label: [row.productName, row.productCode, `${row.orderNo} #${row.itemId}`].filter(Boolean).join(' · '),
   value: row.itemId,
 })));
+const previewOrders = computed(() => loadedOrders.value.filter((order) => previewIds.value.includes(order.id)));
+
+function stopAdviceRequest() {
+  adviceRequest?.abort();
+  adviceRequest = undefined;
+  clearTimeout(advicePollTimer);
+  clearTimeout(adviceDeadline);
+  adviceLoading.value = false;
+}
+
+function invalidateAdvice() {
+  stopAdviceRequest();
+  advice.value = undefined;
+  adviceFeedback.value = '';
+}
+
+function finishWithAdviceFallback(controller: AbortController) {
+  if (adviceRequest !== controller) return;
+  stopAdviceRequest();
+  if (advice.value?.items.length) {
+    advice.value = { ...advice.value, source: 'RULE', status: 'READY' };
+    adviceFeedback.value = 'AI 暂未返回，已保留系统核算建议。';
+  } else {
+    adviceFeedback.value = '暂时无法获取用库建议，可以继续手工核对库存。';
+  }
+}
+
+function acceptAdvice(result: SplitApi.StockAdvice, controller: AbortController, previousRequestId?: string) {
+  if (adviceRequest !== controller) return;
+  if (result.status === 'STALE') {
+    invalidateAdvice();
+    adviceFeedback.value = result.notice || '建议依据已变化，请重新预览后生成建议。';
+    return;
+  }
+  if (result.status === 'READY') {
+    advice.value = result;
+    stopAdviceRequest();
+    return;
+  }
+  if (result.items.length > 0 || !advice.value) advice.value = result;
+  const id = result.requestId || previousRequestId;
+  if (!id) {
+    finishWithAdviceFallback(controller);
+    return;
+  }
+  advicePollTimer = setTimeout(async () => {
+    try {
+      acceptAdvice(await getOrderSplitAdviceResult(id, controller.signal), controller, id);
+    } catch {
+      finishWithAdviceFallback(controller);
+    }
+  }, ADVICE_POLL_DELAY);
+}
+
+async function generateAdvice() {
+  if (!canRequestAdvice.value || !preview.value) return;
+  const request = {
+    productionOrderIds: [...previewIds.value],
+    previewKey: preview.value.previewKey,
+    ...(previewStockSelections.value.length > 0 ? { stockSelections: [...previewStockSelections.value] } : {}),
+  };
+  invalidateAdvice();
+  const controller = new AbortController();
+  adviceRequest = controller;
+  adviceLoading.value = true;
+  adviceDeadline = setTimeout(() => finishWithAdviceFallback(controller), ADVICE_TIMEOUT);
+  try {
+    acceptAdvice(await requestOrderSplitAdvice(request, controller.signal), controller);
+  } catch {
+    finishWithAdviceFallback(controller);
+  }
+}
+
+function markPreviewDirty() {
+  needsRepreview.value = true;
+  requestId.value = '';
+  submittedRequest.value = undefined;
+}
+
+function invalidatePreview() {
+  invalidateAdvice();
+  markPreviewDirty();
+}
+
+watch(stockPicks, () => {
+  ++stockPicksVersion;
+  stopAdviceRequest();
+  markPreviewDirty();
+}, { flush: 'sync' });
+watch(selectedIds, invalidateAdvice, { flush: 'sync' });
+
+function openManualDelivery(stock: { itemId: number; orderId: number; quantity: number; stockId: number }) {
+  if (submitting.value || previewing.value || !canEdit.value) return;
+  emit('manualDelivery', stock);
+}
+
+watch(() => props.deliveredStock?.revision, async () => {
+  const received = props.deliveredStock;
+  if (!open.value || !received) return;
+  const order = previewOrders.value.find((row) => row.items.some((item) => item.id === received.itemId));
+  if (!order) return;
+  stockPicks.value = stockPicks.value.filter(({ candidate }) => candidate.itemId !== received.itemId || candidate.stockId !== received.stockId);
+  invalidatePreview();
+  refreshedAfterDelivery.value = true;
+  const current = ++version;
+  previewing.value = true;
+  try {
+    const fresh = await getProductionOrder(order.id).catch(() => undefined);
+    if (current !== version || !open.value) return;
+    if (fresh) {
+      loadedOrders.value = loadedOrders.value.map((row) => row.id === fresh.id ? fresh : row);
+      emit('changed', fresh);
+    }
+  } finally {
+    if (current === version) {
+      previewing.value = false;
+      if (open.value) await prepare();
+    }
+  }
+});
 
 function editItem(orderId: number, itemId: number) {
   if (!canEdit.value || submitting.value || previewing.value) return;
+  invalidateAdvice();
   configOrderId.value = orderId;
   configItemId.value = itemId;
   configOpen.value = true;
@@ -92,9 +247,9 @@ async function onConfigSaved() {
   const shouldPreview = !!preview.value;
   const current = ++version;
   // 保存成功即作废旧预览，任何刷新失败都不能继续下发旧参数。
+  stockPicks.value = stockPicks.value.filter(({ candidate }) => candidate.itemId !== configItemId.value);
   preview.value = undefined;
-  requestId.value = '';
-  submittedRequest.value = undefined;
+  invalidatePreview();
   refreshError.value = false;
   previewing.value = true;
   try {
@@ -169,13 +324,17 @@ async function loadOrders() {
 
 watch(open, (value) => {
   ++version;
+  invalidateAdvice();
   configOpen.value = false;
   if (!value) return;
   loadedOrders.value = [];
   selectedIds.value = [];
   preview.value = undefined;
-  requestId.value = '';
-  submittedRequest.value = undefined;
+  stockPicks.value = [];
+  previewStockSelections.value = [];
+  previewError.value = false;
+  refreshedAfterDelivery.value = false;
+  needsRepreview.value = false;
   refreshError.value = false;
   keyword.value = '';
   note.value = '';
@@ -187,12 +346,19 @@ watch(open, (value) => {
   void loadOrders();
 });
 watch([keyword, selectedItemId, status], () => { page.value = 1; previewPage.value = 1; });
-onBeforeUnmount(() => { ++version; });
+onBeforeUnmount(() => {
+  ++version;
+  stopAdviceRequest();
+});
 
 function back() {
+  invalidateAdvice();
   preview.value = undefined;
-  requestId.value = '';
-  submittedRequest.value = undefined;
+  stockPicks.value = [];
+  previewStockSelections.value = [];
+  previewError.value = false;
+  refreshedAfterDelivery.value = false;
+  needsRepreview.value = false;
   keyword.value = '';
   status.value = undefined;
   selectedItemId.value = undefined;
@@ -210,24 +376,28 @@ function newRequestId() {
 async function prepare() {
   if (!canPreview.value || previewing.value || submitting.value) return;
   const current = ++version;
+  const picksVersion = stockPicksVersion;
   const ids = [...selectedIds.value];
+  const upstreamPicks = stockPicks.value.filter(({ candidate }) => !candidate.deliverable);
+  const selections = upstreamPicks.filter((pick) => validStockPick(pick))
+    .map(({ candidate, quantity }) => ({ itemId: candidate.itemId, stockId: candidate.stockId, quantity: quantity! }));
   previewing.value = true;
-  // 重新计算时旧预览不能再被确认；重试下发则保留原 requestId。
-  preview.value = undefined;
-  requestId.value = '';
-  submittedRequest.value = undefined;
+  previewError.value = false;
+  invalidatePreview();
   try {
-    const result = await previewOrderSplit(ids);
+    const result = selections.length > 0 ? await previewOrderSplit(ids, selections) : await previewOrderSplit(ids);
     if (current !== version || !open.value) return;
     preview.value = result;
     previewIds.value = ids;
+    previewStockSelections.value = selections;
+    needsRepreview.value = picksVersion !== stockPicksVersion || selections.length !== upstreamPicks.length;
     requestId.value = newRequestId();
     keyword.value = '';
     status.value = undefined;
     if (!result.rows.some((row) => row.itemId === selectedItemId.value)) selectedItemId.value = undefined;
     previewPage.value = 1;
   } catch {
-    // API 统一提示具体错误，保留所选订单以便重新预览。
+    if (current === version) previewError.value = true;
   } finally {
     if (current === version) previewing.value = false;
   }
@@ -242,17 +412,19 @@ async function release() {
       previewKey: preview.value.previewKey,
       requestId: requestId.value,
       note: note.value.trim() || undefined,
+      ...(previewStockSelections.value.length > 0 ? { stockSelections: previewStockSelections.value } : {}),
     };
     const result = await releaseOrderSplit(submittedRequest.value);
     open.value = false;
     Modal.success({
       title: `已下发 ${result.tasks} 个工序任务`,
-      content: `任务已分配到对应车间，所需半成品产品和零库存已自动补齐，可直接领料。账面不足时允许领为负数，上道补报入库后冲抵。${result.warnings.length > 0 ? `提醒：${result.warnings.join('；')}` : ''}`,
+      content: `任务已分配到对应车间。纳入计划的库存已登记占用，车间按实际批次领料时扣减库存。${result.warnings.length > 0 ? `提醒：${result.warnings.join('；')}` : ''}`,
       width: 560,
     });
     emit('released', result.scheduleId);
-  } catch {
-    // 保留 requestId，网络错误后重试由后端返回同一批下发结果。
+  } catch (error) {
+    const { code, msg } = businessError(error);
+    if (code >= 1_000_000_000 || /预览过期|重新预览/.test(msg)) invalidatePreview();
   } finally {
     submitting.value = false;
   }
@@ -268,12 +440,14 @@ async function release() {
         <span class="text-muted-foreground">3. 确认下发到车间</span>
       </div>
       <p class="m-0 text-xs text-muted-foreground">
-        按订单产品的实际工艺路线完整拆分。订单数量与每道工序的计划数量分别核算；库存不足只提醒，缺少工艺或生产配置时需补齐后再下发。
+        按订单工艺拆分。可勾选现有库存，从适用工序接做；其余数量从该款订单的第一道工序开始。
       </p>
       <p class="m-0 text-xs text-primary">
-        确认下发时自动建立缺少的半成品产品和零库存，车间可直接领料；账面不足允许领为负数，上道补报入库后冲抵。预览不会创建产品或变更库存。
+        预览仅计算用量。确认下发后生成车间任务，并占用本次纳入的库存。车间实际领料时扣减库存。
       </p>
       <Alert v-if="refreshError" type="warning" show-icon message="参数已保存，订单刷新失败。旧预览已作废，请重新打开预览核对。" />
+      <Alert v-if="previewError" type="warning" show-icon message="本次预览未完成，已保留勾选库存。请检查库存并重新计算。" />
+      <Alert v-else-if="refreshedAfterDelivery && !needsRepreview && !previewing" type="success" show-icon message="现货已登记。请核对重新预览的欠量和工序，再确认下发。" />
       <template v-if="!preview">
         <div class="flex flex-wrap items-center gap-3">
           <Input id="split-order-search" v-model:value="keyword" allow-clear placeholder="订单号、客户、产品编码、名称、规格" class="max-w-96" :disabled="previewing" />
@@ -313,6 +487,23 @@ async function release() {
         </Table>
       </template>
       <template v-else>
+        <OrderSplitStockPanel
+          v-if="preview.stockCandidates || preview.stockCoverage"
+          v-model:picks="stockPicks"
+          :advice="advice"
+          :advice-feedback="adviceFeedback"
+          :advice-loading="adviceLoading"
+          :can-deliver="canEdit"
+          :can-request-advice="canRequestAdvice"
+          :disabled="submitting || previewing || configOpen"
+          :needs-repreview="needsRepreview || invalidStockPicks"
+          :orders="previewOrders"
+          :preview="preview"
+          @generate-advice="generateAdvice"
+          @manual-delivery="openManualDelivery"
+        />
+        <Alert v-if="invalidStockPicks" type="warning" show-icon message="请给每个已勾选的库存行填写有效用量，或取消不可用的选择。" />
+        <Alert v-else-if="needsRepreview && !previewing && !previewError" type="warning" show-icon message="当前选择需要重新计算。请核对更新后的工序计划，再确认下发。" />
         <div class="flex flex-wrap items-center gap-3">
           <strong>{{ preview.orderCount }} 张订单 · {{ preview.itemCount }} 条产品明细 · {{ preview.taskCount }} 个计划任务</strong>
           <Select
@@ -344,7 +535,7 @@ async function release() {
           <ul class="m-0 mt-1 max-h-28 list-disc overflow-auto pl-4"><li v-for="(error, index) in preview.errors" :key="index">{{ error }}</li></ul>
         </details>
         <details v-if="preview.warnings.length" class="rounded border border-orange-200 px-3 py-2 text-xs">
-          <summary class="cursor-pointer text-orange-600">生产提醒 {{ preview.warnings.length }} 项（不省略工艺任务，展开查看）</summary>
+          <summary class="cursor-pointer text-orange-600">生产提醒 {{ preview.warnings.length }} 项（展开查看）</summary>
           <ul class="m-0 mt-1 max-h-24 list-disc overflow-auto pl-4"><li v-for="(warning, index) in preview.warnings" :key="index">{{ warning }}</li></ul>
         </details>
         <Table
@@ -398,7 +589,7 @@ async function release() {
             </template>
           </template>
         </Table>
-        <p v-if="!canRelease && !preview.errors.length" class="m-0 text-xs text-orange-600">本批没有可下发的任务，或有未解决的配置问题。请检查各行提示后重新预览。</p>
+        <p v-if="!canRelease && !preview.errors.length && !invalidStockPicks && !needsRepreview && !hasFinishedGoodsPick && !previewing" class="m-0 text-xs text-orange-600">本批没有可下发的任务，或有未解决的配置问题。请检查各行提示后重新预览。</p>
         <label for="split-release-note" class="text-xs text-muted-foreground">下发说明（选填）</label>
         <Input.TextArea id="split-release-note" v-model:value="note" :maxlength="500" :rows="2" :disabled="submitting || !!submittedRequest" />
         <p v-if="submittedRequest && !submitting" class="m-0 text-xs text-muted-foreground">重试会保留本次提交内容，避免重复下发；如需修改说明，请重新预览。</p>
@@ -408,7 +599,7 @@ async function release() {
       <div class="flex flex-wrap justify-end gap-2">
         <Button :disabled="submitting || configOpen" @click="open = false">取消</Button>
         <Button v-if="preview" :disabled="submitting" @click="back">返回选择订单</Button>
-        <Button v-if="preview" :disabled="submitting" :loading="previewing" @click="prepare">重新预览</Button>
+        <Button v-if="preview" :disabled="submitting || configOpen" :loading="previewing" @click="prepare">{{ needsRepreview ? '重新计算' : '重新预览' }}</Button>
         <Button v-if="!preview" type="primary" :disabled="!canPreview" :loading="previewing" @click="prepare">预览工序任务</Button>
         <Button v-else type="primary" :disabled="!canRelease" :loading="submitting" @click="release">确认下发 {{ preview.taskCount }} 个任务</Button>
       </div>

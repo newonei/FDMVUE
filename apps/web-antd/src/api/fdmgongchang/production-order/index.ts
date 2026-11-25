@@ -922,11 +922,44 @@ export namespace FdmgongchangSupplyMatchApi {
 }
 
 /** 库存匹配：本厂全部已接单订单按交期一起算，返回这张单每条明细的结果。 */
-export function getSupplyMatch(id: number) {
+export function getSupplyMatch(id: number, stockOnly?: boolean) {
   return requestClient.get<FdmgongchangSupplyMatchApi.Match[]>(
     `${BASE}/supply-match`,
-    { headers: factoryHeaders(), params: { id } },
+    { headers: factoryHeaders(), params: { id, stockOnly } },
   );
+}
+
+interface OrderStockTraceLine {
+  aggregated: boolean;
+  batchNo?: null | string;
+  itemCode: string;
+  itemId: number;
+  location?: null | string;
+  quantity: number | string;
+  stageLabel: string;
+  stockId?: null | number;
+  unit: string;
+}
+
+export interface OrderStockTrace {
+  actual: Array<
+    OrderStockTraceLine & { activity: string; documentNos: string[] }
+  >;
+  planned: Array<
+    OrderStockTraceLine & {
+      covers: number | string;
+      scheduleNo: string;
+      side?: null | string;
+      startProcessLabel?: null | string;
+    }
+  >;
+}
+
+export function getOrderStockTrace(id: number) {
+  return requestClient.get<OrderStockTrace>(`${BASE}/stock-trace`, {
+    headers: factoryHeaders(),
+    params: { id },
+  });
 }
 
 /** 确认规格用的字典选项。 */

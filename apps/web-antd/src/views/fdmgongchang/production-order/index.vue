@@ -1,4 +1,6 @@
 <script lang="ts" setup>
+import type { ShortageDispatchSeed } from '../shared/schedule';
+
 import type { FdmgongchangProductionOrderApi as Api } from '#/api/fdmgongchang/production-order';
 
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
@@ -21,6 +23,7 @@ import {
 import MixBatchModal from '../schedule/modules/mix-batch-modal.vue';
 import OrderSplitModal from '../schedule/modules/order-split-modal.vue';
 import ScheduleBoard from '../schedule/modules/schedule-board.vue';
+import ShortageDispatchModal from '../schedule/modules/shortage-dispatch-modal.vue';
 import TaskManage from '../schedule/modules/task-manage.vue';
 import { factoryToday } from '../shared/factory-date';
 import FactorySwitch from '../shared/factory-switch.vue';
@@ -28,6 +31,7 @@ import { PROCESS_LABELS } from '../shared/schedule';
 import { useFactory } from '../shared/use-factory';
 import BatchRouteModal from './modules/batch-route-modal.vue';
 import CreateModal from './modules/create-modal.vue';
+import DeliveryModal from './modules/delivery-modal.vue';
 import ExceptionLedger from './modules/exception-ledger.vue';
 import ItemProductionConfigModal from './modules/item-production-config-modal.vue';
 import OrderDrawer from './modules/order-drawer.vue';
@@ -35,7 +39,7 @@ import OrderItemsTable from './modules/order-items-table.vue';
 import RestockLedger from './modules/restock-ledger.vue';
 import ScheduleModal from './modules/schedule-modal.vue';
 import SourcePurchaseLink from './modules/source-purchase-link.vue';
-import { dateText, num, ORDER_STATUS, specText, timeText } from './shared';
+import { dateText, num, ORDER_STATUS, remainingOrderItemQuantity, specText, timeText } from './shared';
 
 /**
  * 工厂部门 · 工厂排单（原「工厂下单」，并入了原「AI 排单」）：工厂的人在这里操作。
@@ -59,6 +63,10 @@ const route = useRoute();
 const tab = ref<Tab>(initialTab());
 /** 从看板、旧的 AI 排单地址或勾选订单生成后切过来时要打开的那份排单。 */
 const scheduleFocus = ref<number | undefined>(Number(route?.query?.id) || undefined);
+const focusManualPlanning = ref(false);
+const taskOrderNo = ref<string>();
+const shortageDispatchOpen = ref(false);
+const shortageDispatch = ref<ShortageDispatchSeed>();
 
 function initialTab(): Tab {
   const want = route?.query?.tab;
@@ -94,6 +102,13 @@ const otherStatuses = (['REJECTED', 'CANCELLED'] as const).map((value) => ({ lab
 const otherStatus = computed(() => otherStatuses.find(({ value }) => value === filters.status)?.value);
 const isOrderTab = computed(() => tab.value === 'factory' || tab.value === 'mine');
 const selectedItems = computed(() => [...selected.value.values()].reduce((sum, order) => sum + order.items.length, 0));
+const shortfallItemCounts = computed(() => {
+  if (tab.value !== 'factory' || !canHandle.value) return new Map<number, number>();
+  return new Map(rows.value.filter((order) => order.status === 'ACCEPTED').map((order) => [
+    order.id,
+    order.items.filter((item) => remainingOrderItemQuantity(item) > 0).length,
+  ]));
+});
 let rowsVersion = 0;
 let overviewVersion = 0;
 const pageNo = ref(1);
@@ -103,6 +118,11 @@ const pageSize = ref(20);
 const selected = ref<Map<number, Api.Order>>(new Map());
 const scheduleOpen = ref(false);
 const releaseOpen = ref(false);
+type SplitDeliverySelection = { itemId: number; orderId: number; quantity: number; stockId: number };
+const splitDelivery = ref<{ item: Api.Item; order: Api.Order; selection: SplitDeliverySelection }>();
+const splitDeliveryOpen = ref(false);
+const deliveredStock = ref<{ itemId: number; revision: number; stockId: number }>();
+let splitDeliveryVersion = 0;
 const batchMixOpen = ref(false);
 const expandedOrderIds = ref<number[]>([]);
 const configOpen = ref(false);
@@ -185,8 +205,38 @@ function onScheduled(id: number) {
 
 function onSplitReleased() {
   selected.value = new Map();
-  if (canViewSchedule.value) tab.value = 'tasks';
-  else void loadRows();
+  if (canViewSchedule.value) {
+    taskOrderNo.value = undefined;
+    tab.value = 'tasks';
+  } else {
+    void loadRows();
+  }
+}
+
+async function openSplitDelivery(selection: SplitDeliverySelection) {
+  const version = ++splitDeliveryVersion;
+  const factoryId = factory.factoryId.value;
+  try {
+    const order = await getProductionOrder(selection.orderId);
+    if (version !== splitDeliveryVersion || !releaseOpen.value || factory.factoryId.value !== factoryId) return;
+    const item = order.items.find((row) => row.id === selection.itemId);
+    if (order.factoryId !== factoryId || order.status !== 'ACCEPTED' || !item || remainingOrderItemQuantity(item) <= 0) {
+      message.warning('该明细已无可交数量或订单状态已变化，请重新预览');
+      return;
+    }
+    splitDelivery.value = { item, order, selection };
+    splitDeliveryOpen.value = true;
+  } catch {
+    if (version === splitDeliveryVersion) message.warning('订单明细加载失败，请重新打开入库');
+  }
+}
+
+function onSplitDeliverySaved(text: string) {
+  const selection = splitDelivery.value?.selection;
+  if (!selection) return;
+  message.success(text);
+  deliveredStock.value = { itemId: selection.itemId, stockId: selection.stockId, revision: ++splitDeliveryVersion };
+  void refreshOrders();
 }
 
 const createOpen = ref(false);
@@ -203,6 +253,7 @@ function copyOrder(order: Api.Order) {
 }
 const drawerOpen = ref(false);
 const drawerId = ref<number>();
+const drawerFocusFulfillment = ref(false);
 
 async function loadRows() {
   const current = ++rowsVersion;
@@ -297,7 +348,14 @@ async function switchFactory(id: number) {
   batchRouteOrder.value = undefined;
   scheduleOpen.value = false;
   releaseOpen.value = false;
+  ++splitDeliveryVersion;
+  splitDeliveryOpen.value = false;
+  splitDelivery.value = undefined;
+  deliveredStock.value = undefined;
   configOpen.value = false;
+  taskOrderNo.value = undefined;
+  shortageDispatchOpen.value = false;
+  shortageDispatch.value = undefined;
   ++configRefreshVersion;
   expandedOrderIds.value = [];
   factory.select(id);
@@ -314,7 +372,10 @@ watch(tab, (value) => {
   pageNo.value = 1;
   selected.value = new Map();
   filters.status = undefined;
-  if (value !== 'schedule') void refreshOrders();
+  if (value !== 'schedule') {
+    focusManualPlanning.value = false;
+    void refreshOrders();
+  }
 });
 
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
@@ -332,9 +393,38 @@ watch(
 );
 onBeforeUnmount(() => clearTimeout(searchTimer));
 
-function openOrder(id: number) {
+function openOrder(id: number, focusFulfillment = false) {
   drawerId.value = id;
+  drawerFocusFulfillment.value = focusFulfillment;
   drawerOpen.value = true;
+}
+
+function openOrderTasks(orderNo: string) {
+  if (!canViewSchedule.value) return;
+  taskOrderNo.value = orderNo;
+  drawerOpen.value = false;
+  tab.value = 'tasks';
+}
+
+function openShortagePlanning() {
+  if (!canViewSchedule.value || !canRelease.value) return;
+  drawerOpen.value = false;
+  scheduleFocus.value = undefined;
+  focusManualPlanning.value = true;
+  tab.value = 'schedule';
+}
+
+function openShortageDispatch(seed: ShortageDispatchSeed) {
+  if (!canViewSchedule.value || !canRelease.value || !factory.factoryId.value) return;
+  shortageDispatch.value = seed;
+  shortageDispatchOpen.value = true;
+}
+
+function onShortageDispatched(scheduleId: number) {
+  shortageDispatchOpen.value = false;
+  drawerOpen.value = false;
+  focusManualPlanning.value = false;
+  openSchedule(scheduleId);
 }
 
 function toggleOrderItems(id: number) {
@@ -434,7 +524,12 @@ function progressPercent(o: Api.Order) {
           <template #subTitle>接单、排单只能处理自己所在工厂的单。</template>
         </Result>
         <template v-else-if="tab === 'schedule'">
-          <ScheduleBoard v-if="factory.factoryId.value !== null" :factory-id="factory.factoryId.value" :focus-id="scheduleFocus" />
+          <ScheduleBoard
+            v-if="factory.factoryId.value !== null"
+            :factory-id="factory.factoryId.value"
+            :focus-id="scheduleFocus"
+            :focus-manual-planning="focusManualPlanning"
+          />
         </template>
         <template v-else-if="tab === 'restock'">
           <RestockLedger v-if="factory.factoryId.value !== null" :factory-id="factory.factoryId.value" @open-order="openOrder" />
@@ -443,7 +538,12 @@ function progressPercent(o: Api.Order) {
           <ExceptionLedger v-if="factory.factoryId.value !== null" :factory-id="factory.factoryId.value" />
         </template>
         <template v-else-if="tab === 'tasks'">
-          <TaskManage v-if="factory.factoryId.value !== null" :factory-id="factory.factoryId.value" @open-schedule="openSchedule" />
+          <TaskManage
+            v-if="factory.factoryId.value !== null"
+            v-model:order-no="taskOrderNo"
+            :factory-id="factory.factoryId.value"
+            @open-schedule="openSchedule"
+          />
         </template>
         <Result v-else-if="loadError" status="warning" title="订单没有加载出来">
           <template #extra><Button type="primary" @click="loadRows">重新加载</Button></template>
@@ -594,6 +694,14 @@ function progressPercent(o: Api.Order) {
                     <Progress :percent="progressPercent(record as Api.Order)" :show-info="false" size="small" />
                     <span class="text-xs text-muted-foreground tabular-nums">{{ record.sourceType === 'PURCHASE_ORDER' ? '入库' : '交货' }} {{ num(record.completedQuantity).toLocaleString() }} / {{ num(record.totalQuantity).toLocaleString() }}</span>
                   </div>
+                  <button
+                    v-if="shortfallItemCounts.get(record.id)"
+                    class="self-start rounded-md border border-warning/30 bg-warning/10 px-2 py-1 text-left text-xs font-medium text-warning hover:bg-warning/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-warning"
+                    type="button"
+                    @click="openOrder(record.id, true)"
+                  >
+                    补产指引 · 待补 {{ shortfallItemCounts.get(record.id) }} 款
+                  </button>
                 </div>
               </template>
               <template v-else-if="column.key === 'actions'">
@@ -620,7 +728,24 @@ function progressPercent(o: Api.Order) {
 
       <CreateModal v-model:open="createOpen" :copy-from="copyFrom" :factories="orderable" @created="onCreated" />
       <ScheduleModal v-model:open="scheduleOpen" :orders="[...selected.values()]" @generated="onScheduled" />
-      <OrderSplitModal :key="`split-${factory.factoryId.value ?? 'none'}`" v-model:open="releaseOpen" :orders="[...selected.values()]" @released="onSplitReleased" @changed="applyFreshOrder" />
+      <OrderSplitModal
+        :key="`split-${factory.factoryId.value ?? 'none'}`"
+        v-model:open="releaseOpen"
+        :delivered-stock="deliveredStock"
+        :orders="[...selected.values()]"
+        @changed="applyFreshOrder"
+        @manual-delivery="openSplitDelivery"
+        @released="onSplitReleased"
+      />
+      <DeliveryModal
+        v-if="splitDelivery"
+        v-model:open="splitDeliveryOpen"
+        :factory-id="splitDelivery.order.factoryId"
+        :item="splitDelivery.item"
+        :preset="splitDelivery.selection"
+        :purchase="splitDelivery.order.sourceType === 'PURCHASE_ORDER'"
+        @saved="onSplitDeliverySaved"
+      />
       <ItemProductionConfigModal
         v-if="configOrderId && configItemId"
         :key="factory.factoryId.value ?? 'none'"
@@ -640,11 +765,22 @@ function progressPercent(o: Api.Order) {
       <MixBatchModal :key="factory.factoryId.value ?? 'none'" v-model:open="batchMixOpen" :orders="[...selected.values()]" @released="onScheduled" />
       <OrderDrawer
         v-model:open="drawerOpen"
+        :focus-fulfillment="drawerFocusFulfillment"
         :mode="tab === 'mine' ? 'mine' : 'factory'"
         :order-id="drawerId"
         :status-hint="rows.find((row) => row.id === drawerId)?.status"
         @changed="onChanged"
         @copy="copyOrder"
+        @dispatch-shortage="openShortageDispatch"
+        @plan-shortage="openShortagePlanning"
+        @view-tasks="openOrderTasks"
+      />
+      <ShortageDispatchModal
+        v-if="shortageDispatch && factory.factoryId.value"
+        v-model:open="shortageDispatchOpen"
+        :factory-id="factory.factoryId.value"
+        :seed="shortageDispatch"
+        @released="onShortageDispatched"
       />
     </div>
   </Page>

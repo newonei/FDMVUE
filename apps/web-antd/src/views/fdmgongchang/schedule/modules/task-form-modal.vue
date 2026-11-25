@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import type { StageChoice } from '../../shared/schedule';
+import type { Dayjs } from 'dayjs';
+
+import type { ShortageDispatchSeed, StageChoice } from '../../shared/schedule';
 
 import type { FdmgongchangFactoryApi } from '#/api/fdmgongchang/factory';
 import type { FdmgongchangScheduleApi as Api } from '#/api/fdmgongchang/schedule';
@@ -7,7 +9,7 @@ import type { FdmgongchangStageStockApi as StockApi } from '#/api/fdmgongchang/s
 
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 
-import { Alert, Button, Input, InputNumber, Modal, Select } from 'ant-design-vue';
+import { Alert, Button, DatePicker, Input, InputNumber, Modal, Select } from 'ant-design-vue';
 
 import { getScheduleTaskInputProduct, previewScheduleTaskMaterials } from '#/api/fdmgongchang/schedule';
 import { errorText } from '#/views/fdmplatform/data';
@@ -29,7 +31,8 @@ const props = defineProps<{
   initial?: Api.PlanTask | null;
   options?: Api.FormOptions | null;
   recalculateMaterials?: boolean;
-  schedule: Api.Schedule;
+  schedule: Pick<Api.Schedule, 'days' | 'startDate' | 'status'>;
+  shortageDispatch?: ShortageDispatchSeed;
   submit: (task: Api.PlanTask) => Promise<void>;
   workers: FdmgongchangFactoryApi.Worker[];
 }>();
@@ -87,7 +90,12 @@ const dates = computed(() => {
   });
 });
 const dateOptions = computed(() => dates.value.map((d) => ({ label: dayLabel(d), value: d })));
-const processOptions = computed(() => (props.options?.processes ?? []).map((p) => ({ label: p.label, value: p.code })));
+const processOptions = computed(() => {
+  const configuredProcesses = props.shortageDispatch?.processes;
+  return (props.options?.processes ?? [])
+    .filter((p) => !configuredProcesses?.length || configuredProcesses.includes(p.code))
+    .map((p) => ({ label: p.label, value: p.code }));
+});
 const processOption = computed(() => props.options?.processes.find((p) => p.code === process.value));
 const materialOptions = computed<StockApi.Options>(() => props.options?.materialOptions ?? {
   colors: [], materials: [], patterns: [], processes: [], rawMaterials: [], recipes: [], stages: [], textures: [],
@@ -145,6 +153,7 @@ const productOptions = computed(() => choices.value.map((c) => ({
   value: c.key,
 })));
 const picked = computed(() => choices.value.find((c) => c.key === productKey.value));
+const shortageRemaining = computed(() => picked.value?.remaining ?? props.shortageDispatch?.remaining ?? 0);
 const selectedLayer = computed(() => picked.value?.layers?.find((layer) => layer.side === layerSide.value));
 const layerOptions = computed(() => (picked.value?.layers ?? []).map((layer) => ({
   value: layer.side,
@@ -172,7 +181,23 @@ const sameOriginal = computed(() => !!props.initial && process.value === props.i
   && (order.value === STOCK ? !props.initial.contractCode : order.value === props.initial.contractCode)
   && ((!!picked.value?.assignmentId && picked.value.assignmentId === initialAssignmentId.value) || picked.value?.key === '__CURRENT__'));
 const mergedOriginal = computed(() => sameOriginal.value && (props.initial?.covers?.length ?? 0) > 1);
+const shortageQuantitySuggestion = computed(() => {
+  const seed = props.shortageDispatch;
+  if (!seed || !process.value || shortageRemaining.value <= 0) return null;
+  const remaining = shortageRemaining.value;
+  const sameQuantity = !intermediate.value && (seed.processes?.at(-1) === process.value
+    || (unit.value && unit.value === seed.unit?.trim()));
+  const recommended = seed.suggestedProcess === process.value ? seed.suggestedQuantity : undefined;
+  if (recommended && recommended > 0) {
+    if (sameQuantity) return Math.min(recommended, remaining);
+    if (remaining === seed.remaining && (!intermediate.value || (picked.value?.layers?.length ?? 0) <= 1)) {
+      return recommended;
+    }
+  }
+  return sameQuantity ? remaining : null;
+});
 const suggested = computed(() => {
+  if (props.shortageDispatch) return shortageQuantitySuggestion.value ?? null;
   if (picked.value?.key === '__CURRENT__') return null;
   return stagePlan.value?.suggested ?? null;
 });
@@ -339,7 +364,7 @@ function clearProduct() {
 const workerOptions = computed(() => props.workers.filter((w) => !process.value || w.posts.includes(process.value))
   .map((w) => ({ label: [w.nickname, w.team].filter(Boolean).join(' · '), value: w.userId })));
 
-watch([open, () => props.initial], ([value]) => {
+watch([open, () => props.initial, () => props.shortageDispatch], ([value]) => {
   productPickerOpen.value = false;
   clearInput();
   initialInputContextKey.value = '';
@@ -353,12 +378,16 @@ watch([open, () => props.initial], ([value]) => {
   if (!value) return;
   initializing = true;
   const t = props.initial;
-  date.value = t?.date ?? dates.value.find((d) => d >= factoryToday().format('YYYY-MM-DD')) ?? dates.value[0] ?? '';
-  process.value = t?.process ?? undefined;
-  order.value = t?.contractCode || STOCK;
+  const seed = props.shortageDispatch;
+  const today = factoryToday().format('YYYY-MM-DD');
+  date.value = seed ? today : t?.date ?? dates.value.find((d) => d >= today) ?? dates.value[0] ?? '';
+  const recommendedProcess = processOptions.value.find((p) => p.value === seed?.suggestedProcess);
+  process.value = seed ? recommendedProcess?.value : t?.process ?? undefined;
+  order.value = (seed?.orderNo ?? t?.contractCode) || STOCK;
   found.value = [];
   const fallbackProductKey = t?.product ? '__CURRENT__' : undefined;
-  productKey.value = initialAssignmentId.value && choices.value.some((c) => c.key === initialAssignmentId.value) ? initialAssignmentId.value : fallbackProductKey;
+  const assignmentId = seed ? `PO-ITEM:${seed.itemId}` : initialAssignmentId.value;
+  productKey.value = assignmentId && choices.value.some((c) => c.key === assignmentId) ? assignmentId : fallbackProductKey;
   layerSide.value = t?.output?.side || (picked.value?.layers?.length === 1 ? picked.value.layers[0]?.side : undefined);
   quantity.value = t ? Number(t.quantity) : null;
   autoQuantity.value = !t;
@@ -402,6 +431,7 @@ onBeforeUnmount(() => {
 
 watch([process, productKey], () => {
   if (initializing || !open.value) return;
+  if (props.shortageDispatch) autoQuantity.value = true;
   clearInput();
   layerSide.value = picked.value?.layers?.length === 1 ? picked.value.layers[0]?.side : undefined;
   outputEdited.value = true;
@@ -437,7 +467,11 @@ function inputQuantity(v: null | number | undefined) {
 }
 
 async function save() {
+  if (saving.value) return;
   errors.value = [];
+  if (props.shortageDispatch && (picked.value?.assignmentId !== `PO-ITEM:${props.shortageDispatch.itemId}` || shortageRemaining.value <= 0)) {
+    errors.value.push('这条订单明细已无可派工的欠量，请关闭后刷新订单。');
+  }
   if (!date.value) errors.value.push('请选择日期。');
   if (!process.value) errors.value.push('请选择工序。');
   if (intermediate.value && picked.value?.layers?.length && !selectedLayer.value) errors.value.push('请选择本次生产的正面或反面层。');
@@ -508,27 +542,51 @@ async function save() {
 </script>
 
 <template>
-  <Modal v-model:open="open" :confirm-loading="saving" :title="initial ? '修改生产任务' : '下发生产任务'" :width="900" :body-style="{ maxHeight: '72vh', overflowY: 'auto' }" ok-text="保存" @ok="save">
+  <Modal
+    v-model:open="open"
+    :body-style="{ maxHeight: '72vh', overflowY: 'auto' }"
+    :cancel-button-props="shortageDispatch ? { disabled: saving } : undefined"
+    :closable="!shortageDispatch || !saving"
+    :confirm-loading="saving"
+    :keyboard="!shortageDispatch || !saving"
+    :mask-closable="!shortageDispatch || !saving"
+    :ok-text="shortageDispatch ? '确认下发' : '保存'"
+    :title="shortageDispatch ? '补派工' : initial ? '修改生产任务' : '下发生产任务'"
+    :width="900"
+    @ok="save"
+  >
     <div class="grid grid-cols-1 gap-3 text-xs text-muted-foreground sm:grid-cols-2">
+      <p v-if="shortageDispatch" class="m-0 rounded-md bg-warning/10 px-3 py-2 text-foreground sm:col-span-2">
+        订单 {{ shortageDispatch.orderNo }} 仍需交付 <b class="tabular-nums">{{ shortageRemaining }}</b> {{ shortageDispatch.unit || '成品' }}
+      </p>
       <div class="rounded-md bg-primary/5 px-3 py-2 leading-6 sm:col-span-2">
         <b class="text-foreground">下发任务：{{ selectsInput ? '选择领料产品 → 设置计划产出' : '计划产出 → 预计领料' }} → 指派人员</b><br />
-        任务下发后，进入对应工序的车间菜单确认实际领料，再登记本工序的实际产出。
+        <template v-if="shortageDispatch">本次为所选工序下发一条任务。车间领料后登记这道工序的实际产出。</template>
+        <template v-else>任务下发后，进入对应工序的车间菜单确认实际领料，再登记本工序的实际产出。</template>
       </div>
       <label for="task-form-date" class="flex flex-col gap-1">
         计划日期
-        <Select id="task-form-date" v-model:value="date" :options="dateOptions" />
+        <DatePicker
+          v-if="shortageDispatch"
+          id="task-form-date"
+          v-model:value="date"
+          :allow-clear="false"
+          :disabled-date="(day: Dayjs) => day.isBefore(factoryToday(), 'day')"
+          value-format="YYYY-MM-DD"
+        />
+        <Select v-else id="task-form-date" v-model:value="date" :options="dateOptions" />
       </label>
       <label for="task-form-process" class="flex flex-col gap-1">
         本次工序
         <Select id="task-form-process" v-model:value="process" :options="processOptions" placeholder="选工序" />
       </label>
-      <div v-if="process === 'MIX'" class="flex flex-wrap items-center gap-2 rounded-md border border-primary/20 bg-primary/5 p-3 sm:col-span-2">
+      <div v-if="process === 'MIX' && !shortageDispatch" class="flex flex-wrap items-center gap-2 rounded-md border border-primary/20 bg-primary/5 p-3 sm:col-span-2">
         <Button id="task-form-batch-mix" @click="openBatchMix">批量安排发泡</Button>
         <span>一次安排本订单所有明细和制造层，也可再选多个订单；按预览下发独立排单。</span>
       </div>
       <label for="task-form-order" class="flex flex-col gap-1 sm:col-span-2">
         关联订单（说明这批物料的用途）
-        <Select id="task-form-order" v-model:value="order" :options="orderOptions" option-filter-prop="label" show-search />
+        <Select id="task-form-order" v-model:value="order" :disabled="!!shortageDispatch" :options="orderOptions" option-filter-prop="label" show-search />
       </label>
       <div class="flex flex-col gap-1 sm:col-span-2">
         <label for="task-form-product">{{ order === STOCK ? (intermediate ? '关联产品（选填）' : '备货产品') : '关联订单明细（最终交付产品）' }}</label>
@@ -541,7 +599,7 @@ async function save() {
         </span>
         <Select
 v-else id="task-form-product" v-model:value="productKey" not-found-content="这张订单里没有可排产明细"
-          :options="productOptions" placeholder="选择准确的订单明细" option-filter-prop="label" show-search
+          :disabled="!!shortageDispatch" :options="productOptions" placeholder="选择准确的订单明细" option-filter-prop="label" show-search
 />
         <span v-if="picked" class="text-xs">{{ order === STOCK ? '关联产品' : '订单目标' }}：{{ picked.code || picked.name }}<template v-if="picked.spec"> · {{ dimensionTextInMm(picked.spec) }}</template></span>
       </div>
@@ -588,7 +646,8 @@ v-else id="task-form-product" v-model:value="productKey" not-found-content="这�
           <InputNumber id="task-form-quantity" :min="0" :precision="quantityPrecision(unit)" :value="quantity ?? undefined" class="flex-1" @update:value="(v) => inputQuantity(v as null | number | undefined)" />
           <span class="w-6 shrink-0 text-foreground">{{ unit }}</span>
         </span>
-        <span v-if="stagePlan?.hint">{{ stagePlan.hint }}</span>
+        <span v-if="shortageDispatch && process && shortageQuantitySuggestion == null">请按本工序实际产出填写{{ unit ? `（${unit}）` : '' }}。</span>
+        <span v-else-if="!shortageDispatch && stagePlan?.hint">{{ stagePlan.hint }}</span>
       </label>
       <section v-if="process" class="flex flex-col gap-2 rounded-md border border-border p-3 sm:col-span-2" aria-label="预计领料">
         <div class="flex items-center justify-between gap-3">

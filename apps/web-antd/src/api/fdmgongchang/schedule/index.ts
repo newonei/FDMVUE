@@ -430,10 +430,28 @@ export function createManualSchedule(data: {
   );
 }
 
-export function getScheduleFormOptions(id: number) {
+export function getScheduleFormOptions(
+  schedule: number | { productionOrderId: number },
+) {
   return requestClient.get<FdmgongchangScheduleApi.FormOptions>(
     '/fdmgongchang/schedule/form-options',
-    { ...headers(), params: { id } },
+    {
+      ...headers(),
+      params: typeof schedule === 'number' ? { id: schedule } : schedule,
+    },
+  );
+}
+
+export function dispatchScheduleShortage(data: {
+  itemId: number;
+  orderId: number;
+  requestKey: string;
+  task: FdmgongchangScheduleApi.PlanTask;
+}) {
+  return requestClient.post<{ id: number; notices: string[] }>(
+    '/fdmgongchang/schedule/manual/shortage-dispatch',
+    data,
+    headers(),
   );
 }
 
@@ -540,10 +558,11 @@ export function handleScheduleTaskShortage(data: {
   );
 }
 
-/** 任务管理：跨排单按日期查已下发的任务（默认今天起 7 天，最多 31 天）。 */
+/** 任务管理：精确订单号查全部日期，否则按日期查看已下发任务（默认今天起 7 天，最多 31 天）。 */
 export function listScheduleTasks(params: {
   from?: string;
   keyword?: string;
+  orderNo?: string;
   process?: string;
   status?: FdmgongchangScheduleApi.TaskStatus;
   to?: string;
@@ -598,8 +617,93 @@ export interface FdmgongchangPackageRelease {
   warnings: string[];
 }
 
-/** 按订单需求完整拆分实际工艺，与按库存净需求下发的旧任务包接口独立。 */
+/** 按订单工艺拆分，所选库存参与计算领用量与开工起点。 */
 export namespace FdmgongchangOrderSplitApi {
+  export interface StockSelection {
+    itemId: number;
+    stockId: number;
+    quantity: number | string;
+  }
+
+  interface StockReference {
+    itemId: number;
+    stockId: number;
+    stage: string;
+    stageLabel: string;
+    itemCode: string;
+    batchNo?: null | string;
+    location?: null | string;
+    unit: string;
+    startProcess?: null | string;
+    startProcessLabel?: null | string;
+    side?: 'BACK' | 'BOTH' | 'FRONT' | null;
+    aggregated?: boolean;
+  }
+
+  export interface StockCandidate extends StockReference {
+    available: number | string;
+    deliverable: boolean;
+    perUnit?: null | number | string;
+  }
+
+  export interface StockPlan extends StockReference {
+    orderNo?: string;
+    quantity: number | string;
+    covers: number | string;
+  }
+
+  export interface StockCoverage {
+    itemId: number;
+    covered: number | string;
+    remainingFromStart: number | string;
+  }
+
+  export interface StockAdviceLine extends Pick<
+    StockReference,
+    | 'aggregated'
+    | 'batchNo'
+    | 'itemCode'
+    | 'location'
+    | 'side'
+    | 'stageLabel'
+    | 'startProcess'
+    | 'startProcessLabel'
+    | 'stockId'
+    | 'unit'
+  > {
+    action: 'DELIVER' | 'USE';
+    currentSelection?: boolean;
+    quantity: number | string;
+  }
+
+  export interface StockAdviceItem extends StockCoverage {
+    orderId: number;
+    orderNo: string;
+    productCode?: null | string;
+    productName?: null | string;
+    planningBlocked?: boolean;
+    receiptSuggested: number | string;
+    recommendations: StockAdviceLine[];
+    remaining: number | string;
+    remainingAfterReceipt?: null | number | string;
+    summary?: null | string;
+    unit?: null | string;
+  }
+
+  export interface StockAdvice {
+    items: StockAdviceItem[];
+    notice?: null | string;
+    requestId?: null | string;
+    source: 'AI' | 'RULE';
+    status: 'PENDING' | 'READY' | 'STALE';
+  }
+
+  export interface StockAdviceRequest {
+    productionOrderIds: number[];
+    previewKey?: string;
+    stockSelections?: StockSelection[];
+  }
+
   export interface Row {
     rowKey: string;
     orderId: number;
@@ -651,6 +755,9 @@ export namespace FdmgongchangOrderSplitApi {
     itemCount: number;
     taskCount: number;
     rows: Row[];
+    stockCandidates?: StockCandidate[];
+    stockCoverage?: StockCoverage[];
+    stockPlan?: StockPlan[];
     warnings: string[];
     errors: string[];
   }
@@ -661,15 +768,40 @@ export namespace FdmgongchangOrderSplitApi {
     /** 同一预览确认失败后重试保持此值，避免重复创建任务。 */
     requestId: string;
     note?: string;
+    stockSelections?: StockSelection[];
   }
 }
 
 /** 只读预览，不创建任务、不占用或扣减库存。 */
-export function previewOrderSplit(productionOrderIds: number[]) {
+export function previewOrderSplit(
+  productionOrderIds: number[],
+  stockSelections?: FdmgongchangOrderSplitApi.StockSelection[],
+) {
   return requestClient.post<FdmgongchangOrderSplitApi.Preview>(
     '/fdmgongchang/schedule/order-split/preview',
-    { productionOrderIds },
+    { productionOrderIds, stockSelections },
     headers(),
+  );
+}
+
+export function requestOrderSplitAdvice(
+  data: FdmgongchangOrderSplitApi.StockAdviceRequest,
+  signal?: AbortSignal,
+) {
+  return requestClient.post<FdmgongchangOrderSplitApi.StockAdvice>(
+    '/fdmgongchang/schedule/order-split/advice',
+    data,
+    { ...headers(), signal, silent: true },
+  );
+}
+
+export function getOrderSplitAdviceResult(
+  requestId: string,
+  signal?: AbortSignal,
+) {
+  return requestClient.get<FdmgongchangOrderSplitApi.StockAdvice>(
+    '/fdmgongchang/schedule/order-split/advice/result',
+    { ...headers(), params: { requestId }, signal, silent: true },
   );
 }
 

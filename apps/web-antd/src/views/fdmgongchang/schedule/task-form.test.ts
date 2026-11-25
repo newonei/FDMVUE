@@ -1,16 +1,32 @@
+import type { ShortageDispatchSeed } from '../shared/schedule';
+
 import type { FdmgongchangScheduleApi as Api } from '#/api/fdmgongchang/schedule';
 
 import { createApp, defineComponent, h, nextTick } from 'vue';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import ShortageDispatchModal from './modules/shortage-dispatch-modal.vue';
 import TaskForm from './modules/task-form-modal.vue';
 
 const pickerState = vi.hoisted(() => ({ product: {} as Api.Product, inputProduct: {} as Api.Product }));
 const preview = vi.hoisted(() => vi.fn());
 const resolveInput = vi.hoisted(() => vi.fn());
+const dispatchShortage = vi.hoisted(() => vi.fn());
+const formOptions = vi.hoisted(() => vi.fn());
+const idempotencyKey = vi.hoisted(() => vi.fn());
 const batchMix = vi.fn();
-vi.mock('#/api/fdmgongchang/schedule', () => ({ previewScheduleTaskMaterials: preview, getScheduleTaskInputProduct: resolveInput }));
+vi.mock('#/api/fdmgongchang/factory', () => ({ getWorkerList: vi.fn().mockResolvedValue([]) }));
+vi.mock('#/api/fdmgongchang/schedule', () => ({
+  dispatchScheduleShortage: dispatchShortage,
+  getScheduleFormOptions: formOptions,
+  getScheduleTaskInputProduct: resolveInput,
+  previewScheduleTaskMaterials: preview,
+}));
+vi.mock('#/api/fdmplatform', async (importOriginal) => ({
+  ...await importOriginal<typeof import('#/api/fdmplatform')>(),
+  newIdempotencyKey: idempotencyKey,
+}));
 vi.mock('./modules/product-picker-modal.vue', () => ({
   default: defineComponent({
     props: ['open', 'requiredStage'], emits: ['close', 'selected'],
@@ -32,20 +48,23 @@ vi.mock('ant-design-vue', () => {
     } }),
   });
   return {
-    Alert: defineComponent({ setup: (_, { slots }) => () => h('div', slots.message?.()) }),
+    Alert: defineComponent({ props: ['message'], setup: (props, { slots }) => () => h('div', [props.message, slots.message?.(), slots.action?.()]) }),
     Button: defineComponent({ props: ['disabled', 'loading'], setup: (props, { slots }) => () => h('button', { disabled: props.disabled || props.loading }, slots.default?.()) }),
+    DatePicker: input,
     Input: input,
     InputNumber: input,
-    Modal: defineComponent({ props: ['open'], emits: ['ok'], setup: (props, { emit, slots }) => () => props.open
-      ? h('div', [slots.default?.(), h('button', { onClick: () => emit('ok') }, '保存')]) : null }),
+    message: { success: vi.fn(), warning: vi.fn() },
+    Modal: defineComponent({ props: ['open', 'okText', 'title'], emits: ['ok'], setup: (props, { emit, slots }) => () => props.open
+      ? h('div', [h('h2', props.title), slots.default?.(), h('button', { onClick: () => emit('ok') }, props.okText || '保存')]) : null }),
     Select: defineComponent({
       inheritAttrs: false,
-      props: ['id', 'value', 'options'], emits: ['change', 'update:value'],
-      setup: (props, { emit }) => () => h('select', { id: props.id, value: props.value ?? '', onChange: (event: Event) => {
+      props: ['disabled', 'id', 'value', 'options'], emits: ['change', 'update:value'],
+      setup: (props, { emit }) => () => h('select', { disabled: props.disabled, id: props.id, value: props.value ?? '', onChange: (event: Event) => {
         const value = (event.target as HTMLSelectElement).value;
         emit('update:value', value); emit('change', value);
       } }, [h('option', { value: '' }, '请选择'), ...(props.options ?? []).map((o: { label: string; value: string }) => h('option', { value: o.value }, o.label))]),
     }),
+    Spin: 'div',
   };
 });
 
@@ -72,6 +91,13 @@ const options: Api.FormOptions = {
   },
 };
 const schedule: Api.Schedule = { days: 3, id: 9, revision: 1, scheduleNo: 'PB-09', startDate: '2026-11-10', status: 'DRAFT' };
+const shortageSeed: ShortageDispatchSeed = {
+  itemId: 2, orderId: 30, orderNo: 'GD-01', processes: ['SLICE', 'EMBOSS'], remaining: 12,
+  suggestedProcess: 'EMBOSS', suggestedQuantity: 10, unit: '条',
+};
+function shortageOptions(remaining: number): Api.FormOptions {
+  return { ...options, demand: options.demand.map((item, index) => ({ ...item, assignmentId: `PO-ITEM:${index + 1}`, remaining })) };
+}
 const inputMaterial = (process = 'SLICE'): Api.Material => ({
   productId: 'INPUT-01', code: process === 'SLICE' ? 'BOARD-001' : 'SHEET-001',
   stage: process === 'SLICE' ? 'BOARD' : 'SHEET', name: process === 'SLICE' ? '紫色发泡板材' : '紫色已开片板材',
@@ -99,6 +125,13 @@ async function mount(initial?: Api.PlanTask, existingTaskId?: number, status: Ap
   app.mount(host); unmount = () => app.unmount(); await flush();
   return submit;
 }
+async function mountShortage(seed = shortageSeed) {
+  const released = vi.fn();
+  const host = document.createElement('div'); document.body.append(host);
+  const app = createApp(ShortageDispatchModal, { factoryId: 1, onReleased: released, open: true, seed });
+  app.mount(host); unmount = () => app.unmount(); await flush();
+  return released;
+}
 async function set(id: string, value: string) {
   const field = document.querySelector<HTMLElement>(`#${id}`) as HTMLInputElement | HTMLSelectElement;
   expect(field).toBeTruthy(); field.value = value; field.dispatchEvent(new Event('change', { bubbles: true })); await flush();
@@ -116,6 +149,52 @@ async function selectInput() {
 }
 
 describe('production task dispatch', () => {
+  it('prefills the exact shortage and only writes after confirmation, retaining the key on retry', async () => {
+    formOptions.mockResolvedValue(shortageOptions(8));
+    idempotencyKey.mockReturnValue('same-shortage-key');
+    dispatchShortage.mockRejectedValueOnce(new Error('network')).mockResolvedValueOnce({ id: 9, notices: [] });
+    const released = await mountShortage();
+
+    expect(formOptions).toHaveBeenCalledExactlyOnceWith({ productionOrderId: 30 });
+    expect(document.querySelector<HTMLInputElement>('#task-form-date')?.value).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(document.querySelector<HTMLSelectElement>('#task-form-order')?.value).toBe('GD-01');
+    expect(document.querySelector<HTMLSelectElement>('#task-form-product')?.value).toBe('PO-ITEM:2');
+    expect(document.querySelector<HTMLSelectElement>('#task-form-product')?.disabled).toBe(true);
+    expect(document.querySelector<HTMLSelectElement>('#task-form-process')?.value).toBe('EMBOSS');
+    expect(document.querySelector<HTMLInputElement>('#task-form-quantity')?.value).toBe('8');
+    expect(document.body.textContent).toContain('仍需交付 8 条');
+    expect(dispatchShortage).not.toHaveBeenCalled();
+
+    await set('task-form-process', 'SLICE');
+    expect(document.querySelector<HTMLInputElement>('#task-form-quantity')?.value).toBe('');
+    expect(document.body.textContent).toContain('请按本工序实际产出填写（片）');
+    await set('task-form-process', 'EMBOSS');
+
+    const confirm = [...document.querySelectorAll('button')].find((b) => b.textContent === '确认下发')!;
+    confirm.click();
+    confirm.click();
+    await flush();
+    expect(dispatchShortage).toHaveBeenCalledExactlyOnceWith({
+      itemId: 2, orderId: 30, requestKey: 'same-shortage-key',
+      task: expect.objectContaining({ assignmentId: 'PO-ITEM:2', contractCode: 'GD-01', process: 'EMBOSS', quantity: 8 }),
+    });
+    expect(released).not.toHaveBeenCalled();
+
+    await clickButton('确认下发');
+    expect(dispatchShortage.mock.calls[1]?.[0]).toEqual(dispatchShortage.mock.calls[0]?.[0]);
+    expect(released).toHaveBeenCalledExactlyOnceWith(9);
+    expect(idempotencyKey).toHaveBeenCalledOnce();
+  });
+
+  it('shows an explanatory state when the order line no longer has a shortage', async () => {
+    formOptions.mockResolvedValue(shortageOptions(0));
+    await mountShortage();
+
+    expect(document.body.textContent).toContain('这条明细已无可派工的欠量');
+    expect(document.querySelector('#task-form-product')).toBeNull();
+    expect(dispatchShortage).not.toHaveBeenCalled();
+  });
+
   it('opens batch mixing from the single-task form with current order and date without saving one task', async () => {
     const submit = await mount(); await set('task-form-process', 'MIX');
     await set('task-form-order', 'GD-01'); await set('task-form-date', '2026-11-11');

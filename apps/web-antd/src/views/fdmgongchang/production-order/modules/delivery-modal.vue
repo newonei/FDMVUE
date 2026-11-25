@@ -20,7 +20,12 @@ import { num } from '../shared';
  * 订单按产品单位，库存按工序产出单位，交货按 1:1 计。
  * 采购单生成的单（purchase）默认入本厂仓库，采购单到货随之更新；之后由仓库销售出库或其它出库。
  */
-const props = defineProps<{ factoryId?: number; item?: Api.Item; purchase?: boolean }>();
+const props = defineProps<{
+  factoryId?: number;
+  item?: Api.Item;
+  preset?: { quantity: number; stockId: number };
+  purchase?: boolean;
+}>();
 const emit = defineEmits<{ saved: [text: string] }>();
 const open = defineModel<boolean>('open', { required: true });
 
@@ -48,8 +53,10 @@ const unitDiffers = computed(
   () => !!props.item?.deliveryUnit && !!props.item?.unit && props.item.deliveryUnit !== props.item.unit,
 );
 
-async function loadStock() {
+let loadVersion = 0;
+async function loadStock(preset?: typeof props.preset) {
   if (!props.item?.deliveryStage) return;
+  const version = ++loadVersion;
   loading.value = true;
   try {
     const page = await getStockPage({
@@ -58,29 +65,37 @@ async function loadStock() {
       pageSize: 50,
       showZero: false,
       stage: props.item.deliveryStage,
+      stockId: preset?.stockId,
     });
+    if (version !== loadVersion || !open.value) return;
     const kept = filled.value;
+    if (preset && page.list.length === 0) error.value = '所选库存当前不可用，请核对库存后再办理。';
     rows.value = [
       ...kept,
       ...page.list
         .filter((s) => !kept.some((k) => k.stock.id === s.id))
-        .map((stock) => ({ quantity: null, stock })),
+        .map((stock) => ({
+          quantity: stock.id === preset?.stockId ? Math.min(preset.quantity, num(stock.quantity), remaining.value) : null,
+          stock,
+        })),
     ];
   } catch {
-    rows.value = filled.value;
+    if (version === loadVersion) rows.value = filled.value;
   } finally {
-    loading.value = false;
+    if (version === loadVersion) loading.value = false;
   }
 }
 
 let timer: ReturnType<typeof setTimeout> | undefined;
 watch(keyword, () => {
   clearTimeout(timer);
-  timer = setTimeout(loadStock, 300);
+  if (open.value && !props.preset) timer = setTimeout(() => { void loadStock(); }, 300);
 });
 onBeforeUnmount(() => clearTimeout(timer));
 
 watch(open, async (value) => {
+  ++loadVersion;
+  clearTimeout(timer);
   if (!value) return;
   keyword.value = '';
   rows.value = [];
@@ -88,7 +103,7 @@ watch(open, async (value) => {
   error.value = '';
   deliveredDate.value = factoryToday();
   await Promise.all([
-    loadStock(),
+    loadStock(props.preset),
     getDeliveryWarehouses()
       .then((list) => {
         warehouses.value = list;
@@ -190,8 +205,8 @@ async function submit() {
         </label>
       </div>
       <div class="flex items-center justify-between gap-2">
-        <span class="text-xs text-muted-foreground">在要交的库存行上填数量</span>
-        <Input id="delivery-keyword" v-model:value="keyword" allow-clear class="max-w-60" placeholder="搜编码或批次" size="small" />
+        <span class="text-xs text-muted-foreground">{{ preset ? '核对拆分预览选中的库存和本次办理数量' : '在要交的库存行上填数量' }}</span>
+        <Input v-if="!preset" id="delivery-keyword" v-model:value="keyword" allow-clear class="max-w-60" placeholder="搜编码或批次" size="small" />
       </div>
       <Spin :spinning="loading">
         <Empty v-if="rows.length === 0 && !loading" :description="`${item.deliveryStageLabel ?? ''}没有库存`" />

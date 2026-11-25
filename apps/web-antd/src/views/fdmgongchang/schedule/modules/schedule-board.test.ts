@@ -8,16 +8,18 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import ScheduleBoard from './schedule-board.vue';
 
 const api = vi.hoisted(() => ({
+  createManualSchedule: vi.fn(),
   getMixQueue: vi.fn().mockResolvedValue([]),
   getSchedule: vi.fn(),
   getSchedules: vi.fn(),
 }));
+const access = vi.hoisted(() => vi.fn(() => false));
 vi.mock('#/api/fdmgongchang/schedule', () => api);
 vi.mock('#/api/fdmgongchang/factory', () => ({
   getWorkerList: vi.fn().mockResolvedValue([]),
 }));
 vi.mock('@vben/access', () => ({
-  useAccess: () => ({ hasAccessByCodes: () => false }),
+  useAccess: () => ({ hasAccessByCodes: access }),
 }));
 vi.mock('ant-design-vue', () => ({
   Button: 'button', DatePicker: 'input', Empty: 'div', Input: 'input',
@@ -32,12 +34,16 @@ async function flush() {
   await nextTick();
 }
 
-describe('cached schedule board polling', () => {
+describe('schedule board', () => {
   let app: App | undefined;
+  let host: HTMLDivElement | undefined;
 
   afterEach(() => {
     app?.unmount();
     app = undefined;
+    host?.remove();
+    host = undefined;
+    access.mockReset().mockReturnValue(false);
     vi.useRealTimers();
     vi.clearAllMocks();
   });
@@ -83,5 +89,20 @@ describe('cached schedule board polling', () => {
     await nextTick();
     await vi.advanceTimersByTimeAsync(9000);
     expect(api.getSchedule).toHaveBeenCalledTimes(4);
+  });
+
+  it('focuses manual planning from a shortage without creating a draft', async () => {
+    access.mockReturnValue(true);
+    api.getSchedules.mockResolvedValue([]);
+    host = document.createElement('div');
+    document.body.append(host);
+    app = createApp(ScheduleBoard, { factoryId: 1, focusManualPlanning: true });
+    app.mount(host);
+    await flush();
+
+    const button = host.querySelector<HTMLButtonElement>('#factory-manual-planning');
+    expect(button?.closest('details')?.open).toBe(true);
+    expect(document.activeElement).toBe(button);
+    expect(api.createManualSchedule).not.toHaveBeenCalled();
   });
 });

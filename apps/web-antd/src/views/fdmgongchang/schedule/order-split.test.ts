@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import OrderSplitModal from './modules/order-split-modal.vue';
 
-const api = vi.hoisted(() => ({ orders: vi.fn(), get: vi.fn(), canEdit: true, preview: vi.fn(), release: vi.fn() }));
+const api = vi.hoisted(() => ({ advice: vi.fn(), adviceResult: vi.fn(), orders: vi.fn(), get: vi.fn(), canEdit: true, preview: vi.fn(), release: vi.fn() }));
 vi.mock('#/api/fdmgongchang/production-order', () => ({
   getOpenProductionOrders: api.orders,
   getProductionOrder: api.get,
@@ -21,7 +21,12 @@ vi.mock('../production-order/modules/item-production-config-modal.vue', () => ({
     setup: (props, { emit }) => () => props.open ? h('button', { id: 'save-config-test', onClick: () => { emit('update:open', false); emit('saved'); } }, `保存生产参数 ${props.orderId}/${props.itemId}`) : null,
   }),
 }));
-vi.mock('#/api/fdmgongchang/schedule', () => ({ previewOrderSplit: api.preview, releaseOrderSplit: api.release }));
+vi.mock('#/api/fdmgongchang/schedule', () => ({
+  getOrderSplitAdviceResult: api.adviceResult,
+  previewOrderSplit: api.preview,
+  releaseOrderSplit: api.release,
+  requestOrderSplitAdvice: api.advice,
+}));
 
 const orders: OrderApi.Order[] = [
   {
@@ -55,6 +60,33 @@ function preview(overrides: Partial<SplitApi.Preview> = {}): SplitApi.Preview {
         output: { stage: 'PACKED', name: '已包装成品', quantity: 100, unit: '件' } })], ...overrides };
 }
 
+const upstreamStock: SplitApi.StockCandidate = {
+  itemId: 101, stockId: 81, stage: 'PUNCHED', stageLabel: '已冲裁半成品', itemCode: 'CC-A', batchNo: 'CC-01', location: '半成品仓',
+  available: 9, unit: '件', deliverable: false, startProcess: 'PACK', startProcessLabel: '包装',
+};
+const finishedStock: SplitApi.StockCandidate = {
+  itemId: 101, stockId: 82, stage: 'PACKED', stageLabel: '已包装成品', itemCode: 'BZ-A', batchNo: 'BZ-A', location: '成品仓',
+  available: 5, unit: '件', deliverable: true, aggregated: true,
+};
+const blueStock: SplitApi.StockCandidate = {
+  itemId: 102, stockId: 83, stage: 'SHEET', stageLabel: '已开片板材', itemCode: 'KP-B', batchNo: 'KP-03', location: '片材区',
+  available: 8, unit: '片', deliverable: false, startProcess: 'CUT', startProcessLabel: '立切',
+};
+const adviceCandidates = [upstreamStock, finishedStock, blueStock];
+
+function adviceResult(overrides: Partial<SplitApi.StockAdvice> = {}): SplitApi.StockAdvice {
+  return {
+    requestId: 'advice-1', source: 'RULE', status: 'PENDING',
+    items: [
+      { itemId: 101, orderId: 11, orderNo: 'GD-11', remaining: 100, remainingAfterReceipt: 98, covered: 0, remainingFromStart: 98,
+        receiptSuggested: 2, unit: '条', recommendations: [{ ...finishedStock, action: 'DELIVER', quantity: 2 }] },
+      { itemId: 102, orderId: 11, orderNo: 'GD-11', remaining: 80, covered: 3, remainingFromStart: 77,
+        receiptSuggested: 0, unit: '条', recommendations: [{ ...blueStock, action: 'USE', quantity: 3 }] },
+    ],
+    ...overrides,
+  };
+}
+
 async function flush() {
   for (let i = 0; i < 10; i++) { await Promise.resolve(); await nextTick(); }
 }
@@ -73,14 +105,19 @@ async function input(selector: string, value: string) {
 describe('order selection → process preview → release', () => {
   let unmount: (() => void) | undefined;
   let setOpen: (value: boolean) => void;
+  let recordDelivery: (stock: { itemId: number; revision: number; stockId: number }) => void;
   const released = vi.fn();
+  const manualDelivery = vi.fn();
   async function mount(preset: OrderApi.Order[] = orders) {
     const isOpen = ref(false);
+    const deliveredStock = ref<{ itemId: number; revision: number; stockId: number }>();
     setOpen = (value) => { isOpen.value = value; };
+    recordDelivery = (stock) => { deliveredStock.value = stock; };
     const host = document.createElement('div');
     document.body.append(host);
     const app = createApp(defineComponent({ setup: () => () => h(OrderSplitModal, {
-      open: isOpen.value, orders: preset, 'onUpdate:open': (value: boolean) => { isOpen.value = value; }, onReleased: released,
+      deliveredStock: deliveredStock.value, open: isOpen.value, orders: preset,
+      'onUpdate:open': (value: boolean) => { isOpen.value = value; }, onManualDelivery: manualDelivery, onReleased: released,
     }) }));
     app.mount(host);
     unmount = () => app.unmount();
@@ -246,11 +283,232 @@ describe('order selection → process preview → release', () => {
     button('确认下发 3 个任务').click(); await flush();
     const first = api.release.mock.calls[0]![0];
     api.preview.mockResolvedValue(preview({ previewKey: 'preview-current' }));
-    button('重新预览').click(); await flush();
+    expect(button('确认下发 3 个任务').disabled).toBe(true);
+    button('重新计算').click(); await flush();
     button('确认下发 3 个任务').click(); await flush();
     const second = api.release.mock.calls[1]![0];
     expect(second.previewKey).toBe('preview-current');
     expect(second.requestId).not.toBe(first.requestId);
+  });
+
+  it('starts with no batches selected and only confirms the quantities in the newest reviewed calculation', async () => {
+    const sheetStock: SplitApi.StockCandidate = { ...upstreamStock, stockId: 83, stage: 'SHEET', stageLabel: '已开片板材',
+      itemCode: 'KP-A', batchNo: 'KP-01', side: 'FRONT', perUnit: 8, unit: '片', startProcess: 'PUNCH', startProcessLabel: '冲裁' };
+    api.preview.mockResolvedValue(preview({ stockCandidates: [upstreamStock, finishedStock, sheetStock], stockPlan: [],
+      stockCoverage: [{ itemId: 101, covered: 0, remainingFromStart: 100 }] }));
+    await mount();
+    button('预览工序任务').click(); await flush();
+
+    const checkbox = (stockId: number) => document.querySelector<HTMLInputElement>(`[data-stock-key="101-${stockId}"] input[type="checkbox"]`)!;
+    expect(checkbox(81).checked).toBe(false);
+    expect(checkbox(82).checked).toBe(false);
+    expect(checkbox(83).checked).toBe(false);
+    expect(document.body.textContent).toContain('需从头做 100 条');
+    expect(document.querySelector('[data-stock-key="101-82"]')?.textContent).toContain('按仓库汇总');
+    expect(document.querySelector('[data-stock-key="101-83"]')?.textContent).toContain('面别 正面层');
+    expect(document.querySelector('[data-stock-key="101-83"]')?.textContent).toContain('参考：每片折算 8 片正面层');
+
+    checkbox(81).click(); await flush();
+    await input('[data-stock-key="101-81"] input[role="spinbutton"]', '4');
+    expect(api.preview).toHaveBeenCalledOnce();
+    expect(button('确认下发 3 个任务').disabled).toBe(true);
+    expect(api.release).not.toHaveBeenCalled();
+
+    api.preview.mockResolvedValue(preview({ previewKey: 'with-stock', stockCandidates: [upstreamStock, finishedStock],
+      stockPlan: [{ ...upstreamStock, quantity: 3, covers: 3 }],
+      stockCoverage: [{ itemId: 101, covered: 3, remainingFromStart: 97 }] }));
+    button('重新计算').click(); await flush();
+    const choices = [{ itemId: 101, quantity: 4, stockId: 81 }];
+    expect(api.preview).toHaveBeenLastCalledWith([11, 12], choices);
+    expect(checkbox(81).checked).toBe(true);
+    expect(checkbox(82).checked).toBe(false);
+    expect(document.body.textContent).toContain('可覆盖 3 条');
+    expect(document.body.textContent).toContain('需从头做 97 条');
+    expect(document.body.textContent).toContain('计划领用 3 件');
+    expect(document.body.textContent).toContain('从包装接做');
+    button('确认下发 3 个任务').click(); await flush();
+    expect(api.release).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ previewKey: 'with-stock', stockSelections: choices }));
+  });
+
+  it('keeps chosen finished stock out of the plan and refreshes after its manual receipt', async () => {
+    api.preview.mockResolvedValue(preview({ stockCandidates: [upstreamStock, finishedStock], stockPlan: [],
+      stockCoverage: [{ itemId: 101, covered: 0, remainingFromStart: 100 }] }));
+    api.advice.mockResolvedValueOnce(adviceResult({ status: 'READY' }));
+    await mount([{ ...orders[0]!, sourceType: 'PURCHASE_ORDER' }]);
+    button('预览工序任务').click(); await flush();
+    button('生成 AI 建议').click(); await flush();
+    for (const stockId of [81, 82]) {
+      document.querySelector<HTMLInputElement>(`[data-stock-key="101-${stockId}"] input[type="checkbox"]`)!.click();
+      await flush();
+      await input(`[data-stock-key="101-${stockId}"] input[role="spinbutton"]`, '2');
+    }
+    expect(document.body.textContent).toContain('已勾选末道现货');
+    expect(button('确认下发 3 个任务').disabled).toBe(true);
+    button('先生产入库').click(); await flush();
+    expect(manualDelivery).toHaveBeenCalledExactlyOnceWith({ itemId: 101, orderId: 11, quantity: 2, stockId: 82 });
+    expect(document.querySelector('#split-stock-heading')).toBeTruthy();
+    expect(document.querySelector('[data-stock-advice-item="101"]')).toBeTruthy();
+    expect(api.release).not.toHaveBeenCalled();
+
+    api.preview.mockResolvedValue(preview({ previewKey: 'after-inbound', stockCandidates: [upstreamStock],
+      stockPlan: [{ ...upstreamStock, quantity: 2, covers: 2 }],
+      stockCoverage: [{ itemId: 101, covered: 2, remainingFromStart: 96 }] }));
+    recordDelivery({ itemId: 101, revision: 1, stockId: 82 }); await flush();
+    expect(api.get).toHaveBeenCalledWith(11);
+    expect(api.preview).toHaveBeenLastCalledWith([11], [{ itemId: 101, quantity: 2, stockId: 81 }]);
+    expect(document.querySelector<HTMLInputElement>('[data-stock-key="101-81"] input[type="checkbox"]')?.checked).toBe(true);
+    expect(document.querySelector('[data-stock-key="101-82"]')).toBeNull();
+    expect(document.querySelector('[data-stock-advice-item]')).toBeNull();
+    expect(document.body.textContent).toContain('现货已登记');
+    expect(document.body.textContent).toContain('需从头做 96 条');
+    expect(api.release).not.toHaveBeenCalled();
+  });
+
+  it('shows read-only rule facts while AI runs and leaves selection and release independent', async () => {
+    api.preview.mockResolvedValue(preview({ stockCandidates: adviceCandidates }));
+    api.advice.mockResolvedValueOnce(adviceResult());
+    const interpretation = adviceResult({ source: 'AI', status: 'READY' });
+    interpretation.items[1]!.summary = '片材规格匹配，从立切接做。';
+    api.adviceResult.mockResolvedValueOnce(interpretation);
+    await mount([{ ...orders[0]!, sourceType: 'PURCHASE_ORDER' }]);
+    button('预览工序任务').click(); await flush();
+    expect(api.advice).not.toHaveBeenCalled();
+
+    button('生成 AI 建议').click(); await flush();
+    expect(api.advice).toHaveBeenCalledExactlyOnceWith({ productionOrderIds: [11], previewKey: 'preview-1' }, expect.any(AbortSignal));
+    expect(document.body.textContent).toContain('系统核算建议');
+    expect(document.body.textContent).toContain('建议先生产入库 2 条');
+    expect(document.body.textContent).toContain('预计入库后仍待入库 98 条');
+    expect(document.body.textContent).toContain('按建议办理入库或交货后预计还需从头做 98 条');
+    expect(document.body.textContent).toContain('半成品预计覆盖 3 条');
+    expect(button('确认下发 3 个任务').disabled).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(1500); await flush();
+    expect(api.adviceResult).toHaveBeenCalledExactlyOnceWith('advice-1', expect.any(AbortSignal));
+    expect(document.body.textContent).toContain('AI 解读 · 库存与数量由系统核算');
+    expect(document.body.textContent).toContain('片材规格匹配，从立切接做。');
+    expect(document.body.textContent).not.toContain('填入建议量');
+    expect([...document.querySelectorAll<HTMLInputElement>('[data-stock-key] input[type="checkbox"]')].every((field) => !field.checked)).toBe(true);
+    expect([...document.querySelectorAll<HTMLInputElement>('[data-stock-key] input[role="spinbutton"]')].every((field) => !field.value)).toBe(true);
+    expect(api.preview).toHaveBeenCalledOnce();
+    expect(api.release).not.toHaveBeenCalled();
+    expect(manualDelivery).not.toHaveBeenCalled();
+  });
+
+  it('fills a suggested quantity only after an explicit click on an already selected candidate', async () => {
+    api.preview.mockResolvedValue(preview({ stockCandidates: adviceCandidates }));
+    api.advice.mockResolvedValueOnce(adviceResult({ status: 'READY' }));
+    await mount();
+    button('预览工序任务').click(); await flush();
+    const checkbox = document.querySelector<HTMLInputElement>('[data-stock-key="102-83"] input[type="checkbox"]')!;
+    const qty = '[data-stock-key="102-83"] input[role="spinbutton"]';
+    checkbox.click(); await flush();
+    await input(qty, '4');
+    button('重新计算').click(); await flush();
+    button('生成 AI 建议').click(); await flush();
+
+    expect(api.advice).toHaveBeenCalledExactlyOnceWith({ productionOrderIds: [11, 12], previewKey: 'preview-1', stockSelections: [{ itemId: 102, stockId: 83, quantity: 4 }] }, expect.any(AbortSignal));
+    expect(document.querySelector<HTMLInputElement>(qty)?.value).toBe('4');
+    expect([...document.querySelectorAll('button')].filter((field) => field.textContent === '填入建议量')).toHaveLength(1);
+    button('填入建议量').click(); await flush();
+    expect(checkbox.checked).toBe(true);
+    expect(document.querySelector<HTMLInputElement>(qty)?.value).toBe('3');
+    expect(document.querySelector('[data-stock-advice-item="102"]')).toBeTruthy();
+    expect(document.body.textContent).toContain('以下建议基于上次预览');
+    expect(button('确认下发 3 个任务').disabled).toBe(true);
+    expect(api.preview).toHaveBeenCalledTimes(2);
+    expect(api.release).not.toHaveBeenCalled();
+  });
+
+  it('keeps advice as reference while multiple batches are checked until recalculation', async () => {
+    api.preview.mockResolvedValue(preview({ stockCandidates: adviceCandidates }));
+    api.advice.mockResolvedValueOnce(adviceResult({ status: 'READY' }));
+    await mount();
+    button('预览工序任务').click(); await flush();
+    button('生成 AI 建议').click(); await flush();
+    const stockField = (key: string) => document.querySelector<HTMLInputElement>(`[data-stock-key="${key}"] input[type="checkbox"]`)!;
+    const qty = '[data-stock-key="102-83"] input[role="spinbutton"]';
+    expect(document.body.textContent).not.toContain('填入建议量');
+
+    stockField('102-83').click(); await flush();
+    expect(document.querySelector<HTMLInputElement>(qty)?.value).toBe('');
+    expect(document.body.textContent).toContain('以下建议基于上次预览');
+    button('填入建议量').click(); await flush();
+    expect(document.querySelector<HTMLInputElement>(qty)?.value).toBe('3');
+    stockField('101-81').click(); await flush();
+    await input('[data-stock-key="101-81"] input[role="spinbutton"]', '2');
+    expect(document.querySelectorAll('[data-stock-advice-item]')).toHaveLength(2);
+    expect(button('确认下发 3 个任务').disabled).toBe(true);
+    expect(api.preview).toHaveBeenCalledOnce();
+    expect(api.advice).toHaveBeenCalledOnce();
+
+    button('重新计算').click(); await flush();
+    expect(document.querySelector('[data-stock-advice-item]')).toBeNull();
+    expect(document.body.textContent).not.toContain('以下建议基于上次预览');
+    expect(stockField('102-83').checked).toBe(true);
+    expect(stockField('101-81').checked).toBe(true);
+  });
+
+  it('cancels a pending advice response after stock changes and ignores the late result', async () => {
+    api.preview.mockResolvedValue(preview({ stockCandidates: adviceCandidates }));
+    api.advice.mockResolvedValueOnce(adviceResult());
+    let finish!: (result: SplitApi.StockAdvice) => void;
+    api.adviceResult.mockImplementationOnce(() => new Promise<SplitApi.StockAdvice>((resolve) => { finish = resolve; }));
+    await mount();
+    button('预览工序任务').click(); await flush();
+    button('生成 AI 建议').click(); await flush();
+    await vi.advanceTimersByTimeAsync(1500);
+    const signal = api.advice.mock.calls[0]![1] as AbortSignal;
+
+    document.querySelector<HTMLInputElement>('[data-stock-key="101-81"] input[type="checkbox"]')!.click(); await flush();
+    expect(signal.aborted).toBe(true);
+    finish(adviceResult({ source: 'AI', status: 'READY' }));
+    await vi.advanceTimersByTimeAsync(10_000); await flush();
+    expect(document.querySelector('[data-stock-advice-item="101"]')).toBeTruthy();
+    expect(document.body.textContent).toContain('以下建议基于上次预览');
+    expect(document.body.textContent).toContain('系统核算建议');
+    expect(document.body.textContent).not.toContain('AI 解读');
+    expect(api.adviceResult).toHaveBeenCalledOnce();
+    expect(api.release).not.toHaveBeenCalled();
+  });
+
+  it('keeps the rule advice and normal release available if AI times out', async () => {
+    api.preview.mockResolvedValue(preview({ stockCandidates: adviceCandidates }));
+    api.advice.mockResolvedValueOnce(adviceResult());
+    api.adviceResult.mockImplementationOnce(() => new Promise(() => {}));
+    await mount();
+    button('预览工序任务').click(); await flush();
+    button('生成 AI 建议').click(); await flush();
+    await vi.advanceTimersByTimeAsync(40_000); await flush();
+
+    expect(document.querySelector('[data-stock-advice-item="101"]')).toBeTruthy();
+    expect(document.body.textContent).toContain('AI 暂未返回，已保留系统核算建议');
+    expect(document.body.textContent).not.toContain('AI 正在生成建议');
+    expect(button('确认下发 3 个任务').disabled).toBe(false);
+    expect(api.release).not.toHaveBeenCalled();
+  });
+
+  it('keeps finished receipt visible for blocked products and discards explicitly stale advice', async () => {
+    api.preview.mockResolvedValue(preview({ stockCandidates: adviceCandidates }));
+    const pending = adviceResult();
+    pending.items[0]!.planningBlocked = true;
+    api.advice.mockResolvedValueOnce(pending);
+    api.adviceResult.mockResolvedValueOnce(adviceResult({ items: [], notice: '库存已变化，请重新预览。', status: 'STALE' }));
+    await mount([{ ...orders[0]!, sourceType: 'PURCHASE_ORDER' }]);
+    button('预览工序任务').click(); await flush();
+    button('生成 AI 建议').click(); await flush();
+
+    const item = document.querySelector('[data-stock-advice-item="101"]')?.textContent;
+    expect(item).toContain('暂不可拆分');
+    expect(item).toContain('预计还需从头做 —');
+    expect(item).toContain('建议先生产入库 2 条');
+    expect(item).toContain('预计入库后仍待入库 98 条');
+
+    await vi.advanceTimersByTimeAsync(1500); await flush();
+    expect(document.querySelector('[data-stock-advice-item]')).toBeNull();
+    expect(document.body.textContent).toContain('库存已变化，请重新预览。');
+    expect(button('确认下发 3 个任务').disabled).toBe(false);
+    expect(api.release).not.toHaveBeenCalled();
   });
 
   it('loads orders when opened without a preset and searches every product code before selecting', async () => {

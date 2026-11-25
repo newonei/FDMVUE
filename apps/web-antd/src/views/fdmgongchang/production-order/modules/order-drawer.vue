@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Dayjs } from 'dayjs';
 
+import type { ShortageDispatchSeed } from '../../shared/schedule';
 import type { RouteDraft } from '../shared';
 import type { RoutePurchaseReference } from './route-purchase-reference';
 
@@ -33,9 +34,11 @@ import { colorModeText, parameterText, textureText, thicknessText } from '../man
 import { dateText, num, ORDER_STATUS, routeProblem, specText, timeText } from '../shared';
 import AuxPanel from './aux-panel.vue';
 import DeliveryModal from './delivery-modal.vue';
+import FulfillmentGuide from './fulfillment-guide.vue';
 import { productionConfigDraft, productionRouteProblems, savedProductionConfigProblems } from './item-production-config';
 import ItemProductionConfigModal from './item-production-config-modal.vue';
 import MaterialPlan from './material-plan.vue';
+import OrderStockTrace from './order-stock-trace.vue';
 import PurchaseSheet from './purchase-sheet.vue';
 import RoutePicker from './route-picker.vue';
 import RouteProductReference from './route-product-reference.vue';
@@ -52,14 +55,26 @@ import SupplyMatch from './supply-match.vue';
  * 生产要求读采购单下单资料，数量跟着采购单走（接单后有变更要工厂确认）；做好的货开「生产入库」单进本厂仓库，
  * 采购单到货随之更新，之后由仓库销售出库或其它出库（库存中心）。
  */
-const props = defineProps<{ mode: 'factory' | 'mine'; orderId?: number; statusHint?: Api.Order['status'] }>();
-const emit = defineEmits<{ changed: []; copy: [order: Api.Order] }>();
+const props = defineProps<{
+  focusFulfillment?: boolean;
+  mode: 'factory' | 'mine';
+  orderId?: number;
+  statusHint?: Api.Order['status'];
+}>();
+const emit = defineEmits<{
+  changed: [];
+  copy: [order: Api.Order];
+  dispatchShortage: [seed: ShortageDispatchSeed];
+  planShortage: [];
+  viewTasks: [orderNo: string];
+}>();
 const open = defineModel<boolean>('open', { required: true });
 const { hasAccessByCodes } = useAccess();
 const canHandleOrder = computed(() => hasAccessByCodes(['fdmgongchang:production-order:handle']));
 const canViewProductArchive = computed(() => hasAccessByCodes(['fdmplatform:products:query']));
 
 const order = ref<Api.Order>();
+const fulfillmentGuide = ref<InstanceType<typeof FulfillmentGuide>>();
 const loading = ref(false);
 const loadError = ref(false);
 let loadVersion = 0;
@@ -112,6 +127,7 @@ const canHandle = computed(() => props.mode === 'factory' && canHandleOrder.valu
 const canProgress = computed(() => props.mode === 'factory' && canHandleOrder.value && order.value?.status === 'ACCEPTED');
 const canSupplementRoute = computed(() => props.mode === 'factory' && order.value?.status === 'ACCEPTED'
   && hasAccessByCodes(['fdmgongchang:schedule:confirm']));
+const canViewTasks = computed(() => hasAccessByCodes(['fdmgongchang:schedule:query']));
 /** 工厂看用料逆推：接单前就能看要多少板材和原料，生产中可以换配方、板材规格。 */
 /** 多个产品待定工艺时才显示批量设置。 */
 const canBatchRoute = computed(() => factoryRoute.value && canHandle.value && activeItems.value.length > 1);
@@ -140,6 +156,10 @@ const allDone = computed(() =>
   (order.value?.items ?? []).every((i) => num(i.completedQuantity) >= num(i.quantity)),
 );
 const deliveries = computed(() => order.value?.deliveries ?? []);
+
+watch([open, () => props.focusFulfillment, fulfillmentGuide], ([isOpen, focus, guide]) => {
+  if (isOpen && focus) guide?.focus();
+}, { flush: 'post' });
 
 function selectAcceptView(view: typeof acceptView.value) {
   if (view === acceptView.value) return;
@@ -459,6 +479,33 @@ function producedQty(item: Api.Item) {
         <p v-else-if="fromPurchase && order.sourceChangeNote && order.status === 'SUBMITTED'" class="m-0 text-xs text-warning">
           {{ order.sourceChangeNote }}
         </p>
+        <FulfillmentGuide
+          v-if="mode === 'factory' && order.status === 'ACCEPTED'"
+          ref="fulfillmentGuide"
+          :can-deliver="canProgress"
+          :can-plan-shortage="canViewTasks && canSupplementRoute"
+          :can-view-tasks="canViewTasks"
+          :items="order.items"
+          :order-id="order.id"
+          :order-no="order.orderNo"
+          :purchase="fromPurchase"
+          @configure="editProductionConfig"
+          @deliver="openDelivery"
+          @dispatch-shortage="emit('dispatchShortage', $event)"
+          @plan-shortage="emit('planShortage')"
+          @view-tasks="emit('viewTasks', order.orderNo)"
+        >
+          <template v-if="canProgress && allDone" #completed-action>
+            <Popconfirm title="结束这张单？结束后不能再交货" ok-text="结束" @confirm="finish">
+              <Button :loading="busy" type="primary">结束这张单</Button>
+            </Popconfirm>
+          </template>
+        </FulfillmentGuide>
+        <OrderStockTrace
+          v-if="mode === 'factory' && canHandleOrder && ['ACCEPTED', 'COMPLETED'].includes(order.status)"
+          :items="order.items"
+          :order-id="order.id"
+        />
         <section v-if="fromPurchase" aria-labelledby="po-purchase-source" class="rounded-lg border border-border bg-muted/30 px-4 py-3">
           <h3 id="po-purchase-source" class="m-0 text-xs font-medium text-muted-foreground">采购来源</h3>
           <dl class="mb-0 mt-2 grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -729,13 +776,13 @@ function producedQty(item: Api.Item) {
           </div>
         </section>
 
-        <section v-if="canProgress" class="flex flex-wrap items-center justify-between gap-3 rounded-md bg-muted/40 p-3">
+        <section v-if="canProgress && !allDone" class="flex flex-wrap items-center justify-between gap-3 rounded-md bg-muted/40 p-3">
           <span class="text-xs text-muted-foreground">
             <template v-if="fromPurchase">采购单做完或不再做时结束这张单；已入库的货照常由仓库出库。</template>
-            <template v-else>{{ allDone ? '已全部交货，可以结束这张单。' : '还没交够也可以结束，比如下单人同意少做。' }}</template>
+            <template v-else>下单人同意少做时，可以结束这张单。</template>
           </span>
           <Popconfirm title="结束这张单？结束后不能再交货" ok-text="结束" @confirm="finish">
-            <Button :loading="busy" :type="allDone ? 'primary' : 'default'">结束这张单</Button>
+            <Button :loading="busy">结束这张单</Button>
           </Popconfirm>
         </section>
 

@@ -33,7 +33,7 @@ import ScheduleDetail from './schedule-detail.vue';
  * 排单员调整或带意见重新生成，确认后下发成任务。AI 只出方案，不动库存和单据。也可以不用 AI 手动派工。
  * 当前工厂由外层页面选好（接口自动带 factory-id），切换工厂时重新加载；focusId 指定要打开的那一份。
  */
-const props = defineProps<{ factoryId: number; focusId?: number }>();
+const props = defineProps<{ factoryId: number; focusId?: number; focusManualPlanning?: boolean }>();
 
 const { hasAccessByCodes } = useAccess();
 const canGenerate = computed(() => hasAccessByCodes(['fdmgongchang:schedule:generate']));
@@ -48,6 +48,7 @@ const workers = ref<FdmgongchangFactoryApi.Worker[]>([]);
 const generating = ref(false);
 const creatingManual = ref(false);
 const form = ref({ days: 3, note: '', startDate: factoryToday() as Dayjs });
+const planningPanel = ref<HTMLDetailsElement>();
 
 let pollTimer: ReturnType<typeof setTimeout> | undefined;
 let active = true;
@@ -120,6 +121,11 @@ watch(
     select(id);
   },
 );
+watch([() => props.focusManualPlanning, planningPanel], ([focus, panel]) => {
+  if (!focus || !panel) return;
+  panel.open = true;
+  panel.querySelector<HTMLButtonElement>('#factory-manual-planning')?.focus();
+}, { flush: 'post' });
 
 function select(id: number) {
   selectedId.value = id;
@@ -222,7 +228,7 @@ const dayOptions = [1, 2, 3, 4, 5, 6, 7].map((d) => ({ label: `${d} 天`, value:
   <div v-else class="flex flex-col gap-4 xl:flex-row xl:items-start">
     <aside class="flex flex-col gap-3 xl:w-72 xl:shrink-0">
       <p class="m-0 text-xs text-muted-foreground">正常订单请在「本厂收到的单」选择订单并拆分工序任务。这里保留辅助排单工具与历史方案。</p>
-      <details v-if="canGenerate || canConfirm" class="rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground">
+      <details v-if="canGenerate || canConfirm" ref="planningPanel" class="rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground">
         <summary class="cursor-pointer text-sm font-semibold text-foreground">辅助排单（AI / 手动 / 旧流程）</summary>
         <div class="mt-3 flex flex-col gap-2">
         <label for="schedule-start" class="flex flex-col gap-1">
@@ -253,7 +259,7 @@ const dayOptions = [1, 2, 3, 4, 5, 6, 7].map((d) => ({ label: `${d} 天`, value:
         <p class="m-0">旧流程按库存净需求计算任务，不保证完整列出订单工艺。需要按订单逐工序下发时，请使用「拆分工序任务」。</p>
         <Button v-if="canGenerate" :loading="generating" block @click="generate()">AI 生成排单</Button>
         <p v-if="canGenerate" class="m-0">AI 只排发泡的先后（同配方、同板材、同颜色合成一个任务）；确认下发时，开片以后由系统按工序生成任务包。</p>
-        <Button v-if="canConfirm" :loading="creatingManual" block @click="createManual">手动派工（不用 AI）</Button>
+        <Button v-if="canConfirm" id="factory-manual-planning" :loading="creatingManual" block @click="createManual">手动派工（不用 AI）</Button>
         <Button v-if="canConfirm" block @click="batchMixOpen = true">批量安排发泡</Button>
         </div>
       </details>

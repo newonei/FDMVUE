@@ -56,7 +56,9 @@ import {
   customerMissingFields,
   customerRegion,
   customerSourceLabel,
+  customerSourceOptions,
   customerTiers,
+  foreignCustomerSourceOptions,
   moneyShort,
   receivableHint,
   signedAgo,
@@ -217,12 +219,12 @@ const scrollX = computed(
 const countryOptions = computed(() =>
   countrySelectOptions(options.value?.countries ?? []),
 );
-const sourceOptions = computed(() =>
-  (options.value?.customerSources ?? []).map((value) => ({
-    label: value,
-    value,
-  })),
-);
+const sourceOptions = computed(() => {
+  const values = options.value?.customerSources ?? [];
+  return domestic.value
+    ? customerSourceOptions(values)
+    : foreignCustomerSourceOptions(values);
+});
 
 function query() {
   return {
@@ -525,9 +527,11 @@ onBeforeUnmount(() => {
             <Select
               v-model:value="customerSource"
               :options="sourceOptions"
+              :show-search="!domestic"
+              option-filter-prop="label"
               placeholder="客户来源"
               allow-clear
-              style="width: 130px"
+              :style="{ width: domestic ? '130px' : '210px', maxWidth: '100%' }"
               @change="load(true)"
             />
             <Select

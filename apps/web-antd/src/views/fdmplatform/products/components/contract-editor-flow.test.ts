@@ -252,6 +252,7 @@ vi.mock('ant-design-vue', () => {
       props: { message: { type: String, default: '' } },
       setup: (props) => () => h('div', {}, props.message),
     }),
+    AutoComplete: input,
     Button: defineComponent({
       props: { disabled: Boolean, loading: Boolean },
       setup: (props, ctx) => () =>
