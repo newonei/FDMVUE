@@ -1,4 +1,5 @@
 import type {
+  PurchaseReturn,
   StockIn,
   StockInKind,
   StockOut,
@@ -7,8 +8,7 @@ import type {
 import BigNumber from 'bignumber.js';
 
 /**
- * 入库单 / 出库单按单据展示（金智同款）：主题「【单据类型】对应单据 对方」、单据类型、对应单据、状态、合计。
- * 后端没有存主题，按单据内容拼出来。
+ * 仓库单据主题由单据类型、往来方或产品名称组成。
  */
 
 const decimal = (value: unknown) =>
@@ -43,12 +43,15 @@ export function inKindLabel(row: Pick<StockIn, 'kind'>) {
   return IN_KIND_LABELS[inKind(row)];
 }
 
-/** 工厂报工、领料、退料、作废自动生成的单据：主题写工厂和工序单号。 */
-function factorySubject(
-  head: string,
-  row: Pick<StockIn, 'factoryName' | 'sourceNo'>,
+function stockSubject(
+  kind: string,
+  description: Array<string | undefined>,
+  lines: Array<{ productName?: string }>,
 ) {
-  return `${head}${[row.sourceNo, row.factoryName].filter(Boolean).join(' ')}`;
+  const title =
+    description.filter(Boolean).join(' · ') ||
+    lines.find((line) => line.productName)?.productName;
+  return title ? `【${kind}】${title}` : kind;
 }
 
 /** 供应商 / 工厂 / 来源 */
@@ -58,16 +61,8 @@ export function inPartner(row: StockIn) {
   return row.supplierName || row.factoryName || '';
 }
 
-/** 对应单据：采购单号；工厂交货是内部订单号；工厂生产单据是工序单号。 */
-export function inRelated(row: StockIn) {
-  return row.orderCode || row.sourceNo || '';
-}
-
 export function inSubject(row: StockIn) {
-  const head = `【${inKindLabel(row)}】`;
-  if (row.factoryDoc) return factorySubject(head, row);
-  if (row.kind === 'OTHER') return `${head}${row.source ?? ''}`;
-  return `${head}${[inRelated(row), inPartner(row)].filter(Boolean).join(' ')}`;
+  return stockSubject(inKindLabel(row), [inPartner(row)], row.lines);
 }
 
 export function outPartner(row: StockOut) {
@@ -77,16 +72,16 @@ export function outPartner(row: StockOut) {
     : (row.customerName ?? '');
 }
 
-/** 对应单据：合同号；直发另带入库单号；工厂生产单据是工序单号。 */
-export function outRelated(row: StockOut) {
-  return row.contractCode || row.sourceNo || '';
+export function outSubject(row: StockOut) {
+  return stockSubject(
+    OUT_KIND_LABELS[row.kind] ?? '出库',
+    [outPartner(row)],
+    row.lines,
+  );
 }
 
-export function outSubject(row: StockOut) {
-  const head = `【${OUT_KIND_LABELS[row.kind] ?? '出库'}】`;
-  if (row.factoryDoc) return factorySubject(head, row);
-  if (row.kind === 'OTHER') return `${head}${row.destination ?? ''}`;
-  return `${head}${[row.contractCode, row.customerName].filter(Boolean).join(' ')}`;
+export function returnSubject(row: PurchaseReturn) {
+  return stockSubject('采购退货', [row.supplierName], row.lines);
 }
 
 /** 销售出库额：数量 × 合同单价；没有单价的行不算，全都没有时返回 undefined。 */

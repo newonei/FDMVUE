@@ -51,7 +51,7 @@ const { active, linkedId } = useWarehouseDocumentLink(
   'transferId',
   getTransfer,
   (document) => {
-    keyword.value = document.code;
+    keyword.value = '';
     warehouseId.value = undefined;
     pageNo.value = 1;
     rows.value = [document];
@@ -69,7 +69,7 @@ const { statusFor, refresh: refreshReviewStatuses } = useAiReviewStatuses(() =>
 );
 
 const columns = [
-  { title: '调拨单号', key: 'code', width: 180 },
+  { title: '调拨主题', key: 'subject', width: 180 },
   { title: '调出 → 调入', key: 'route', width: 220 },
   { title: '产品', key: 'product', width: 240 },
   { title: '数量', key: 'quantity', width: 100, align: 'right' as const },
@@ -100,14 +100,14 @@ async function load(reset = false) {
 function sum(row: Transfer) {
   return row.lines.reduce((value, line) => value + Number(line.quantity), 0);
 }
-function saved(code: string) {
+function saved() {
   creating.value = false;
-  message.success(`已调拨 ${code}`);
+  message.success('已调拨');
   void load(true);
 }
-function voided(code: string) {
+function voided() {
   voiding.value = undefined;
-  message.success(`已作废 ${code}`);
+  message.success('已作废调拨单');
   void load();
 }
 onMounted(async () => {
@@ -129,7 +129,7 @@ onMounted(async () => {
       <Input.Search
         v-model:value="keyword"
         allow-clear
-        placeholder="调拨单号、产品"
+        placeholder="产品、备注"
         style="width: 280px"
         @search="load(true)"
       />
@@ -214,8 +214,8 @@ onMounted(async () => {
         </table>
       </template>
       <template #bodyCell="{ column, record }">
-        <div v-if="column.key === 'code'" class="cell">
-          <b class="mono">{{ record.code }}</b>
+        <div v-if="column.key === 'subject'" class="cell">
+          <b>调拨 · {{ linesTitle(record.lines) }}</b>
           <Tag v-if="record.status === 'VOIDED'" :title="record.voidReason">
             已作废
           </Tag>

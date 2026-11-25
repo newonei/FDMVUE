@@ -100,9 +100,7 @@ onMounted(async () => {
         v-model:value="keyword"
         allow-clear
         :placeholder="
-          ledger
-            ? '单据号、产品、内部单号、合同号、往来单位'
-            : '产品名称、编号、规格'
+          ledger ? '产品、内部单号、往来单位' : '产品名称、编号、规格'
         "
         style="width: 300px"
         @search="refresh"

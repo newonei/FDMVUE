@@ -15,7 +15,6 @@ import { money, qty } from '../../purchase/warehouse/model';
 import {
   inKindLabel,
   inPartner,
-  inRelated,
   inSubject,
   lineSum,
   OUT_KIND_LABELS,
@@ -66,14 +65,9 @@ const fields = computed<[string, string][]>(() => {
       [other ? '入库来源' : '供应商 / 工厂', inPartner(doc)],
       ['入库日期', doc.receivedDate],
       ['入库仓库', doc.warehouseName],
-      ['入库单号', doc.code],
-      ['对应单据', inRelated(doc)],
-      [
-        '关联合同',
-        [doc.contractCode, doc.customerName].filter(Boolean).join(' · '),
-      ],
+      ['关联客户', doc.customerName ?? ''],
       ['送货单号', doc.deliveryNo ?? ''],
-      ['直发出库单', doc.directShip ? (doc.stockOutCode ?? '') : ''],
+      ['直发出库单', doc.directShip ? '已直发出库' : ''],
       ['单据类型', inKindLabel(doc)],
       ['入库状态', voided.value ? '已作废' : '已入库'],
       ['经办人', name(doc.createdBy)],
@@ -88,9 +82,7 @@ const fields = computed<[string, string][]>(() => {
     [out.kind === 'OTHER' ? '出库去向' : '客户', outPartner(out)],
     ['出库日期', out.shippedDate],
     ['出库仓库', out.warehouseName],
-    ['出库单号', out.code],
-    ['对应单据', out.contractCode ?? ''],
-    ['直发入库单', out.kind === 'DIRECT' ? (out.stockInCode ?? '') : ''],
+    ['直发入库单', out.kind === 'DIRECT' ? '由入库单直发' : ''],
     ['单据类型', OUT_KIND_LABELS[out.kind] ?? ''],
     ['出库状态', voided.value ? '已作废' : '已出库'],
     ['经办人', name(out.createdBy)],
@@ -267,8 +259,11 @@ watch(open, async (value) => {
               >
                 <td>
                   {{ line.productName }}
-                  <div v-if="line.productionOrderNo" class="hint">
-                    生产订单：{{ line.productionOrderNo }}
+                  <div
+                    v-if="line.productionOrderItemId || line.productionOrderNo"
+                    class="hint"
+                  >
+                    已关联生产订单
                   </div>
                 </td>
                 <td class="mono">{{ line.productCode }}</td>

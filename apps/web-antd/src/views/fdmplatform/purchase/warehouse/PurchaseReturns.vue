@@ -19,6 +19,7 @@ import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewSt
 
 import { errorText } from '../../data';
 import { personName } from '../../directory';
+import { returnSubject } from '../../inventory-center/components/doc-model';
 import { linesTitle, money, qty } from './model';
 import { useWarehouseDocumentLink } from './useWarehouseDocumentLink';
 
@@ -40,7 +41,7 @@ const { active, linkedId } = useWarehouseDocumentLink(
   'returnId',
   getPurchaseReturn,
   (document) => {
-    keyword.value = document.code;
+    keyword.value = '';
     warehouseId.value = undefined;
     pageNo.value = 1;
     rows.value = [document];
@@ -58,7 +59,7 @@ const { statusFor, refresh: refreshReviewStatuses } = useAiReviewStatuses(() =>
 );
 
 const columns = [
-  { title: '退货单号', key: 'code', width: 170 },
+  { title: '退货主题', key: 'subject', width: 170 },
   { title: '原入库单 / 仓库', key: 'stockIn', width: 170 },
   { title: '采购单 / 供应商', key: 'order', width: 220 },
   { title: '产品', key: 'product', width: 220 },
@@ -111,7 +112,7 @@ onMounted(async () => {
       <Input.Search
         v-model:value="keyword"
         allow-clear
-        placeholder="退货单号、入库单、采购单、内部单号、供应商、产品"
+        placeholder="内部单号、供应商、退货原因、产品"
         style="width: 320px"
         @search="load(true)"
       />
@@ -189,17 +190,17 @@ onMounted(async () => {
         </table>
       </template>
       <template #bodyCell="{ column, record }">
-        <div v-if="column.key === 'code'" class="cell">
-          <b class="mono">{{ record.code }}</b>
+        <div v-if="column.key === 'subject'" class="cell">
+          <b>{{ returnSubject(record as PurchaseReturn) }}</b>
           <Tag v-if="record.noReplacement" color="orange">不再补货</Tag>
           <Tag v-else color="blue">供应商补发</Tag>
         </div>
         <div v-else-if="column.key === 'stockIn'" class="cell">
-          <span class="mono">{{ record.stockInCode }}</span>
+          <span>关联入库单</span>
           <span class="muted">{{ record.warehouseName }}</span>
         </div>
         <div v-else-if="column.key === 'order'" class="cell">
-          <span class="mono">{{ record.orderCode }}</span>
+          <span>关联采购单</span>
           <span class="muted ellipsis">{{ record.supplierName }}</span>
         </div>
         <span v-else-if="column.key === 'product'" class="ellipsis">{{

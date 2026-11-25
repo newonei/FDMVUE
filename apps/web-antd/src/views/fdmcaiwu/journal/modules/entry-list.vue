@@ -50,6 +50,7 @@ import {
 const props = defineProps<{
   companyNames: string[];
   direction: Api.Direction;
+  linkedAccount?: { id: number; name?: string };
   options?: Api.Options;
 }>();
 const emit = defineEmits<{
@@ -67,10 +68,10 @@ const lead = computed(() => (canDelete.value ? 1 : 0));
 const text = computed(() => labels(props.direction));
 const isExpense = computed(() => props.direction === 'EXPENSE');
 
-const preset = ref<'custom' | MonthPreset>('thisMonth');
+const preset = ref<'custom' | MonthPreset>(props.linkedAccount ? 'all' : 'thisMonth');
 const customRange = ref<[string, string]>();
 const filter = reactive({
-  bankAccount: undefined as string | undefined,
+  bankAccount: props.linkedAccount?.id as number | string | undefined,
   category: undefined as string | undefined,
   companyName: undefined as string | undefined,
   deptName: undefined as string | undefined,
@@ -87,6 +88,37 @@ const totals = ref<Api.Totals>();
 const pendingInvoice = ref<Api.Totals>();
 const selectedIds = ref<number[]>([]);
 
+const accountFilterOptions = computed(() => {
+  const accounts = props.options?.accountOptions ?? [];
+  const choices: { label: string; value: number | string }[] = accounts.map((account) => ({
+    label: account.accountName && account.accountName !== account.name
+      ? `${account.name} · ${account.accountName}`
+      : account.name,
+    value: account.id,
+  }));
+  const names = new Set(accounts.map(({ name }) => name));
+  choices.push(...(props.options?.bankAccounts ?? []).map((name) => ({
+    label: names.has(name) ? `${name}（按名称）` : name,
+    value: name,
+  })));
+  const linked = props.linkedAccount;
+  if (linked && !choices.some(({ value }) => value === linked.id)) {
+    choices.push({ label: linked.name || `账户 #${linked.id}`, value: linked.id });
+  }
+  return choices;
+});
+
+const BUSINESS_SOURCE_LABELS: Record<string, string> = {
+  CONTRACT_RECEIPT: '合同收款',
+  CONTRACT_RECEIPT_REVERSAL: '收款冲销',
+  PROCUREMENT_PAYMENT: '采购付款',
+  PROCUREMENT_PAYMENT_REVERSAL: '付款冲销',
+};
+
+function isBusinessLinked(record: Api.Entry) {
+  return record.source === 'BUSINESS' || record.businessSourceId != null || Boolean(record.businessSourceType);
+}
+
 const PRESETS = [
   { label: '本月', value: 'thisMonth' },
   { label: '上月', value: 'lastMonth' },
@@ -99,7 +131,8 @@ function currentFilter(): Api.Filter {
   const range =
     preset.value === 'custom' ? customRange.value : monthRange(preset.value);
   return {
-    bankAccount: filter.bankAccount || undefined,
+    bankAccount: typeof filter.bankAccount === 'string' ? filter.bankAccount : undefined,
+    bankAccountId: typeof filter.bankAccount === 'number' ? filter.bankAccount : undefined,
     category: filter.category || undefined,
     companyName: filter.companyName || undefined,
     deptName: filter.deptName || undefined,
@@ -112,7 +145,9 @@ function currentFilter(): Api.Filter {
   };
 }
 
+let loadRequest = 0;
 async function load() {
+  const request = ++loadRequest;
   loading.value = true;
   const params = currentFilter();
   try {
@@ -123,15 +158,16 @@ async function load() {
         ? getJournalTotals({ ...params, invoiceStatus: 'PENDING' })
         : Promise.resolve(undefined),
     ]);
+    if (request !== loadRequest) return;
     rows.value = result.list ?? [];
     total.value = result.total ?? 0;
     totals.value = sum;
     pendingInvoice.value = pending;
     selectedIds.value = selectedIds.value.filter((id) =>
-      rows.value.some((row) => row.id === id),
+      rows.value.some((row) => row.id === id && !isBusinessLinked(row)),
     );
   } finally {
-    loading.value = false;
+    if (request === loadRequest) loading.value = false;
   }
 }
 
@@ -159,6 +195,11 @@ watch(preset, (value) => {
   }
   search();
 });
+watch(() => props.linkedAccount?.id, (id) => {
+  filter.bankAccount = id;
+  if (id != null && preset.value !== 'all') preset.value = 'all';
+  else search();
+});
 function onRangeChange() {
   if (preset.value === 'custom') search();
 }
@@ -170,8 +211,13 @@ function showPendingInvoice() {
 defineExpose({ reload: load });
 
 async function edit(record: Api.Entry) {
-  if (!canUpdate.value) return;
-  emit('edit', toSaveReq(await getJournal(record.id)));
+  if (!canUpdate.value || isBusinessLinked(record)) return;
+  const detail = await getJournal(record.id);
+  if (isBusinessLinked(detail)) {
+    message.warning('请在业务单据中修改这笔流水');
+    return;
+  }
+  emit('edit', toSaveReq(detail));
 }
 function copy(record: Api.Entry) {
   emit('edit', copyForm(record));
@@ -295,9 +341,10 @@ onMounted(load);
       />
       <Select
         v-model:value="filter.bankAccount"
-        :options="toOptions(options?.bankAccounts)"
+        :options="accountFilterOptions"
         allow-clear
         show-search
+        option-filter-prop="label"
         class="w-36"
         :placeholder="text.bank"
         @change="search"
@@ -411,6 +458,7 @@ onMounted(load);
         canDelete
           ? {
               selectedRowKeys: selectedIds,
+              getCheckboxProps: (record: Api.Entry) => ({ disabled: isBusinessLinked(record) }),
               onChange: (keys: (number | string)[]) =>
                 (selectedIds = keys.map(Number)),
             }
@@ -469,7 +517,10 @@ onMounted(load);
           </Tag>
         </template>
         <template v-else-if="column.key === 'action'">
-          <Space :size="0">
+          <Tooltip v-if="isBusinessLinked(record as Api.Entry)" title="请在对应的业务单据中处理这笔流水">
+            <Tag color="blue">{{ BUSINESS_SOURCE_LABELS[record.businessSourceType] || '业务来源' }}</Tag>
+          </Tooltip>
+          <Space v-else :size="0">
             <Button v-access:code="['fdmcaiwu:journal:update']" size="small" type="link" @click="edit(record as Api.Entry)">
               编辑
             </Button>

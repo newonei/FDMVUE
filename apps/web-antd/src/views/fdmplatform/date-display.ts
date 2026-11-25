@@ -4,6 +4,7 @@ import { formatDate, formatDateTime } from '@vben/utils';
 const dateFields = new Set([
   'actualDate',
   'businessDate',
+  'cashMovementDate',
   'costDate',
   'deliveryDate',
   'dueDate',

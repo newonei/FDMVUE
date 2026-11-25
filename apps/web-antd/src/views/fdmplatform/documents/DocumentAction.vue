@@ -47,6 +47,7 @@ import AttachmentPanel from '../components/AttachmentPanel.vue';
 import CreationAttachments from '../components/CreationAttachments.vue';
 import { errorText, statusLabels } from '../data';
 import { withDirectory, withEvidence } from '../directory';
+import { contractLabel } from '../document-label';
 import RequestAssignDialog from '../purchase/tasks/RequestAssignDialog.vue';
 import ContractPicker from './ContractPicker.vue';
 import { documentActionDataNeeds } from './data-needs';
@@ -577,7 +578,7 @@ async function execute(input: Record<string, unknown>, key: string) {
       </Alert>
       <Descriptions v-if="contract" bordered size="small" :column="2">
         <Descriptions.Item label="关联合同">
-          {{ contract.code }} · {{ contract.name }}
+          {{ contractLabel(contract) }}
 </Descriptions.Item><Descriptions.Item label="客户">
           {{ contract.customerName }}
 </Descriptions.Item><Descriptions.Item label="订单所属公司">

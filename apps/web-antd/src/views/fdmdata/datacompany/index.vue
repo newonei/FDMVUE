@@ -2,6 +2,8 @@
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { FdmdataDataCompanyApi } from '#/api/fdmdata/datacompany';
 
+import { useRouter } from 'vue-router';
+
 import { Page, useVbenModal } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
 
@@ -20,6 +22,7 @@ import Form from './modules/form.vue';
 defineOptions({ name: 'FdmdataDataCompany' });
 
 const [FormModal, formModalApi] = useVbenModal({ connectedComponent: Form });
+const router = useRouter();
 
 function handleCreate() {
   formModalApi.setData(null).open();
@@ -27,6 +30,11 @@ function handleCreate() {
 
 function handleEdit(row: FdmdataDataCompanyApi.DataCompany) {
   formModalApi.setData(row).open();
+}
+
+function openCompanyAccounts(row: FdmdataDataCompanyApi.DataCompany) {
+  if (row.id == null) return;
+  void router.push({ path: '/caiwu/bank-accounts', query: { companyId: row.id } });
 }
 
 async function handleDelete(row: FdmdataDataCompanyApi.DataCompany) {
@@ -96,6 +104,12 @@ const [Grid, gridApi] = useVbenVxeGrid({
         <template #actions="{ row }">
           <TableAction
             :actions="[
+              {
+                label: '账户档案',
+                type: 'link',
+                auth: ['fdmcaiwu:journal:query'],
+                onClick: openCompanyAccounts.bind(null, row),
+              },
               {
                 label: $t('common.edit'),
                 type: 'link',

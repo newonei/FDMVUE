@@ -8,6 +8,7 @@ import type {
 import BigNumber from 'bignumber.js';
 
 import { money } from '../../data';
+import { documentLabel } from '../../document-label';
 import { contractReferenceText } from '../../documents/migration-display';
 
 export const EMPTY_PURCHASE_SUBJECT = '未填写采购主题';
@@ -18,14 +19,28 @@ export function purchaseRowLabels(row: BusinessRecord) {
     values.find((value) => typeof value === 'string' && value.trim()) as
       | string
       | undefined;
-  const order =
-    first(row.orderCode, record.code, row.code, record.name, row.name) ||
-    '查看采购单';
   const details = (row.details ?? {}) as Record<string, unknown>;
-  const subject = first(details.subject, record.subject, row.subject);
+  const title = documentLabel(
+    {
+      ...record,
+      internalOrderNo: first(
+        details.internalOrderNo,
+        record.internalOrderNo,
+        row.internalOrderNo,
+      ),
+      subject: first(details.subject, record.subject, row.subject),
+      name: first(record.name, row.name),
+    },
+    EMPTY_PURCHASE_SUBJECT,
+    row.orderCode,
+    row.code,
+    row.contractCode,
+  );
   return {
-    order,
-    title: subject?.trim() || EMPTY_PURCHASE_SUBJECT,
+    order:
+      first(row.orderCode, record.code, row.code, record.name, row.name) ||
+      '采购单',
+    title,
     supplier: first(record.supplierName, row.supplierName) || '供应商未注明',
     supplierId: first(record.supplierId, row.supplierId),
     contract: contractReferenceText(

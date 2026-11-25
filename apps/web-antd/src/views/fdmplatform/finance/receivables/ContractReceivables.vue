@@ -16,6 +16,7 @@ import { getContractReceivables } from '#/api/fdmplatform/contract-board';
 
 import { errorText } from '../../data';
 import { personName } from '../../directory';
+import { contractLabel } from '../../document-label';
 import { amountText, currencyLine } from '../../trade/contracts/model';
 
 import '../../components/compact-tables.css';
@@ -133,7 +134,7 @@ onMounted(async () => {
     <div class="toolbar">
       <Input.Search
         v-model:value="keyword"
-        placeholder="合同号 / 客户 / 产品"
+        placeholder="内部单号 / 客户 / 产品"
         allow-clear
         style="width: 260px"
         @search="load(true)"
@@ -202,7 +203,7 @@ onMounted(async () => {
             class="code"
             @click="openContract(record as ReceivableRow)"
           >
-            {{ record.code }}
+            {{ contractLabel({ name: record.name }) }}
           </button>
           <span class="sub" :title="record.customerName">{{
             record.customerName

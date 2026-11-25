@@ -12,6 +12,7 @@ import { formatMoneyDecimal } from '#/utils/money';
 
 import { label } from '../data';
 import { formatTemporalField } from '../date-display';
+import { contractLabel, documentLabel } from '../document-label';
 import { businessRecordTarget, referenceId } from '../documents/navigation';
 
 export const activityTypes: { label: string; value: ProductActivityType }[] = [
@@ -60,11 +61,12 @@ export function activityLabel(type: ProductActivityType) {
 }
 
 export function activityName(record: ProductActivityRecord) {
-  if (record.name)
-    return record.type === 'STOCK_EVENT' ? label(record.name) : record.name;
-  if (record.type === 'CONTRACT' && record.contractCode)
-    return record.contractCode;
-  return `${record.supplierName ? `${record.supplierName} · ` : ''}${activityLabel(record.type)} · ${record.documentId.slice(0, 8)}`;
+  if (record.type === 'STOCK_EVENT' && record.name) return label(record.name);
+  const type = activityLabel(record.type);
+  const fallback = contractLabel({ name: record.contractName }, type);
+  const name =
+    record.displayName === undefined ? record.name : record.displayName;
+  return documentLabel({ name }, fallback, record.contractCode);
 }
 
 export function activityTarget(

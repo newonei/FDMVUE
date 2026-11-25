@@ -55,7 +55,8 @@ export interface ProcurementFinanceRecord extends BusinessRecord {
   currency: string;
   amount: Decimal;
   payerEntityId?: string;
-  payerSnapshot?: { name?: string };
+  payerSnapshot?: { companyId?: number; name?: string };
+  payerBankAccountCompanyId?: number;
   expenseEntityId?: string;
   expenseEntitySnapshot?: { name?: string };
   /** 钉钉审批中才有：发起状态和最近一次失败原因。 */
@@ -80,6 +81,8 @@ export interface ProcurementFinanceRecord extends BusinessRecord {
   sourceType?: string;
   paidAt?: string;
   payerAccount?: string;
+  payerBankAccountId?: number;
+  existingJournalEntryId?: number;
   payeeName?: string;
   payeeAccount?: string;
   paymentMethod?: string;
@@ -107,6 +110,8 @@ export interface OrderPaymentInput {
   paidAt: string;
   payerEntityId: string;
   payerAccount: string;
+  payerBankAccountId?: number;
+  existingJournalEntryId?: number;
   paymentMethod?: string;
   payeeName: string;
   payeeAccount?: string;

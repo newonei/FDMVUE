@@ -63,6 +63,7 @@ import { productCategoryLabel } from '../contract-categories';
 import { errorText, label, money, receiptStatusLabel, rows } from '../data';
 import { formatTemporalField } from '../date-display';
 import { departmentLabel, personLabel, personName } from '../directory';
+import { documentLabel } from '../document-label';
 import {
   receiptAiReviewType,
   shipmentAiReviewType,
@@ -171,7 +172,7 @@ function openStockOut() {
 }
 function stockOutSaved(value: StockOut) {
   stockOutOpen.value = false;
-  message.success(`已出库 ${value.code}`);
+  message.success('已出库');
   stockOutViewing.value = value;
   void loadStockOuts();
   void loadRelatedDocs();
@@ -180,7 +181,7 @@ function stockOutSaved(value: StockOut) {
 
 /**
  * 下属单据页签（#112）：合同下每类单据一个页签，没有这类单据就不显示。
- * 点单号打开原来的详情：采购类、发货、收款开票走单据详情，出入库走库存单据抽屉，付款与报销走财务单据。
+ * 点击单据主题打开详情，出入库、付款与报销进入各自的业务抽屉。
  */
 type RelatedTabKey = `doc:${string}`;
 const relatedDocs = ref<RelatedDocGroup[]>([]);
@@ -195,7 +196,7 @@ async function loadRelatedDocs() {
   const run = ++relatedDocsSequence;
   relatedDocsError.value = '';
   try {
-    const groups = await loadContractRelatedDocs(id);
+    const groups = await loadContractRelatedDocs(id, props.contract?.name);
     if (run !== relatedDocsSequence || id !== props.contract?.id) return;
     relatedDocs.value = groups;
     if (
@@ -1079,6 +1080,15 @@ async function download(file: { id: string; name: string }) {
             <dd :class="{ muted: !contract.paymentTerms }">
               {{ contract.paymentTerms || '未填写' }}
             </dd>
+            <template v-if="contract.receiptAccount">
+              <dt>默认收款账户</dt>
+              <dd>
+                {{ contract.receiptAccount.name }}
+                <template v-if="contract.receiptAccount.accountNumberTail">
+                  · 尾号 {{ contract.receiptAccount.accountNumberTail }}
+                </template>
+              </dd>
+            </template>
             <dt>交付要求</dt>
             <dd :class="{ muted: !contract.deliveryRequirement }">
               {{ contract.deliveryRequirement || '未填写' }}
@@ -1214,6 +1224,8 @@ async function download(file: { id: string; name: string }) {
             :tab="timelineCount ? `时间线 (${timelineCount})` : '时间线'"
           >
             <ContractTimeline
+              :contract-code="contract.code"
+              :contract-name="contractTitle"
               :requests="purchaseRows.requests"
               :orders="purchaseRows.orders"
               :shipments="shipmentRows"
@@ -1256,7 +1268,7 @@ async function download(file: { id: string; name: string }) {
                   class="mini-row"
                 >
                   <span class="strong">{{
-                    request.code || request.name || '采购申请'
+                    documentLabel(request, contractTitle, contract?.code)
                   }}</span>
                   <span>{{ rows(request.items).length }} 项 · 需求
                     {{ requestDue(request) }}</span>
@@ -1300,8 +1312,10 @@ async function download(file: { id: string; name: string }) {
                   title="打开采购单"
                   @click="openPurchaseOrder(String(order.id))"
                 >
-                  <span class="strong">{{ order.code || '采购单' }} ·
-                    {{ order.supplierName || '供应商未注明' }}</span>
+                  <span class="strong">
+                    {{ documentLabel(order, contractTitle, contract?.code) }}
+                    · {{ order.supplierName || '供应商未注明' }}
+                  </span>
                   <span>{{ nativeMoney(order.amount, order.currency) }}</span>
                   <span>到货 {{ orderProgress(order) }} · {{ label(order.status) }}
                     <AiReviewStatus
@@ -1349,7 +1363,7 @@ async function download(file: { id: string; name: string }) {
                     class="strong"
                     :class="{ muted: out.status === 'VOIDED' }"
                     @click="childOpen || (stockOutViewing = out)"
-                    >{{ out.code }}</a>
+                    >{{ contractTitle }}</a>
                   <span>{{ out.warehouseName }}</span>
                   <span>{{ linesTitle(out.lines) }}</span>
                   <span>{{ out.status === 'VOIDED' ? '已作废' : out.shippedDate }}
@@ -1396,7 +1410,7 @@ async function download(file: { id: string; name: string }) {
                         openNote = openNote === note.id ? undefined : note.id
                       "
                     >
-                      <span class="strong">{{ note.code }}</span>
+                      <span class="strong">{{ contractTitle }}</span>
                       <span>{{
                         noteText(note.deliveryMethod, note.trackingNo) || '—'
                       }}</span>
@@ -1619,6 +1633,7 @@ async function download(file: { id: string; name: string }) {
           <TabPane key="attachments" tab="合同附件">
             <ContractFilesPanel
               :contract-id="contract.id"
+              :contract-name="contractTitle"
               :listing="attachments"
               :directory="directory"
               :error="attachmentError"

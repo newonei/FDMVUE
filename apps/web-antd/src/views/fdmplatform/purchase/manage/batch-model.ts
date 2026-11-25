@@ -10,6 +10,7 @@ export interface BatchOrder {
   contractId: string;
   orderId: string;
   code: string;
+  label: string;
   supplierId?: string;
   supplierName: string;
   currency: string;
@@ -37,6 +38,7 @@ export function batchOrders(rows: ProcurementOrderRow[]): BatchOrder[] {
         contractId: row.standaloneId ? '' : String(row.contractId ?? ''),
         orderId: String(row.standaloneId ?? row.id),
         code: labels.order,
+        label: labels.title,
         supplierId: labels.supplierId,
         supplierName: labels.supplier,
         currency: String(row.record?.currency ?? 'CNY'),
@@ -110,6 +112,7 @@ export function batchInvoiceLines(orders: BatchOrder[]) {
       contractId: order.contractId,
       orderId: order.orderId,
       code: order.code,
+      label: order.label,
       remaining: order.uninvoiced,
     }));
 }
@@ -118,6 +121,8 @@ export interface BatchPaymentForm {
   paidAt?: string;
   payerEntityId?: string;
   payerAccount?: string;
+  payerBankAccountId?: number;
+  journalMatches?: Record<string, number | undefined>;
   paymentMethod?: string;
   payeeName?: string;
   payeeAccount?: string;
@@ -133,7 +138,8 @@ export function batchPaymentProblem(
   if (!form.paidAt) return '请选择付款日期';
   if (form.paidAt > today) return '付款日期不能晚于今天';
   if (!form.payerEntityId) return '请选择所属公司（付款公司）';
-  if (!form.payerAccount?.trim()) return '请填写付款方式（付款账户）';
+  if (!form.payerBankAccountId && !form.payerAccount?.trim())
+    return '请填写付款方式（付款账户）';
   if (!form.payeeName?.trim()) return '请填写收款方';
   const positive = Object.entries(amounts).filter(([, value]) =>
     new BigNumber(value ?? '').gt(0),
@@ -171,11 +177,17 @@ export function batchPaymentInputs(
       input: {
         contractId: order.contractId,
         orderId: order.orderId,
-        name: `${order.code} 付款`,
+        name: `${order.label} 付款`,
         amount: amounts[order.key]!,
         paidAt: form.paidAt!,
         payerEntityId: form.payerEntityId!,
-        payerAccount: form.payerAccount!.trim(),
+        payerAccount: form.payerAccount?.trim() ?? '',
+        ...(form.payerBankAccountId
+          ? {
+              payerBankAccountId: form.payerBankAccountId,
+              existingJournalEntryId: form.journalMatches?.[order.key],
+            }
+          : {}),
         paymentMethod: form.paymentMethod?.trim() || undefined,
         payeeName: form.payeeName!.trim(),
         payeeAccount: form.payeeAccount?.trim() || undefined,
@@ -185,8 +197,8 @@ export function batchPaymentInputs(
     }));
 }
 
-/** 集中收票里已经付过款（未付少于采购金额）的单号，用来提醒别从发票重复付。 */
-export function batchPrepaidCodes(orders: BatchOrder[]) {
+/** 集中收票里已经付过款的采购主题，用来提示避免重复付款。 */
+export function batchPrepaidLabels(orders: BatchOrder[]) {
   const keys = new Set(batchInvoiceLines(orders).map((line) => line.key));
   return orders
     .filter((order) => {
@@ -194,5 +206,5 @@ export function batchPrepaidCodes(orders: BatchOrder[]) {
       const amount = new BigNumber(order.orderAmount ?? '');
       return amount.isFinite() && new BigNumber(order.unpaid).lt(amount);
     })
-    .map((order) => order.code);
+    .map((order) => order.label);
 }

@@ -36,7 +36,6 @@ import { personName } from '../../directory';
 import {
   inKindLabel,
   inPartner,
-  inRelated,
   inSubject,
   lineSum,
   pageSum,
@@ -118,8 +117,7 @@ const viewActions = computed(() => {
 const factoryHint = computed(() => {
   const row = viewing.value;
   if (!row || row.status === 'VOIDED') return '';
-  if (row.factoryDoc)
-    return `工厂生产单据：要冲回请在工厂作废工序单${row.sourceNo ? ` ${row.sourceNo}` : ''}或办理退料`;
+  if (row.factoryDoc) return '工厂生产单据：要冲回请在工厂作废工序单或办理退料';
   if (row.kind === 'PRODUCTION')
     return '工厂交货入库：要冲回请在工厂排单的交货单上作废';
   if (row.kind === 'FACTORY_PURCHASE')
@@ -131,7 +129,6 @@ const factoryHint = computed(() => {
 
 const columns = [
   { title: '入库主题', key: 'subject', width: 280, fixed: 'left' as const },
-  { title: '入库单号', key: 'code', width: 150 },
   { title: '供应商 / 来源', key: 'partner', width: 170 },
   { title: '对应单据', key: 'related', width: 170 },
   { title: '入库仓库', key: 'warehouse', width: 110 },
@@ -178,29 +175,25 @@ function accepted(row: StockIn) {
 }
 function saved(value: StockIn) {
   creating.value = false;
-  message.success(
-    value.directShip
-      ? `已入库 ${value.code}，并直发出库 ${value.stockOutCode}`
-      : `已入库 ${value.code}`,
-  );
+  message.success(value.directShip ? '已入库，并直发出库' : '已入库');
   void load(true);
 }
 function savedOther(value: StockIn) {
   creatingOther.value = false;
-  message.success(`已入库 ${value.code}`);
+  message.success('已入库');
   void load(true);
   viewing.value = value;
 }
-function returned(value: { code: string }) {
+function returned() {
   returning.value = undefined;
   closeDetail();
-  message.success(`已办理采购退货 ${value.code}`);
+  message.success('已办理采购退货');
   void load();
 }
-function voided(code: string) {
+function voided() {
   voiding.value = undefined;
   closeDetail();
-  message.success(`已作废 ${code}`);
+  message.success('已作废入库单');
   void load();
 }
 function viewAction(key: string) {
@@ -240,7 +233,7 @@ onMounted(async () => {
       <Input.Search
         v-model:value="keyword"
         allow-clear
-        placeholder="入库单号、采购单、内部单号、合同号、供应商、来源、产品"
+        placeholder="内部单号、供应商、来源、产品"
         style="width: 320px"
         @search="load(true)"
       />
@@ -306,20 +299,12 @@ onMounted(async () => {
           :title="inSubject(record as StockIn)"
           @click="viewing = record as StockIn"
           >{{ inSubject(record as StockIn) }}</a>
-        <span v-else-if="column.key === 'code'" class="mono">{{
-          record.code
-        }}</span>
         <span v-else-if="column.key === 'partner'" class="ellipsis">{{
           inPartner(record as StockIn)
         }}</span>
         <div v-else-if="column.key === 'related'" class="cell">
-          <span class="mono ellipsis">{{ inRelated(record as StockIn) }}</span>
-          <span v-if="record.contractCode" class="muted ellipsis">
-            合同 {{ record.contractCode }}
-          </span>
-          <span v-if="record.directShip" class="muted">
-            直发 · {{ record.stockOutCode }}
-          </span>
+          <span v-if="record.orderId">关联采购单</span>
+          <span v-if="record.directShip" class="muted">直发出库</span>
         </div>
         <span v-else-if="column.key === 'warehouse'">{{
           record.warehouseName

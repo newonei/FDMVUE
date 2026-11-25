@@ -104,7 +104,7 @@ const statusNames: Record<string, string> = {
                     documentId: order.id,
                   }"
                 >
-                  {{ order.code || order.id }}
+                  {{ order.items || '采购单' }}
                 </RelatedLink>
                 <RelatedLink
                   v-else-if="order.standaloneId"
@@ -114,9 +114,9 @@ const statusNames: Record<string, string> = {
                     standaloneId: order.standaloneId,
                   }"
                 >
-                  {{ order.code || order.id }}
+                  {{ order.items || '采购单' }}
                 </RelatedLink>
-                <span v-else>{{ order.code || order.id }}</span>
+                <span v-else>{{ order.items || '采购单' }}</span>
                 <span v-if="order.migrated" class="tag">金智</span>
               </td>
               <td class="items-cell" :title="order.items">

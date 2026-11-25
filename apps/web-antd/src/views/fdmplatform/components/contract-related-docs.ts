@@ -12,6 +12,11 @@ import { getProcurementFinancePage } from '#/api/fdmplatform/procurement-finance
 import { getStockIns, getStockOuts } from '#/api/fdmplatform/warehouse';
 
 import { label, receiptStatusLabel } from '../data';
+import {
+  contractLabel,
+  documentLabel,
+  documentRowLabel,
+} from '../document-label';
 import { migrationCell, nativeMoney } from '../documents/migration-display';
 import { allocationKind, documentDefinitions } from '../documents/model';
 import { receiptFxDisplay } from '../finance/exchange-rates/model';
@@ -24,7 +29,7 @@ import { linesTitle } from '../purchase/warehouse/model';
 
 /**
  * 合同详情的下属单据页签：每类单据一个页签，合同下有这类单据才显示（#112）。
- * 各类单据按合同查第一页，页签里列出单号、关键字段和状态，点单号打开原来的详情。
+ * 各类单据按合同查第一页，页签里列出主题、关键字段和状态，点击主题打开详情。
  */
 
 export const RELATED_PAGE_SIZE = 50;
@@ -37,7 +42,7 @@ export type RelatedDocRef =
 
 export interface RelatedDocRow {
   id: string;
-  code: string;
+  title: string;
   cells: string[];
   status: string;
   voided: boolean;
@@ -101,7 +106,7 @@ export function businessGroup(
   const definition = documentDefinitions[kind];
   const fields = definition.fields
     .map((pair) => pair.split('|') as [string, string])
-    .filter(([key]) => key !== 'status');
+    .filter(([key]) => key !== 'status' && key !== 'name');
   return {
     key: kind,
     kind,
@@ -114,13 +119,9 @@ export function businessGroup(
         kind === 'receipts' ? receiptStatusLabel(status) : label(status);
       return {
         id: String(row.id),
-        code: text(
-          row.code ||
-            row.record.code ||
-            row.record.invoiceNumber ||
-            row.record.name ||
-            row.record.batchNo ||
-            definition.title,
+        title: documentRowLabel(
+          row,
+          contractLabel({ name: row.contractName }, definition.title),
         ),
         cells: fields.map(([key]) => businessCell(row, key)),
         status: status ? statusLabel : '',
@@ -131,7 +132,11 @@ export function businessGroup(
   };
 }
 
-export function stockInGroup(list: StockIn[], total: number): RelatedDocGroup {
+export function stockInGroup(
+  list: StockIn[],
+  total: number,
+  contractName?: string,
+): RelatedDocGroup {
   return {
     key: 'stockIns',
     title: '入库单',
@@ -139,7 +144,7 @@ export function stockInGroup(list: StockIn[], total: number): RelatedDocGroup {
     columns: ['入库类型', '仓库', '供应商 / 来源', '产品', '入库日期'],
     rows: list.map((row) => ({
       id: row.id,
-      code: row.code,
+      title: contractLabel({ name: contractName }, '入库单'),
       cells: [
         inKindLabel(row),
         row.warehouseName,
@@ -157,6 +162,7 @@ export function stockInGroup(list: StockIn[], total: number): RelatedDocGroup {
 export function stockOutGroup(
   list: StockOut[],
   total: number,
+  contractName?: string,
 ): RelatedDocGroup {
   return {
     key: 'stockOuts',
@@ -165,7 +171,7 @@ export function stockOutGroup(
     columns: ['出库类型', '仓库', '产品', '出库日期'],
     rows: list.map((row) => ({
       id: row.id,
-      code: row.code,
+      title: contractLabel({ name: contractName }, '出库单'),
       cells: [
         OUT_KIND_LABELS[row.kind] ?? row.kind,
         row.warehouseName,
@@ -189,12 +195,16 @@ export function financeGroup(
     key: `finance-${type}`,
     title,
     total,
-    columns: ['名称', '金额', '日期'],
+    columns: ['金额', '日期'],
     rows: list.map((record) => ({
       id: record.id,
-      code: record.code || title,
+      title: documentLabel(
+        record,
+        contractLabel({ name: record.contractInternalOrderNo }, title),
+        record.contractCode,
+        record.orderCode,
+      ),
       cells: [
-        text(record.name),
         nativeMoney(record.amount, record.currency),
         text(record.paidAt ?? record.createdAt)
           .replace('T', ' ')
@@ -213,6 +223,7 @@ export function financeGroup(
  */
 export async function loadContractRelatedDocs(
   contractId: string,
+  contractName?: string,
 ): Promise<RelatedDocGroup[]> {
   const page = { pageNo: 1, pageSize: RELATED_PAGE_SIZE };
   const business = (kind: DocumentKind) =>
@@ -224,10 +235,10 @@ export async function loadContractRelatedDocs(
   const loaders: Promise<RelatedDocGroup>[] = [
     ...BUSINESS_BEFORE_STOCK.map((kind) => business(kind)),
     getStockIns({ ...page, contractId }).then((result) =>
-      stockInGroup(result.list, result.total),
+      stockInGroup(result.list, result.total, contractName),
     ),
     getStockOuts({ ...page, contractId }).then((result) =>
-      stockOutGroup(result.list, result.total),
+      stockOutGroup(result.list, result.total, contractName),
     ),
     ...BUSINESS_AFTER_STOCK.map((kind) => business(kind)),
     ...FINANCE_TYPES.map(({ type, title }) =>

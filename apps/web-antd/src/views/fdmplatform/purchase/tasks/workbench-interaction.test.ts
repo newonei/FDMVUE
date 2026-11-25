@@ -400,7 +400,7 @@ afterEach(() => {
 });
 
 describe('采购工作台交互与全量查询', () => {
-  it('列表、看板和摘要优先显示内部单号，旧单回退合同号', async () => {
+  it('列表、看板和摘要显示合同内部单号，旧单缺号时隐藏生成编号', async () => {
     const internal = entry('internal');
     internal.row.contractName = 'FDMF10020261027-1Y';
     const legacy = entry('legacy');
@@ -412,9 +412,9 @@ describe('采购工作台交互与全量查询', () => {
     const internalRow = host.querySelector('[data-entry="internal"]');
     expect(internalRow?.textContent).toContain('FDMF10020261027-1Y');
     expect(internalRow?.textContent).not.toContain('HT-001');
-    expect(host.querySelector('[data-entry="legacy"]')?.textContent).toContain(
-      'HT-LEGACY',
-    );
+    const legacyRow = host.querySelector('[data-entry="legacy"]');
+    expect(legacyRow?.textContent).toContain('查看关联合同');
+    expect(legacyRow?.textContent).not.toContain('HT-LEGACY');
 
     button(host, '需求internal').click();
     await settle();

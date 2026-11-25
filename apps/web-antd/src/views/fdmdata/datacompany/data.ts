@@ -224,6 +224,6 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataDataCompanyApi.Data
       minWidth: 160,
       formatter: 'formatDateTime',
     },
-    { title: '操作', width: 150, fixed: 'right', slots: { default: 'actions' } },
+    { title: '操作', width: 205, fixed: 'right', slots: { default: 'actions' } },
   ];
 }

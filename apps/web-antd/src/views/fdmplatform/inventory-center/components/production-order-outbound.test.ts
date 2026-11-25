@@ -48,7 +48,8 @@ const candidate = (
 ): ProductionOrderOutboundCandidate => ({
   productionOrderItemId: id,
   productionOrderId: 10,
-  orderNo: `PO-${id}`,
+  orderNo: `GD2026112500${id}`,
+  productName: '瑜伽垫',
   skuId: 'sku',
   specVersion: 'v1',
   unit: '条',
@@ -59,7 +60,7 @@ const candidate = (
 });
 
 describe('生产订单与库存出库关联', () => {
-  it('only offers matching product specifications, shows available quantity, and emits the chosen item', async () => {
+  it('shows matching products and available quantities, hides generated numbers, and emits the chosen item', async () => {
     const selected = vi.fn();
     const host = document.createElement('div');
     const app = createApp({
@@ -81,7 +82,8 @@ describe('生产订单与库存出库关联', () => {
         [...host.querySelectorAll('option')].map(
           (option) => option.textContent,
         ),
-      ).toEqual(['PO-1 · 可出 7 条']);
+      ).toEqual(['瑜伽垫 · 可出 7 条']);
+      expect(host.textContent).not.toContain('GD20261125001');
       const select = host.querySelector('select')!;
       select.value = '1';
       select.dispatchEvent(new Event('change'));

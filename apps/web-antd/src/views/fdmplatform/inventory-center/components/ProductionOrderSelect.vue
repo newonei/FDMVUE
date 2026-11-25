@@ -26,7 +26,7 @@ const options = computed(() =>
     )
     .map((row) => ({
       value: row.productionOrderItemId,
-      label: `${row.orderNo} · 可出 ${qty(row.availableQuantity)} ${row.unit ?? ''}`,
+      label: `${row.productName || '生产入库'} · 可出 ${qty(row.availableQuantity)} ${row.unit ?? ''}`,
     })),
 );
 </script>

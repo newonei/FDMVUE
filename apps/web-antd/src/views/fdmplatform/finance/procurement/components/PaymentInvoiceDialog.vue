@@ -13,12 +13,13 @@ import {
 } from '#/api/fdmplatform/procurement';
 
 import { errorText } from '../../../data';
-import InvoiceUpload from './InvoiceUpload.vue';
-
 /**
  * 付款记录下登记付款发票（金智付款发票挂「付款计划/记录」）：上传发票原件登记，
  * 或把采购单上已登记、还没挂付款的发票挂过来。发票仍计入采购单收票合计。
  */
+import { documentLabel } from '../../../document-label';
+import InvoiceUpload from './InvoiceUpload.vue';
+
 const props = defineProps<{
   contractId: string;
   open: boolean;
@@ -91,7 +92,7 @@ async function attach() {
 <template>
   <Modal
     :open="open"
-    :title="`付款发票 · ${payment?.code ?? ''}`"
+    :title="documentLabel(payment, '付款发票')"
     width="720px"
     :mask-closable="false"
     @cancel="emit('close')"

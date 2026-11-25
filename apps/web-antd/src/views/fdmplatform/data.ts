@@ -6,6 +6,7 @@ import dayjs from 'dayjs';
 
 import { formatMoneyDecimal } from '#/utils/money';
 
+import { contractLabel, documentLabel } from './document-label';
 import { hasReceiptFx } from './finance/exchange-rates/model';
 import {
   requestExcessHint,
@@ -68,6 +69,19 @@ export interface ActionDefinition {
   contractCurrency?: string;
   /** 内销回款只收人民币，不查询汇率 */
   rmbOnly?: boolean;
+  cashPosting?: {
+    accountId: number;
+    amountField: string;
+    companyId?: number;
+    currency: string;
+    dateField: string;
+    direction: 'EXPENSE' | 'INCOME';
+  };
+  receiptCash?: {
+    account?: Contract['receiptAccount'];
+    companyId: number;
+    receipts?: BusinessRecord[];
+  };
 }
 
 export const masterTypes: Option[] = [
@@ -410,11 +424,16 @@ export function contractActions(
     label: `${item.skuName} · ${item.specification}`,
     fill: requestLineDefaults(contract, item),
   }));
-  const requestOptions = options(contract.requests ?? []);
+  const requestLabel = (request: BusinessRecord) =>
+    documentLabel(request, contractLabel(contract, '采购申请'), contract.code);
+  const requestOptions = (contract.requests ?? []).map((request) => ({
+    label: requestLabel(request),
+    value: request.id,
+  }));
   const requestItems = (contract.requests ?? []).flatMap((request) =>
     rows(request.items).map((item) => ({
       ...item,
-      name: `${request.name || request.id} / ${item.contractItemId}`,
+      name: `${requestLabel(request)} / ${contract.items.find((line) => line.id === item.contractItemId)?.skuName ?? '产品明细'}`,
     })),
   );
   const assignmentOptions = options(contract.assignments ?? [], [
@@ -422,7 +441,7 @@ export function contractActions(
     'id',
   ]);
   const planOptions = (contract.plans ?? []).map((plan) => ({
-    label: `${plan.name} · 版本 ${plan.version} · ${plan.id}`,
+    label: `${documentLabel(plan, '采购方案', contract.code)} · 版本 ${plan.version}`,
     value: plan.id,
     fill: { planVersion: plan.version ?? 1 },
   }));
@@ -462,13 +481,7 @@ export function contractActions(
       title: '取消采购申请',
       description:
         '取消未形成执行承诺的申请；已有生效或下单等约束由服务端检查，历史记录保留。',
-      fields: [
-        selectField(
-          'requestId',
-          '采购申请',
-          options(contract.requests ?? [], ['name', 'id']),
-        ),
-      ],
+      fields: [selectField('requestId', '采购申请', requestOptions)],
     },
     CREATE_REQUEST: {
       action: 'CREATE_REQUEST',
@@ -478,10 +491,10 @@ export function contractActions(
         '已带入合同中尚未申请的产品明细，可删减或调整数量；同一明细允许超量申请。申请不会自动扩大合同数量。',
       initialValues: { items: requestPrefillLines(contract) },
       fields: [
-        field('name', '申请名称', undefined, {
-          default: contract.code,
-          hidden: true,
-          hint: '自动带入当前合同编号，可按需修改；同一合同允许分批申请。',
+        field('name', '申请主题', undefined, {
+          default: contractLabel(contract, ''),
+          required: false,
+          hint: '默认使用合同内部单号，可填写本批申请的主题。',
         }),
         field('remark', '备注 / 超量原因', 'textarea', { required: false }),
       ],
@@ -786,6 +799,11 @@ export function financeActions(
   contract: Contract,
 ): Record<string, ActionDefinition> {
   const ledger = contract.finance ?? {};
+  const receiptCash: ActionDefinition['receiptCash'] = {
+    account: contract.receiptAccount,
+    companyId: contract.companyId,
+    receipts: ledger.receipts,
+  };
   const receiptOptions = options(ledger.receipts ?? [], [
     'receivedAt',
     'amount',
@@ -819,10 +837,11 @@ export function financeActions(
       action: 'CREATE_RECEIPT',
       title: '新建回款记录',
       description: rmbOnly
-        ? '登记真实到账，内销回款均为人民币；账户和凭证引用暂不要求填写，附件可选。财务确认后计入合同回款，可暂时没有发票。'
-        : '登记真实到账，按到账日期自动折算人民币；账户和凭证引用暂不要求填写，附件可选。财务确认后计入合同回款，可暂时没有发票。',
+        ? '登记真实到账，内销回款均为人民币。财务确认后计入合同回款。'
+        : '登记真实到账，按到账日期自动折算人民币。财务确认后计入合同回款。',
       contractCurrency: contract.currency,
       rmbOnly,
+      receiptCash,
       fields: [
         source,
         { ...amount, label: rmbOnly ? '回款金额（人民币）' : '回款金额' },
@@ -841,6 +860,10 @@ export function financeActions(
               },
             ),
         field('receivedAt', '到账日期', 'date'),
+        field('accountId', '收款账户', 'number', {
+          default: receiptCash.account?.id,
+          required: false,
+        }),
         selectField(
           'paymentMethod',
           '到款方式',
@@ -880,8 +903,12 @@ export function financeActions(
       action: 'CONFIRM_RECEIPT',
       title: '财务确认到账',
       description:
-        '核对真实到账金额、币种与到账日期，确认后不可直接删除，只能记录退款或冲销。',
-      fields: [selectField('receiptId', '待确认回款', receiptOptions)],
+        '核对真实到账金额、币种、日期与实际账户。已确认的回款可办理退款或冲销。',
+      receiptCash,
+      fields: [
+        selectField('receiptId', '待确认回款', receiptOptions),
+        field('accountId', '实际到账账户', 'number', { required: false }),
+      ],
     },
     CANCEL_RECEIPT: {
       action: 'CANCEL_RECEIPT',
@@ -899,10 +926,15 @@ export function financeActions(
       title: '回款退款 / 冲销',
       description:
         '以反向记录更正真实回款，保留原凭证和更正关系。已分配部分须先解除绑定。',
+      receiptCash,
       fields: [
         source,
         selectField('receiptId', '原回款记录', receiptOptions),
         amount,
+        field('postingDate', '退款 / 冲销日期', 'date', {
+          default: dayjs().format('YYYY-MM-DD'),
+          required: false,
+        }),
         selectField(
           'kind',
           '更正类型',
@@ -1092,14 +1124,18 @@ export function executionActions(
   pools: BusinessRecord[],
   master: MasterRecord[],
 ): Record<string, ActionDefinition> {
-  const orderOptions = options(contract.purchaseOrders ?? [], [
-    'supplierName',
-    'id',
-  ]);
+  const orderOptions = (contract.purchaseOrders ?? []).map((order) => ({
+    value: order.id,
+    label: documentLabel(
+      order,
+      String(order.supplierName || '采购单'),
+      contract.code,
+    ),
+  }));
   const orderLines = (contract.purchaseOrders ?? []).flatMap((order) =>
     rows(order.lines).map((line) => ({
       ...line,
-      name: `${order.supplierName || order.id} / ${line.skuId}`,
+      name: `${documentLabel(order, String(order.supplierName || '采购单'), contract.code)} / ${line.skuName ?? '产品明细'}`,
     })),
   );
   const poolOptions = options(pools, [
@@ -1179,7 +1215,10 @@ export function executionActions(
         selectField(
           'arrivalId',
           '原到货记录',
-          options(rows(contract.arrivals), ['batchNo', 'quantity', 'id']),
+          rows(contract.arrivals).map((arrival) => ({
+            value: arrival.id,
+            label: `${documentLabel(arrival, '到货单')} · 到货 ${arrival.quantity}`,
+          })),
         ),
         selectField(
           'kind',

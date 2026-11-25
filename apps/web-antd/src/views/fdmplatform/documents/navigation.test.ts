@@ -88,7 +88,7 @@ const contract = {
   },
 } as unknown as Contract;
 describe('stable related-document navigation', () => {
-  it('申请详情可打开分批生成的多张采购单，并保留各自单号', () => {
+  it('申请详情可打开分批生成的多张采购单，并显示各自主题', () => {
     const current = {
       ...contract,
       purchaseOrders: [
@@ -96,12 +96,14 @@ describe('stable related-document navigation', () => {
           id: 'first',
           requestId: 'request-a',
           code: 'CG001',
+          subject: '瑜伽砖首批',
           supplierName: '同一供应商',
         },
         {
           id: 'second',
           requestId: 'request-a',
           code: 'CG002',
+          subject: '瑜伽砖补单',
           supplierName: '同一供应商',
         },
         { id: 'other', requestId: 'request-b', code: 'CG003' },
@@ -116,7 +118,7 @@ describe('stable related-document navigation', () => {
       links
         .filter((link) => link.label === '来源采购单')
         .map((link) => link.value),
-    ).toEqual(['CG001 · 同一供应商', 'CG002 · 同一供应商']);
+    ).toEqual(['瑜伽砖首批 · 同一供应商', '瑜伽砖补单 · 同一供应商']);
   });
   it('routes independent native invoice and stock records to their actual business type and clears stale identities', () => {
     expect(

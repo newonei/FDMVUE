@@ -27,6 +27,11 @@ import AiReviewStatus from '#/views/fdmaicheck/components/AiReviewStatus.vue';
 import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewStatuses';
 
 import { errorText } from '../../../data';
+/**
+ * 采购单的付款与费用：付款记录（金智「付款记录」）每付一笔登记一张，分期就是多张；
+ * 每张付款记录下挂付款发票。历史请款单和付款计划只读保留，不再新建。
+ */
+import { documentLabel } from '../../../document-label';
 import { procurementFinanceAiCheckTypes } from '../../../documents/ai-check-types';
 import BusinessDocumentDetail from '../../../documents/BusinessDocumentDetail.vue';
 import { useRouteOwner } from '../../../documents/useRouteOwner';
@@ -44,10 +49,6 @@ import PaymentInvoiceDialog from './PaymentInvoiceDialog.vue';
 import PaymentRecordDialog from './PaymentRecordDialog.vue';
 import RefundTable from './RefundTable.vue';
 
-/**
- * 采购单的付款与费用：付款记录（金智「付款记录」）每付一笔登记一张，分期就是多张；
- * 每张付款记录下挂付款发票。历史请款单和付款计划只读保留，不再新建。
- */
 const props = defineProps<{
   contractId: string;
   /** 采购单已收票合计（付款表单的数据参考） */
@@ -284,7 +285,7 @@ watch(
           size="small"
           :pagination="false"
           :columns="[
-            { title: '付款单号', key: 'code' },
+            { title: '付款主题', key: 'code' },
             { title: '付款日期', dataIndex: 'paidAt', width: 110 },
             { title: '金额', key: 'amount', align: 'right' },
             { title: '类型', key: 'kind' },
@@ -305,7 +306,7 @@ watch(
               size="small"
               @click="show(record as ProcurementFinanceRecord)"
             >
-              {{ record.code }}
+              {{ documentLabel(record, '查看付款单') }}
             </Button>
             <span v-else-if="column.key === 'amount'" class="num">
               {{ record.currency }} {{ money(record.amount) }}
@@ -447,7 +448,7 @@ watch(
           size="small"
           :pagination="false"
           :columns="[
-            { title: '单据号 / 名称', key: 'name' },
+            { title: '单据主题', key: 'name' },
             { title: '金额', dataIndex: 'amount' },
             { title: '币种', dataIndex: 'currency' },
             { title: '状态', key: 'state' },
@@ -460,7 +461,7 @@ watch(
               type="link"
               @click="show(record as ProcurementFinanceRecord)"
             >
-              {{ record.code }} · {{ record.name }}
+              {{ documentLabel(record, '查看单据') }}
             </Button>
             <Tag v-else-if="column.key === 'state'">
               {{ financeRecordStatus(record) }}
@@ -490,7 +491,7 @@ watch(
         size="small"
         :pagination="false"
         :columns="[
-          { title: '单据号 / 名称', key: 'name' },
+          { title: '单据主题', key: 'name' },
           { title: '金额', dataIndex: 'amount' },
           { title: '币种', dataIndex: 'currency' },
           { title: '状态', key: 'state' },
@@ -503,7 +504,7 @@ watch(
             type="link"
             @click="show(record as ProcurementFinanceRecord)"
           >
-            {{ record.code }} · {{ record.name }}
+            {{ documentLabel(record, '查看单据') }}
           </Button>
           <Tag v-else-if="column.key === 'state'">
             {{ financeRecordStatus(record) }}

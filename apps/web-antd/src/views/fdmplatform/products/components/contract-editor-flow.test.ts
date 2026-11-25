@@ -393,6 +393,65 @@ afterEach(() => {
 });
 
 describe('order entry without changing menus', () => {
+  it('hides a legacy generated name and preserves it until a business number is entered', async () => {
+    const generated = 'HT-20261125-000004';
+    const contract: Contract = {
+      id: 'contract',
+      code: generated,
+      name: generated,
+      companyId: 1,
+      departmentId: 8,
+      ownerUserId: 7,
+      customerId: 'customer',
+      customerName: '客户甲',
+      businessType: 'FOREIGN',
+      productCategory: 'YOGA',
+      currency: 'CNY',
+      status: 'EXECUTING',
+      version: 12,
+      businessVersion: 2,
+      signedDate: '2026-05-28',
+      items: [
+        {
+          id: 'item',
+          skuId: 'sku',
+          skuName: '规格',
+          specVersion: 'V1',
+          specification: '规格',
+          unit: '件',
+          quantity: '2',
+          unitPrice: '10',
+        },
+      ],
+      allowedActions: ['UPDATE_CONTRACT'],
+    };
+    api.customers.mockResolvedValue({
+      list: [
+        { id: 'customer', name: '客户甲', type: 'CUSTOMER', active: true },
+      ],
+      total: 1,
+    });
+    api.update
+      .mockRejectedValueOnce(new Error('请重试'))
+      .mockResolvedValue(contract);
+    const { host } = await mountEditor('FOREIGN', contract);
+    expect(host.textContent).not.toContain(generated);
+    expect(
+      host.querySelector<HTMLInputElement>('[data-label="内部单号"] input')
+        ?.value,
+    ).toBe('');
+    button(host, '保存合同修订').click();
+    await vi.waitFor(() => expect(host.textContent).toContain('请重试'));
+    expect(api.update.mock.calls[0]?.[4]).toMatchObject({ name: generated });
+
+    await fill(host, '内部单号', 'FYY18020261123-1Y');
+    button(host, '保存合同修订').click();
+    await vi.waitFor(() => expect(api.update).toHaveBeenCalledTimes(2));
+    expect(api.update.mock.calls[1]?.[4]).toMatchObject({
+      name: 'FYY18020261123-1Y',
+    });
+  });
+
   it('corrects the subject on the existing contract and keeps unsaved edits for the next revision', async () => {
     const contract: Contract = {
       id: 'contract',

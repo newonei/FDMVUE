@@ -29,6 +29,7 @@ import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewSt
 
 import FilePreviewButton from '../../../components/FilePreviewButton.vue';
 import { errorText } from '../../../data';
+import { documentLabel } from '../../../document-label';
 import InvoiceUpload from '../../../finance/procurement/components/InvoiceUpload.vue';
 import { confirmVoidInvoice } from '../../../finance/procurement/components/void-invoice';
 
@@ -73,7 +74,7 @@ const paymentOptions = computed(() =>
     )
     .map((row) => ({
       value: String(row.id),
-      label: `${String(row.code)} · ${String(row.paidAt ?? '')} · ${new BigNumber(String(row.amount ?? 0)).toFormat(2)}`,
+      label: `${documentLabel(row, '付款记录')} · ${String(row.paidAt ?? '')} · ${new BigNumber(String(row.amount ?? 0)).toFormat(2)}`,
     })),
 );
 
@@ -220,7 +221,7 @@ watch(() => props.view.id, load, { immediate: true });
           new BigNumber(String(record.amount)).toFormat(2)
         }}</span>
         <span v-else-if="column.key === 'payment'">{{
-          record.paymentCode ?? '—'
+          record.paymentId || record.paymentCode ? '已关联付款' : '—'
         }}</span>
         <Tag
           v-else-if="column.key === 'status'"

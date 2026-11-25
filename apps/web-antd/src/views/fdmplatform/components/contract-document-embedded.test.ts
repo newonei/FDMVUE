@@ -367,7 +367,8 @@ describe('locked contract document actions', () => {
     expect(mocks.contract).toHaveBeenCalledExactlyOnceWith('contract-a');
     expect(host.querySelector('[data-picker]')).toBeNull();
     expect(host.querySelector('[data-action="CREATE_REQUEST"]')).not.toBeNull();
-    expect(host.textContent).toContain('HT-contract-a');
+    expect(host.textContent).toContain('合同 contract-a');
+    expect(host.textContent).not.toContain('HT-contract-a');
     click(host, '提交当前单据');
     await settle();
     expect(mocks.action).toHaveBeenCalledExactlyOnceWith(
@@ -486,9 +487,10 @@ describe('locked contract document actions', () => {
     await settle();
     slow.reject(new Error('旧合同迟到失败'));
     await settle();
-    expect(host.textContent).toContain('HT-contract-b');
+    expect(host.textContent).toContain('合同 contract-b');
+    expect(host.textContent).not.toContain('HT-contract-b');
     expect(host.textContent).not.toContain('旧合同迟到失败');
-    expect(host.textContent).not.toContain('HT-contract-a');
+    expect(host.textContent).not.toContain('合同 contract-a');
   });
   it('does not reopen a closed child when its pending preparation completes', async () => {
     const slow = deferred<Contract>();

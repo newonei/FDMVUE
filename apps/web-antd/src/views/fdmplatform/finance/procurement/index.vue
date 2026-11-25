@@ -36,6 +36,7 @@ import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewSt
 
 import { useInMergedView } from '../../components/merged-view';
 import { rows as businessRows, errorText, money } from '../../data';
+import { documentLabel, documentRowLabel } from '../../document-label';
 import { procurementFinanceAiCheckTypes } from '../../documents/ai-check-types';
 import BusinessDocumentDetail from '../../documents/BusinessDocumentDetail.vue';
 import { withoutDetailQuery } from '../../documents/navigation';
@@ -226,7 +227,7 @@ const columns = computed(() =>
           align: 'right' as const,
         },
         { title: '供应商 / 收款方', key: 'payee', width: 200, ellipsis: true },
-        { title: '采购单 / 付款单号', key: 'name', width: 260 },
+        { title: '采购单 / 付款主题', key: 'name', width: 260 },
         { title: '付款日期', key: 'paidAt', width: 110 },
         { title: '付款分类', key: 'method', width: 110 },
         { title: '是否收票', key: 'invoice', width: 100 },
@@ -302,7 +303,7 @@ async function orderPicked(row: DocumentRow) {
     paymentOrder.value = {
       contractId,
       orderId,
-      code: String(row.record?.code ?? row.record?.orderCode ?? ''),
+      code: documentRowLabel(row, ''),
       supplierName: String(row.record?.supplierName ?? ''),
       currency: String(summary.currency ?? row.record?.currency ?? ''),
       available: summary.availablePaymentAmount,
@@ -414,7 +415,7 @@ watch(
 </Alert><Space wrap>
           <Input.Search
             v-model:value="keyword"
-            placeholder="搜索单据名称或编号"
+            placeholder="搜索单据主题"
             @search="
               page = 1;
               load();
@@ -557,10 +558,10 @@ watch(
           <template #bodyCell="{ column, record }">
             <span v-if="column.key === 'name'" class="name-cell"><Button
                 type="link"
-                :title="[record.code, record.name].filter(Boolean).join(' · ')"
+                :title="documentLabel(record, '查看单据')"
                 @click="show(record as ProcurementFinanceRecord)"
               >
-                {{ record.code }} · {{ record.name }} </Button><Button
+                {{ documentLabel(record, '查看单据') }} </Button><Button
                 v-if="record.invoiceId"
                 type="link"
                 size="small"
@@ -570,7 +571,7 @@ watch(
                 {{
                   (record.invoice?.orderCount ?? 1) > 1
                     ? `集中收票-查看来源（${record.invoice?.orderCount} 个采购单）`
-                    : `付款发票 ${record.invoice?.code ?? ''} · 查看来源`
+                    : `付款发票${record.invoice?.invoiceNo ? ` ${record.invoice.invoiceNo}` : ''} · 查看来源`
                 }}
               </Button></span><span
               v-else-if="column.key === 'payer'"

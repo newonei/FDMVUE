@@ -7,10 +7,15 @@ import { computed } from 'vue';
 import { Empty, Tag } from 'ant-design-vue';
 import BigNumber from 'bignumber.js';
 
+import { documentLabel } from '../../../document-label';
 import {
   financeStatus,
   invoiceStates,
 } from '../../../finance/procurement/model';
+import {
+  inSubject,
+  returnSubject,
+} from '../../../inventory-center/components/doc-model';
 
 /**
  * 采购单「时间线」（金智同款）：付款记录、付款发票、入库单、退货单按时间倒序列在一起，
@@ -48,7 +53,7 @@ const entries = computed<Entry[]>(() => {
       key: `pay-${row.id}`,
       kind: '付款记录',
       tab: 'payments',
-      title: `${String(row.paidAt ?? '')} ${String(row.code ?? '')}`.trim(),
+      title: documentLabel(row, '付款记录'),
       time: String(row.createdAt ?? row.paidAt ?? ''),
       amount: money(row.amount),
       tags: [
@@ -69,7 +74,7 @@ const entries = computed<Entry[]>(() => {
         row.status === 'VALID'
           ? { color: 'success', label: '有效' }
           : { label: '已作废' },
-        ...(row.paymentCode ? [{ label: `付款 ${row.paymentCode}` }] : []),
+        ...(row.paymentId || row.paymentCode ? [{ label: '已关联付款' }] : []),
       ],
     });
   }
@@ -78,7 +83,7 @@ const entries = computed<Entry[]>(() => {
       key: `in-${row.id}`,
       kind: '入库单',
       tab: 'stock',
-      title: `${row.code} · ${row.warehouseName}`,
+      title: inSubject(row),
       time: row.createdAt,
       amount: money(row.amount),
       tags: [
@@ -96,7 +101,7 @@ const entries = computed<Entry[]>(() => {
       key: `ret-${row.id}`,
       kind: '采购退货单',
       tab: 'stock',
-      title: row.code,
+      title: returnSubject(row),
       time: String((row as unknown as Record<string, unknown>).createdAt ?? ''),
       tags: [],
     });

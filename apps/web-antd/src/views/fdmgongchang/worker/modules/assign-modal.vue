@@ -97,26 +97,28 @@ async function submit() {
         show-icon
         type="info"
       />
-      <section class="flex flex-col gap-2">
-        <h3 class="m-0 text-sm font-semibold">
-          工序岗位<span class="ml-2 text-xs font-normal text-muted-foreground">能开哪道工序的工序单</span>
-        </h3>
-        <Checkbox.Group v-model:value="form.posts" class="flex flex-wrap gap-y-2">
-          <Checkbox v-for="p in processPosts" :key="p.code" :value="p.code">
-            {{ p.label }}
-          </Checkbox>
-        </Checkbox.Group>
-      </section>
-      <section class="flex flex-col gap-2">
-        <h3 class="m-0 text-sm font-semibold">
-          管理岗位<span class="ml-2 text-xs font-normal text-muted-foreground">班组长可以替本班组成员开单</span>
-        </h3>
-        <Checkbox.Group v-model:value="form.posts" class="flex flex-wrap gap-y-2">
-          <Checkbox v-for="p in managePosts" :key="p.code" :value="p.code">
-            {{ p.label }}
-          </Checkbox>
-        </Checkbox.Group>
-      </section>
+      <Checkbox.Group v-model:value="form.posts" class="flex flex-col gap-4">
+        <section class="flex flex-col gap-2">
+          <h3 class="m-0 text-sm font-semibold">
+            工序岗位<span class="ml-2 text-xs font-normal text-muted-foreground">能开哪道工序的工序单</span>
+          </h3>
+          <div class="flex flex-wrap gap-2">
+            <Checkbox v-for="p in processPosts" :key="p.code" :value="p.code">
+              {{ p.label }}
+            </Checkbox>
+          </div>
+        </section>
+        <section class="flex flex-col gap-2">
+          <h3 class="m-0 text-sm font-semibold">
+            管理岗位<span class="ml-2 text-xs font-normal text-muted-foreground">班组长可以替本班组成员开单</span>
+          </h3>
+          <div class="flex flex-wrap gap-2">
+            <Checkbox v-for="p in managePosts" :key="p.code" :value="p.code">
+              {{ p.label }}
+            </Checkbox>
+          </div>
+        </section>
+      </Checkbox.Group>
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label for="worker-team" class="flex flex-col gap-1 text-xs text-muted-foreground">
           班组

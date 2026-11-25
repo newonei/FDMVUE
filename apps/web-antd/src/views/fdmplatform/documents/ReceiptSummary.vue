@@ -6,6 +6,7 @@ import { computed } from 'vue';
 import { Tag } from 'ant-design-vue';
 
 import { money, receiptStatusLabel } from '../data';
+import { contractLabel } from '../document-label';
 import { receiptSettlement } from './model';
 import { contractTarget, entityTarget } from './navigation';
 import RelatedLink from './RelatedLink.vue';
@@ -74,7 +75,7 @@ const facts = computed(() =>
         <dt>合同/订单</dt>
         <dd>
           <RelatedLink :target="contractTarget(contract.id)">
-            {{ contract.code }} · {{ contract.name }}
+            {{ contractLabel(contract) }}
           </RelatedLink>
         </dd>
       </div>

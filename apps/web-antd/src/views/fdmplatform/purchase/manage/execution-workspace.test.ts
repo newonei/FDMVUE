@@ -645,9 +645,7 @@ describe('采购订单原页执行', () => {
   it('输入采购主题查单并回到第一页', async () => {
     const { host } = await mount('?page=2');
     const search = host.querySelector<HTMLInputElement>('input')!;
-    expect(search.placeholder).toBe(
-      '搜索采购主题、内部单号、合同号、客户或供应商',
-    );
+    expect(search.placeholder).toBe('搜索采购主题、内部单号、客户或供应商');
     search.value = '瑜伽垫备货';
     search.dispatchEvent(new Event('input'));
     await nextTick();

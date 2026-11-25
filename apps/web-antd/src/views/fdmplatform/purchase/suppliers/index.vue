@@ -475,7 +475,7 @@ onMounted(refresh);
               class="stack"
               :title="
                 record.stats?.lastOrderDate
-                  ? `最近下单 ${record.stats.lastOrderDate} · ${record.stats.lastOrderCode ?? ''}`
+                  ? `最近下单 ${record.stats.lastOrderDate}`
                   : undefined
               "
             >

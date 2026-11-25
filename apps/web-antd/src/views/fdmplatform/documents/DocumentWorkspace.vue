@@ -42,6 +42,10 @@ import {
 } from '../data';
 import { formatTemporalField } from '../date-display';
 import { personLabel } from '../directory';
+import {
+  contractLabel as displayContract,
+  documentRowLabel,
+} from '../document-label';
 import { receiptFxDisplay } from '../finance/exchange-rates/model';
 import {
   transferStatusLabel,
@@ -212,6 +216,13 @@ const actionContractId = ref<string>();
 let sequence = 0;
 let locateSequence = 0;
 const locateError = ref('');
+function rowSubject(row: DocumentRow) {
+  const fallback =
+    effectiveKind.value === 'requests'
+      ? displayContract({ name: row.contractName }, '')
+      : '';
+  return documentRowLabel(row, fallback);
+}
 function openRow(row: DocumentRow) {
   ++locateSequence;
   locateError.value = '';
@@ -533,7 +544,7 @@ async function loadContext() {
       const current = contractId.value;
       const contract = await getContract(current);
       if (current === contractId.value)
-        contractLabel.value = `${contract.code} · ${contract.name}`;
+        contractLabel.value = displayContract(contract);
     } catch (error) {
       pageError.value = errorText(error);
     }
@@ -721,8 +732,8 @@ onMounted(async () => {
                 : actionTitle(action)
             }}
 </Button><Button :loading="loading" @click="refreshDocuments">
-刷新
-</Button>
+            刷新
+          </Button>
 </Space><Alert v-if="contractId" type="info" show-icon>
           <template #message>
             <Space>
@@ -740,7 +751,7 @@ onMounted(async () => {
           />
           <Input.Search
             v-model:value="keyword"
-            placeholder="搜索内部单号、合同号、客户或单据内容"
+            placeholder="搜索内部单号、主题、客户或单据内容"
             style="width: 310px"
             allow-clear
             @search="search"
@@ -858,22 +869,11 @@ onMounted(async () => {
           <template #bodyCell="{ column, record }">
             <div v-if="column.key === 'contract'">
               <Button
-                v-if="record.standaloneId"
+                v-if="rowSubject(record as DocumentRow) || record.standaloneId"
                 type="link"
-                :title="
-                  record.code ||
-                  record.record.code ||
-                  record.name ||
-                  record.record.name
-                "
                 @click="openRow(record as DocumentRow)"
               >
-                {{
-                  record.code ||
-                  record.record.code ||
-                  record.name ||
-                  record.record.name
-                }}
+                {{ rowSubject(record as DocumentRow) || '查看单据' }}
               </Button>
               <div class="fdm-cell-line">
                 <Tag v-if="record.migration?.sourceSystem === 'JINZHI'">
@@ -886,32 +886,22 @@ onMounted(async () => {
                         ? 'calc(100% - 50px)'
                         : '100%',
                   }"
-                  :title="
-                    [record.contractCode, record.contractName]
-                      .filter(Boolean)
-                      .join(' · ')
-                  "
+                  :title="displayContract({ name: record.contractName })"
                   :target="contractTarget(record.contractId)"
                 >
                   <strong>{{
-                    contractReferenceText(
-                      record.contractCode,
-                      record.contractName,
-                      record.contractId,
-                    )
+                    rowSubject(record as DocumentRow) ===
+                    displayContract({ name: record.contractName }, '')
+                      ? record.contractId
+                        ? '查看关联合同'
+                        : '尚未关联合同'
+                      : contractReferenceText(
+                          record.contractCode,
+                          record.contractName,
+                          record.contractId,
+                        )
                   }}</strong>
                 </RelatedLink>
-              </div>
-              <div
-                v-if="
-                  !record.standaloneId &&
-                  record.contractCode &&
-                  record.contractName
-                "
-                class="fdm-cell-line"
-                :title="record.contractName"
-              >
-                {{ record.contractName }}
               </div>
             </div>
             <AiReviewStatus

@@ -29,6 +29,7 @@ import { contractActionWithAttachments } from '#/api/fdmplatform/submissions';
 import CreationAttachments from '../../components/CreationAttachments.vue';
 import RemoteMasterSelect from '../../components/RemoteMasterSelect.vue';
 import { errorText, money } from '../../data';
+import { contractLabel } from '../../document-label';
 import ContractPicker from '../../documents/ContractPicker.vue';
 import ProductStructureDetails from '../../products/components/ProductStructureDetails.vue';
 import { latestTaskQuotes, localDate } from './comparison';
@@ -310,7 +311,8 @@ watch(
   >
     <template #title>
       录入报价<span v-if="context" class="title-sub">
-        · {{ context.title }} · {{ contract?.code }}</span>
+        · {{ context.title }} ·
+        {{ contract ? contractLabel(contract) : '' }}</span>
     </template>
     <Spin :spinning="loading">
       <Alert

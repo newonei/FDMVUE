@@ -47,6 +47,7 @@ export interface CustomsBatch extends CustomsDetails {
   version: number;
   contractId: string;
   contractCode: string;
+  contractName?: string;
   contractVersion: number;
   companyId: number;
   ownerUserId?: number;
@@ -76,6 +77,7 @@ export interface CustomsExpense extends BusinessRecord {
 export interface CustomsSource {
   contractId: string;
   contractCode: string;
+  contractName?: string;
   contractVersion: number;
   companyId: number;
   items: CustomsLine[];

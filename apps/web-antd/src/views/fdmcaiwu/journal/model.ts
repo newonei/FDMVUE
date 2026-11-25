@@ -1,10 +1,18 @@
-import type { FdmcaiwuJournalApi as Api } from '#/api/fdmcaiwu/journal';
+import type {
+  FdmcaiwuBankBalanceApi,
+  FdmcaiwuJournalApi as Api,
+} from '#/api/fdmcaiwu/journal';
 
 import dayjs from 'dayjs';
 
 export const DIRECTION_LABELS: Record<Api.Direction, string> = {
   EXPENSE: '支出',
   INCOME: '收入',
+};
+
+export const ACCOUNT_TYPE_LABELS: Record<FdmcaiwuBankBalanceApi.AccountType, string> = {
+  BANK: '银行账户',
+  PRIVATE: '私账账户',
 };
 
 export const INVOICE_STATUS_OPTIONS: {
@@ -29,36 +37,35 @@ export const CURRENCY_OPTIONS = [
 ].map((value) => ({ label: value, value }));
 
 export const DIMENSION_OPTIONS: { label: string; value: Api.Dimension }[] = [
-  { label: '按收付款行', value: 'BANK' },
+  { label: '按收付款账户', value: 'BANK' },
   { label: '按经手人', value: 'HANDLER' },
   { label: '按部门', value: 'DEPT' },
   { label: '按类别', value: 'CATEGORY' },
   { label: '按所属公司', value: 'COMPANY' },
 ];
 
-/** 两张表名称不同的列：收入的「收款行 / 往来单位 / 备注/单据号」对应支出的「付款行 / 收款方 / 备注」 */
 export function labels(direction: Api.Direction) {
   return direction === 'INCOME'
     ? {
         amount: '金额',
-        bank: '收款行',
+        bank: '收款账户',
         counterparty: '往来单位',
         remark: '备注/单据号',
       }
-    : { amount: '付款金额', bank: '付款行', counterparty: '收款方', remark: '备注' };
+    : { amount: '付款金额', bank: '付款账户', counterparty: '收款方', remark: '备注' };
 }
 
 export function invoiceStatusOption(status?: null | string) {
   return INVOICE_STATUS_OPTIONS.find((item) => item.value === status);
 }
 
-/** 金额千分位两位小数；空值显示 — */
+/** 至少显示两位小数，有更精细的原币金额时保留至八位。 */
 export function formatMoney(value: unknown) {
   if (value === null || value === undefined || value === '') return '—';
   const number = Number(value);
   if (!Number.isFinite(number)) return '—';
   return number.toLocaleString('zh-CN', {
-    maximumFractionDigits: 2,
+    maximumFractionDigits: 8,
     minimumFractionDigits: 2,
   });
 }
@@ -116,6 +123,7 @@ export function emptyForm(direction: Api.Direction): Api.SaveReq {
   return {
     amount: '',
     bankAccount: undefined,
+    bankAccountId: null,
     billType: undefined,
     category: undefined,
     companyId: undefined,
@@ -152,6 +160,7 @@ export const STICKY_FIELDS = [
   'companyId',
   'companyName',
   'bankAccount',
+  'bankAccountId',
   'category',
   'deptName',
   'handlerName',
@@ -170,6 +179,8 @@ export function nextForm(previous: Api.SaveReq): Api.SaveReq {
 /** 接口返回的记录转成表单：null 换成 undefined，去掉只读字段 */
 export function toSaveReq(entry: Api.Entry): Api.SaveReq {
   const {
+    businessSourceId: _businessSourceId,
+    businessSourceType: _businessSourceType,
     createTime: _createTime,
     source: _source,
     sourceRef: _sourceRef,

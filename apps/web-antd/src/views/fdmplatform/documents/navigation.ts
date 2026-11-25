@@ -3,6 +3,7 @@ import type { DocumentKind } from './model';
 import type { BusinessRecord, Contract, DocumentRow } from '#/api/fdmplatform';
 
 import { rows } from '../data';
+import { contractLabel, documentLabel } from '../document-label';
 import {
   currentDocument,
   documentDefinitions,
@@ -258,7 +259,16 @@ export function relatedDocumentLinks(
   }
   function request(id: unknown) {
     const current = find(contract.requests, id);
-    doc('来源申请', 'requests', id, current?.name);
+    doc(
+      '来源申请',
+      'requests',
+      id,
+      documentLabel(
+        current,
+        contractLabel(contract, '采购申请'),
+        contract.code,
+      ),
+    );
   }
   function assignment(id: unknown) {
     const current = find(contract.assignments, id);
@@ -296,7 +306,12 @@ export function relatedDocumentLinks(
   }
   function plan(id: unknown) {
     const current = find(contract.plans, id);
-    doc('来源方案', 'plans', id, current?.name);
+    doc(
+      '来源方案',
+      'plans',
+      id,
+      documentLabel(current, '采购方案', contract.code),
+    );
     if (current) request(current.requestId);
   }
   function order(id: unknown) {
@@ -306,7 +321,7 @@ export function relatedDocumentLinks(
       'orders',
       id,
       current
-        ? [current.code || current.name, current.supplierName]
+        ? [documentLabel(current, '', contract.code), current.supplierName]
             .filter(Boolean)
             .join(' · ') || '采购单'
         : undefined,
@@ -321,11 +336,7 @@ export function relatedDocumentLinks(
       );
     }
   }
-  add(
-    '关联合同',
-    `${contract.code} · ${contract.name}`,
-    contractTarget(contract.id),
-  );
+  add('关联合同', contractLabel(contract), contractTarget(contract.id));
   add(
     '客户',
     contract.customerName,
@@ -358,7 +369,12 @@ export function relatedDocumentLinks(
   }
   if (record.arrivalId) {
     const arrival = find(rows(contract.arrivals), record.arrivalId);
-    doc('原到货单', 'arrivals', record.arrivalId, arrival?.batchNo);
+    doc(
+      '原到货单',
+      'arrivals',
+      record.arrivalId,
+      documentLabel(arrival, '到货单'),
+    );
     if (arrival) {
       order(arrival.orderId);
       item(arrival.contractItemId);

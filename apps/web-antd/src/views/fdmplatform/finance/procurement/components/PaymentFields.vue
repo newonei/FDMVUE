@@ -7,6 +7,10 @@ import { Button } from 'ant-design-vue';
 
 import { money } from '../../../data';
 import {
+  contractLabel as displayContract,
+  documentLabel,
+} from '../../../document-label';
+import {
   businessDocumentTarget,
   contractTarget,
   documentTarget,
@@ -23,25 +27,21 @@ const contract = computed(() =>
     ? undefined
     : contractTarget(props.record.contractId),
 );
-const contractLabel = computed(() => {
-  const { contractCode, contractInternalOrderNo } = props.record;
-  return (
-    contractInternalOrderNo ||
-    (contractCode ? `合同单号 ${contractCode}` : '内部单号待补齐')
-  );
-});
+const contractLabel = computed(() =>
+  displayContract({ name: props.record.contractInternalOrderNo }),
+);
 const order = computed(() =>
   contract.value
     ? documentTarget('orders', props.record.contractId, props.record.orderId)
     : businessDocumentTarget('orders', props.record.orderId),
 );
-const orderLabel = computed(() => {
-  const subject = props.record.orderSubject?.trim();
-  const code = props.record.orderCode?.trim();
-  return subject && code && subject !== code
-    ? `${subject}（单号 ${code}）`
-    : subject || code || '查看采购单';
-});
+const orderLabel = computed(() =>
+  documentLabel(
+    { subject: props.record.orderSubject, code: props.record.orderCode },
+    '查看采购单',
+    props.record.contractCode,
+  ),
+);
 const supplier = computed(
   () => props.record.supplierName || props.record.invoice?.supplierName,
 );
@@ -111,7 +111,7 @@ const items = computed(() => {
     <div v-if="record.invoiceId" class="wide">
       <dt>来源（付款发票）</dt>
       <dd>
-        {{ record.invoice?.code ?? record.invoice?.invoiceNo ?? '付款发票' }}
+        {{ record.invoice?.invoiceNo ?? '付款发票' }}
         · {{ record.invoice?.orderCount ?? 1 }} 个采购单
         <Button type="link" size="small" @click="emit('sources')">
           查看来源

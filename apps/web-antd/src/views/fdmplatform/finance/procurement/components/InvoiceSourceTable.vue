@@ -12,7 +12,9 @@ import {
 } from 'ant-design-vue';
 import BigNumber from 'bignumber.js';
 
-/** 发票的来源采购单表：查看来源弹窗和发票详情共用；点单号打开采购单。 */
+/** 发票的来源采购单表：查看来源弹窗和发票详情共用；点采购主题打开采购单。 */
+import { documentLabel } from '../../../document-label';
+
 const props = defineProps<{
   currency?: string;
   orders: InvoiceSourceOrder[];
@@ -49,8 +51,7 @@ const totals = computed(() => ({
       orders.length > 20 ? { pageSize: 20, showSizeChanger: false } : false
     "
     :columns="[
-      { title: '采购主题', dataIndex: 'subject', width: 220, ellipsis: true },
-      { title: '采购单号', key: 'code', width: 170 },
+      { title: '采购主题', key: 'subject', width: 220, ellipsis: true },
       { title: '采购分类', dataIndex: 'category', width: 100 },
       {
         title: '供应商',
@@ -66,13 +67,18 @@ const totals = computed(() => ({
   >
     <template #bodyCell="{ column, record }">
       <Button
-        v-if="column.key === 'code'"
+        v-if="column.key === 'subject'"
         type="link"
         size="small"
         :disabled="record.missing"
         @click="emit('open', record as InvoiceSourceOrder)"
       >
-        {{ record.orderCode || '查看采购单' }}
+        {{
+          documentLabel(
+            { subject: record.subject, code: record.orderCode },
+            '查看采购单',
+          )
+        }}
       </Button>
       <span v-else-if="column.key === 'orderAmount'" class="num">
         {{ money(record.orderAmount) }}

@@ -22,27 +22,36 @@ import dayjs from 'dayjs';
 
 import { saveBankAccount } from '#/api/fdmcaiwu/journal';
 
-import { CURRENCY_OPTIONS } from '../model';
+import { ACCOUNT_TYPE_LABELS, CURRENCY_OPTIONS } from '../../journal/model';
 
 /**
- * 新增或修改一个银行账户和它的期初余额。开户行名称要和日记账里的收款行/付款行写法一致，
- * 改名时日记账里的旧写法会一起改掉。
+ * 账户简称用于匹配日记账里的历史账户名称。
  */
-const props = defineProps<{ bankNames: string[] }>();
+const props = defineProps<{ companies: Api.CompanyOption[] }>();
 const emit = defineEmits<{ saved: [] }>();
 
-const NATURE_OPTIONS = ['基本户', '一般户', '外币户', '现金', '微信', '支付宝'].map(
+const NON_BANK_NATURES = ['现金', '微信', '支付宝'];
+const NATURE_OPTIONS = ['基本户', '一般户', '外币户', ...NON_BANK_NATURES].map(
   (value) => ({ value }),
+);
+const ACCOUNT_TYPE_OPTIONS = Object.entries(ACCOUNT_TYPE_LABELS).map(
+  ([value, label]) => ({ label, value }),
 );
 
 const open = ref(false);
 const saving = ref(false);
 const formRef = ref<FormInstance>();
 const originalName = ref('');
-const form = reactive<Api.Account>(empty());
+const form = reactive<Api.AccountSaveReq>(empty());
 
-function empty(): Api.Account {
+function empty(): Api.AccountSaveReq {
   return {
+    accountName: '',
+    accountNo: '',
+    accountType: 'BANK',
+    active: true,
+    bankName: '',
+    companyId: null,
     currency: 'CNY',
     enabled: true,
     name: '',
@@ -57,13 +66,33 @@ function empty(): Api.Account {
 const renaming = computed(
   () => Boolean(form.id) && originalName.value !== '' && originalName.value !== form.name.trim(),
 );
-const nameOptions = computed(() => props.bankNames.map((value) => ({ value })));
+const isPrivate = computed(() => form.accountType === 'PRIVATE');
+const bankInfoRequired = computed(() =>
+  !isPrivate.value && !NON_BANK_NATURES.includes(form.nature?.trim() ?? ''),
+);
+const companyOptions = computed(() => {
+  const choices = props.companies.map(({ id, name }) => ({ label: name, value: id }));
+  if (form.companyId != null && !choices.some(({ value }) => value === form.companyId)) {
+    choices.push({ label: `公司 #${form.companyId}`, value: form.companyId });
+  }
+  return choices;
+});
 
-/** 新增传开户行名称（余额表里未设置的那行），修改传已有账户 */
-function show(data?: Api.Account | string) {
+/** 从未设置的余额行新增时带入日记账原有名称 */
+function show(data?: Api.Account | string, companyId?: null | number) {
   Object.keys(form).forEach((key) => delete (form as Record<string, unknown>)[key]);
-  Object.assign(form, empty(), typeof data === 'object' ? data : { name: data ?? '' });
-  originalName.value = typeof data === 'object' ? data.name : '';
+  const account = typeof data === 'object' ? data : undefined;
+  const { companyName: _companyName, ...fields } = account ?? {};
+  Object.assign(form, empty(), fields, {
+    accountName: account?.accountName ?? '',
+    accountNo: account?.accountNo ?? '',
+    accountType: account?.accountType ?? 'BANK',
+    active: account?.active ?? true,
+    bankName: account?.bankName ?? '',
+    companyId: account ? account.companyId ?? null : companyId ?? null,
+    name: account?.name ?? (typeof data === 'string' ? data : ''),
+  });
+  originalName.value = account?.name ?? '';
   open.value = true;
   nextTick(() => formRef.value?.clearValidate());
 }
@@ -77,7 +106,14 @@ async function save() {
   }
   saving.value = true;
   try {
-    await saveBankAccount({ ...form, name: form.name.trim() });
+    await saveBankAccount({
+      ...form,
+      accountName: form.accountName.trim(),
+      accountNo: form.accountNo.trim(),
+      bankName: form.bankName.trim(),
+      companyId: form.companyId ?? null,
+      name: form.name.trim(),
+    });
     message.success(renaming.value ? '已保存，日记账里的写法已同步改名' : '已保存');
     open.value = false;
     emit('saved');
@@ -90,7 +126,7 @@ async function save() {
 <template>
   <Modal
     v-model:open="open"
-    :title="form.id ? '修改银行账户' : '新增银行账户'"
+    :title="form.id ? '修改账户' : '新增账户'"
     :confirm-loading="saving"
     ok-text="保存"
     width="640px"
@@ -98,19 +134,48 @@ async function save() {
   >
     <Form ref="formRef" :model="form" layout="vertical" class="account-form">
       <div class="account-grid">
-        <FormItem
-          label="开户行"
-          name="name"
-          class="account-span-2"
-          :rules="[{ required: true, whitespace: true, message: '请填写开户行' }]"
-          extra="和日记账里的收款行/付款行写法一致，才会算进这个账户"
-        >
-          <AutoComplete
-            v-model:value="form.name"
-            :options="nameOptions"
-            :filter-option="(input: string, option: { value?: unknown }) => String(option.value ?? '').includes(input.trim())"
-            placeholder="如 工行基本户"
+        <FormItem label="所属公司" name="companyId">
+          <Select
+            :value="form.companyId ?? undefined"
+            :options="companyOptions"
+            allow-clear
+            show-search
+            option-filter-prop="label"
+            placeholder="未归属主体"
+            @update:value="form.companyId = typeof $event === 'number' ? $event : null"
           />
+        </FormItem>
+        <FormItem label="账户类型" name="accountType">
+          <Select v-model:value="form.accountType" :options="ACCOUNT_TYPE_OPTIONS" />
+        </FormItem>
+        <FormItem
+          label="账户简称"
+          name="name"
+          :rules="[{ required: true, whitespace: true, message: '请填写账户简称' }]"
+          extra="填写原有名称可匹配历史日记账"
+        >
+          <Input
+            v-model:value="form.name"
+            :maxlength="128"
+            :placeholder="isPrivate ? '如 张三代收' : '如 工行基本户'"
+          />
+        </FormItem>
+        <FormItem label="开户行" name="bankName">
+          <Input v-model:value="form.bankName" :maxlength="128" />
+        </FormItem>
+        <FormItem
+          label="账户名称"
+          name="accountName"
+          :rules="[{ required: isPrivate || bankInfoRequired, whitespace: true, message: '请填写账户名称' }]"
+        >
+          <Input v-model:value="form.accountName" :maxlength="128" />
+        </FormItem>
+        <FormItem
+          label="银行账号"
+          name="accountNo"
+          :rules="[{ required: bankInfoRequired, whitespace: true, message: '请填写银行账号' }]"
+        >
+          <Input v-model:value="form.accountNo" :maxlength="64" />
         </FormItem>
         <FormItem label="性质">
           <AutoComplete v-model:value="form.nature" :options="NATURE_OPTIONS" allow-clear />
@@ -146,6 +211,9 @@ async function save() {
         </FormItem>
         <FormItem label="排序">
           <InputNumber v-model:value="form.sort" :precision="0" :style="{ width: '100%' }" />
+        </FormItem>
+        <FormItem label="业务可选" extra="停用后，历史关联和余额仍可查询">
+          <Switch v-model:checked="form.active" />
         </FormItem>
         <FormItem label="在余额表显示">
           <Switch v-model:checked="form.enabled" />

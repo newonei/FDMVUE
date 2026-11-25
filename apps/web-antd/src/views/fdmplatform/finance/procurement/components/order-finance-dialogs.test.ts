@@ -227,7 +227,8 @@ describe('采购单财务卡片弹窗办理', () => {
 
   it('点击关联请款、付款留在采购单内，更新自动刷新摘要，新建不会携带旧记录 ID', async () => {
     const { host, changed } = await mount();
-    click(host, 'QK-1 · 首期请款');
+    expect(host.textContent).not.toContain('QK-1');
+    click(host, '首期请款');
     await nextTick();
     expect(
       host.querySelector<HTMLElement>('[data-finance-dialog]')?.dataset
@@ -239,7 +240,8 @@ describe('采购单财务卡片弹窗办理', () => {
     expect(changed).toHaveBeenCalledOnce();
     click(host, '关闭财务单据');
     await nextTick();
-    click(host, 'FK-1 · 报销付款');
+    expect(host.textContent).not.toContain('FK-1');
+    click(host, '报销付款');
     await nextTick();
     expect(
       host.querySelector<HTMLElement>('[data-finance-dialog]')?.dataset.type,
@@ -290,7 +292,8 @@ describe('采购单财务卡片弹窗办理', () => {
       ],
     });
     const { host } = await mount();
-    click(host, 'OLD-1 · 首期请款');
+    expect(host.textContent).not.toContain('OLD-1');
+    click(host, '首期请款');
     await nextTick();
     expect(
       host.querySelector<HTMLElement>('[data-imported-id="import-1"]')?.dataset

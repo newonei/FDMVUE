@@ -361,7 +361,7 @@ function row(
     companyId: 2,
     contractStatus: 'ACTIVE',
     allowedActions: [],
-    record: { id, code: `单据-${id}`, name: id, status: 'ACTIVE' },
+    record: { id, code: `单据-${id}`, name: `主题 ${id}`, status: 'ACTIVE' },
   };
 }
 function deferred<T>() {
@@ -492,7 +492,8 @@ describe('contract document dialog entry points', () => {
         expectedAction ? 'true' : undefined,
       );
       expect(view.router.currentRoute.value.fullPath).toBe(view.route);
-      expect(view.host.textContent).toContain('HT-contract-a');
+      expect(view.host.textContent).toContain('合同contract-a');
+      expect(view.host.textContent).not.toContain('HT-contract-a');
     },
   );
 
@@ -652,7 +653,7 @@ describe('contract document dialog interactions and request lifecycle', () => {
       }),
     );
     const input = view.host.querySelector<HTMLInputElement>(
-      'input[placeholder="搜索本合同单据"]',
+      'input[placeholder="搜索本合同单据主题"]',
     )!;
     input.value = '  分批申请  ';
     input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -733,7 +734,8 @@ describe('contract document dialog interactions and request lifecycle', () => {
     expect(
       view.host.querySelector<HTMLElement>('[data-total]')?.dataset.total,
     ).toBe('1');
-    expect(view.host.textContent).toContain('HT-contract-b');
+    expect(view.host.textContent).toContain('合同contract-b');
+    expect(view.host.textContent).not.toContain('HT-contract-b');
     expect(view.updated).not.toHaveBeenCalled();
   });
 
@@ -788,7 +790,7 @@ describe('contract document dialog interactions and request lifecycle', () => {
       total: 2,
     });
     const view = await mount('plans');
-    click(view.host, '单据-native-row');
+    click(view.host, '主题 native-row');
     await settle();
     expect(
       view.host.querySelector<HTMLElement>('[data-standalone-id="native-id"]')
@@ -797,7 +799,7 @@ describe('contract document dialog interactions and request lifecycle', () => {
     expect(view.host.querySelector('[data-detail-id]')).toBeNull();
     click(view.host, '关闭原生单据');
     await settle();
-    click(view.host, '单据-wrong-row');
+    click(view.host, '主题 wrong-row');
     await settle();
     expect(view.host.textContent).toContain('此单据不属于当前合同');
     expect(view.host.querySelector('[data-standalone-id]')).toBeNull();
@@ -812,7 +814,7 @@ describe('contract document dialog interactions and request lifecycle', () => {
     const view = await mount('orders');
     click(view.host, '关闭建单');
     await settle();
-    click(view.host, '单据-existing-order');
+    click(view.host, '主题 existing-order');
     await settle();
     expect(
       view.host.querySelector<HTMLElement>('[data-detail-id="existing-order"]')
@@ -845,7 +847,8 @@ describe('contract document dialog interactions and request lifecycle', () => {
       total: 1,
     });
     const view = await mount('tasks');
-    click(view.host, '单据-native-row');
+    expect(view.host.textContent).not.toContain('单据-native-row');
+    click(view.host, '主题 native-row');
     await settle();
     mocks.businessResult = {
       contractId: 'contract-a',

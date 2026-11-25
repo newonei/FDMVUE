@@ -73,6 +73,7 @@ export interface CustomerStats extends Partial<CustomerCurrencyAmounts> {
   lastSignedDate?: null | string;
   lastContractId?: null | string;
   lastContractCode?: null | string;
+  lastContractName?: null | string;
   daysSinceLastSigned?: null | number;
   tier: CustomerTier;
   newThisYear: boolean;
@@ -109,6 +110,7 @@ export interface CustomerSnapshot {
     code?: null | string;
     currency?: null | string;
     id: string;
+    name?: null | string;
     signedDate?: null | string;
     status?: null | string;
   }[];
@@ -264,6 +266,14 @@ export function setCustomerStatus(
     `${base}/${encodeURIComponent(id)}/status`,
     data,
   );
+}
+export function deleteCustomer(
+  id: string,
+  data: { expectedVersion: number; idempotencyKey: string },
+) {
+  return requestClient.delete<boolean>(`${base}/${encodeURIComponent(id)}`, {
+    data,
+  });
 }
 export function getOkkiCustomerStatus() {
   return requestClient.get<{

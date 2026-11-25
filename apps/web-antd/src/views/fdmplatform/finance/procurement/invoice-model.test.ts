@@ -13,6 +13,7 @@ const orders = [
     contractId: 'c1',
     orderId: 'a',
     code: 'CG001',
+    label: '瑜伽砖首批',
     remaining: '3000',
   },
   { key: 'b', contractId: '', orderId: 'b', code: 'CG002', remaining: '8000' },
@@ -46,7 +47,7 @@ describe('集中收票分配', () => {
     );
     expect(
       allocationProblem('15600', { ...full, a: '3100' }, orders),
-    ).toContain('CG001 超额开票');
+    ).toContain('瑜伽砖首批 超额开票');
     expect(allocationProblem('0', full, orders)).toContain('大于 0');
     expect(allocationProblem('1', {}, orders)).toContain('至少一张');
   });

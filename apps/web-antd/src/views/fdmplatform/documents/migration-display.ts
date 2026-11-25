@@ -1,12 +1,14 @@
 import { money } from '../data';
+import { contractLabel } from '../document-label';
 export function contractReferenceText(
-  primary: unknown,
-  fallback: unknown,
+  _code: unknown,
+  name: unknown,
   id: unknown,
 ) {
-  for (const value of [primary, fallback])
-    if (typeof value === 'string' && value.trim()) return value.trim();
-  return typeof id === 'string' && id.trim() ? '查看关联合同' : '尚未关联合同';
+  return contractLabel(
+    { name },
+    typeof id === 'string' && id.trim() ? '查看关联合同' : '尚未关联合同',
+  );
 }
 
 export function nativeMoney(value: unknown, currency: unknown) {

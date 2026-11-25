@@ -17,7 +17,7 @@ import { canCancelReceipt } from '../documents/model';
 
 import './compact-tables.css';
 
-/** 合同详情下属单据页签的内容：一类单据一张表，点单号打开原来的详情 */
+/** 合同详情下属单据页签的内容：一类单据一张表，点击主题打开详情 */
 const props = defineProps<{
   disabled?: boolean;
   group: RelatedDocGroup;
@@ -59,7 +59,7 @@ function reviewStatus(row: RelatedDocRow) {
     : { state: 'UNAVAILABLE' as const };
 }
 const columns = computed(() => [
-  { key: 'code', title: '单号', width: 180 },
+  { key: 'title', title: '主题 / 内部单号', width: 180 },
   ...props.group.columns.map((title, index) => ({
     key: `c${index}`,
     title,
@@ -118,14 +118,14 @@ const cell = (row: RelatedDocRow, key: string) =>
     >
       <template #bodyCell="{ column, record }">
         <Button
-          v-if="column.key === 'code'"
+          v-if="column.key === 'title'"
           type="link"
           :class="{ voided: (record as RelatedDocRow).voided }"
           :disabled="disabled"
-          :title="(record as RelatedDocRow).code"
+          :title="(record as RelatedDocRow).title"
           @click="emit('open', record as RelatedDocRow)"
         >
-          {{ (record as RelatedDocRow).code }}
+          {{ (record as RelatedDocRow).title }}
         </Button>
         <Tag
           v-else-if="column.key === 'status'"

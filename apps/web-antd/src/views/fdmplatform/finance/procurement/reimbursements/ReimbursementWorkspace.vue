@@ -27,6 +27,7 @@ import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewSt
 
 import { useInMergedView } from '../../../components/merged-view';
 import { errorText, expenseCategories } from '../../../data';
+import { documentLabel } from '../../../document-label';
 import BusinessDocumentDetail from '../../../documents/BusinessDocumentDetail.vue';
 import { withoutDetailQuery } from '../../../documents/navigation';
 import { useOwnedRoute } from '../../../documents/useOwnedRoute';
@@ -326,8 +327,8 @@ onBeforeUnmount(() => {
           <Input.Search
             v-model:value="keyword"
             allow-clear
-            placeholder="搜索主题、单号或收款人"
-            aria-label="搜索主题、单号或收款人"
+            placeholder="搜索主题或收款人"
+            aria-label="搜索主题或收款人"
             @search="searchRecords"
           />
           <Select
@@ -368,7 +369,7 @@ onBeforeUnmount(() => {
             pageSizeOptions: ['15', '30', '50'],
           }"
           :columns="[
-            { title: '报销主题 / 单号', key: 'subject', width: 270 },
+            { title: '报销主题', key: 'subject', width: 270 },
             { title: '申请人 / 日期', key: 'applicant', width: 150 },
             { title: '部门 / 费用归属', key: 'company', width: 190 },
             { title: '报销金额', key: 'amount', width: 150, align: 'right' },
@@ -392,8 +393,8 @@ onBeforeUnmount(() => {
                 type="button"
                 @click="show(row as ProcurementFinanceRecord)"
               >
-                {{ row.name || row.code }}
-</button><small>{{ row.code }}</small>
+                {{ documentLabel(row, '查看报销单') }}
+              </button>
             </template>
             <template v-else-if="column.key === 'applicant'">
               <span>{{ applicant(row as ProcurementFinanceRecord) }}</span><small>{{ dateText(row.createdAt) }}</small>

@@ -6,6 +6,7 @@ import { computed } from 'vue';
 import { Empty } from 'ant-design-vue';
 
 import { label, receiptStatusLabel } from '../data';
+import { documentLabel } from '../document-label';
 import { nativeMoney } from '../documents/migration-display';
 
 /**
@@ -13,6 +14,8 @@ import { nativeMoney } from '../documents/migration-display';
  * 每条显示类型、金额和状态；点一条跳到对应部门页签或打开采购单。
  */
 const props = defineProps<{
+  contractCode?: string;
+  contractName?: string;
   invoices: BusinessRecord[];
   orders: BusinessRecord[];
   receipts: BusinessRecord[];
@@ -46,13 +49,16 @@ function text(value: unknown) {
     ? String(value)
     : '';
 }
+function title(row: BusinessRecord, fallback: string) {
+  return documentLabel(row, props.contractName || fallback, props.contractCode);
+}
 const entries = computed<Entry[]>(() => {
   const list: Entry[] = [];
   for (const row of props.requests)
     list.push({
       key: `req-${text(row.id)}`,
       kind: '采购申请单',
-      title: text(row.code) || text(row.name) || '采购申请',
+      title: title(row, '采购申请'),
       time: time(row, 'createdAt', 'requestedAt', 'requiredDate'),
       status: label(row.assignmentStatus ?? row.status),
       tab: 'purchase',
@@ -61,7 +67,7 @@ const entries = computed<Entry[]>(() => {
     list.push({
       key: `po-${text(row.id)}`,
       kind: '采购单',
-      title: `${text(row.code) || '采购单'} · ${text(row.supplierName) || '供应商未注明'}`,
+      title: `${title(row, '采购单')} · ${text(row.supplierName) || '供应商未注明'}`,
       time: time(row, 'createdAt', 'orderedAt', 'orderDate'),
       amount: nativeMoney(row.amount, row.currency),
       status: label(row.status),
@@ -89,7 +95,7 @@ const entries = computed<Entry[]>(() => {
     list.push({
       key: `inv-${text(row.id)}`,
       kind: '开票记录',
-      title: text(row.invoiceNumber) || '发票号未填',
+      title: title(row, '开票记录'),
       time: time(row, 'createdAt', 'issuedAt'),
       amount: nativeMoney(row.amount, row.currency),
       status: label(row.status),

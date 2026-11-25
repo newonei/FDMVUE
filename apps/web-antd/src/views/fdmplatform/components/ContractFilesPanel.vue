@@ -47,12 +47,14 @@ import {
   contractAttachmentCategories,
   contractFileCounts,
   contractFileGroups,
+  contractFileSubject,
   filterContractFiles,
 } from './contract-files';
 import RenameFileDialog from './RenameFileDialog.vue';
 
 const props = defineProps<{
   contractId: string;
+  contractName?: string;
   directory?: Directory;
   error: string;
   listing?: ContractFileListing;
@@ -91,7 +93,9 @@ const groups = computed(() =>
 const hasSuperseded = computed(() =>
   items.value.some((item) => item.superseded),
 );
-const visible = computed(() => filterContractFiles(items.value, filter));
+const visible = computed(() =>
+  filterContractFiles(items.value, filter, props.contractName),
+);
 const groupColors: Record<string, string> = {
   CONTRACT: 'blue',
   PRODUCT: 'cyan',
@@ -471,7 +475,7 @@ const columns = [
         </Checkbox>
         <Input.Search
           v-model:value="filter.keyword"
-          placeholder="文件名 / 单号 / 分类"
+          placeholder="文件名 / 来源 / 分类"
           allow-clear
           style="width: 200px"
         />
@@ -511,10 +515,10 @@ const columns = [
         <span
           v-else-if="column.key === 'source'"
           class="source-cell"
-          :title="record.sourceCode ?? undefined"
+          :title="contractFileSubject(record as ContractFile, contractName)"
         >
           <Tag :color="groupColors[record.group]">{{ record.sourceTitle }}</Tag>
-          {{ record.sourceCode }}
+          {{ contractFileSubject(record as ContractFile, contractName) }}
         </span>
         <span v-else-if="column.key === 'size'">
           {{ attachmentSize(Number(record.size)) }}

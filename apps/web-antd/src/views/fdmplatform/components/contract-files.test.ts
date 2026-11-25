@@ -69,7 +69,7 @@ describe('合同全部附件', () => {
     expect(contractFileCounts(items, true).CUSTOMS).toBe(2);
   });
 
-  it('按分组、关键词筛选，关键词覆盖文件名、来源单号和分类', () => {
+  it('关键词覆盖文件名、来源主题和分类，系统单号不能筛出附件', () => {
     const base = { group: 'ALL', keyword: '', showSuperseded: false } as const;
     expect(
       filterContractFiles(items, { ...base, group: 'CUSTOMS' }).map(
@@ -84,10 +84,13 @@ describe('合同全部附件', () => {
       }),
     ).toHaveLength(2);
     expect(
-      filterContractFiles(items, { ...base, keyword: 'bg-7' }).map(
+      filterContractFiles(items, { ...base, keyword: 'fyy7' }, 'FYY7').map(
         (item) => item.id,
       ),
-    ).toEqual(['declaration-v2']);
+    ).toEqual(['pi']);
+    expect(filterContractFiles(items, { ...base, keyword: 'bg-7' })).toEqual(
+      [],
+    );
     expect(
       filterContractFiles(items, { ...base, keyword: ' 财务凭据 ' }).map(
         (item) => item.id,
@@ -95,8 +98,9 @@ describe('合同全部附件', () => {
     ).toEqual(['payment']);
   });
 
-  it('来源显示单据类型与单号，无单号时只显示类型', () => {
-    expect(contractFileSource(items[2]!)).toBe('报关批次 BG-7');
+  it('来源显示业务主题或类型', () => {
+    expect(contractFileSource(items[0]!, 'FYY7')).toBe('合同 FYY7');
+    expect(contractFileSource(items[2]!)).toBe('报关批次');
     expect(contractFileSource(items[3]!)).toBe('采购请款单');
   });
 });

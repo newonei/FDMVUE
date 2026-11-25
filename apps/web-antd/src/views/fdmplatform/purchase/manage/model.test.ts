@@ -53,7 +53,7 @@ describe('采购下单资料', () => {
       }),
     ).toContain('交付日期');
   });
-  it('编号与供应商分别保留，兼容独立原生行的顶层名称', () => {
+  it('收起采购生成单号，独立采购单仍显示供应商和合同内部单号', () => {
     expect(
       purchaseRowLabels({
         id: 'po',
@@ -100,7 +100,7 @@ describe('采购下单资料', () => {
       purchaseRowLabels({
         id: 'po',
         contractId: 'contract-1',
-        contractCode: ' ',
+        contractCode: 'HT-20261125-000004',
         record: { code: 'CG-1' },
       }).contract,
     ).toBe('查看关联合同');

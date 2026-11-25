@@ -108,7 +108,6 @@ const viewActions = computed(() =>
 
 const columns = [
   { title: '出库主题', key: 'subject', width: 260, fixed: 'left' as const },
-  { title: '出库单号', key: 'code', width: 150 },
   { title: '客户 / 去向', key: 'partner', width: 170 },
   { title: '对应单据', key: 'related', width: 150 },
   { title: '出库仓库', key: 'warehouse', width: 110 },
@@ -153,19 +152,19 @@ function quantity(row: StockOut) {
 }
 function saved(value: StockOut) {
   creating.value = false;
-  message.success(`已出库 ${value.code}`);
+  message.success('已出库');
   void load(true);
   viewing.value = value;
 }
-function savedOther(code: string) {
+function savedOther() {
   creatingOther.value = false;
-  message.success(`已出库 ${code}`);
+  message.success('已出库');
   void load(true);
 }
-function voided(code: string) {
+function voided() {
   voiding.value = undefined;
   closeDetail();
-  message.success(`已作废 ${code}`);
+  message.success('已作废出库单');
   void load();
 }
 onMounted(async () => {
@@ -199,7 +198,7 @@ onMounted(async () => {
       <Input.Search
         v-model:value="keyword"
         allow-clear
-        placeholder="出库单号、内部单号、合同号、客户、去向、产品"
+        placeholder="内部单号、客户、去向、产品"
         style="width: 320px"
         @search="load(true)"
       />
@@ -259,17 +258,12 @@ onMounted(async () => {
           :title="outSubject(record as StockOut)"
           @click="viewing = record as StockOut"
           >{{ outSubject(record as StockOut) }}</a>
-        <span v-else-if="column.key === 'code'" class="mono">{{
-          record.code
-        }}</span>
         <span v-else-if="column.key === 'partner'" class="ellipsis">{{
           outPartner(record as StockOut)
         }}</span>
         <div v-else-if="column.key === 'related'" class="cell">
-          <span class="mono">{{ record.contractCode }}</span>
-          <span v-if="record.kind === 'DIRECT'" class="muted">
-            直发 · {{ record.stockInCode }}
-          </span>
+          <span>{{ record.contractId ? '关联合同' : '' }}</span>
+          <span v-if="record.kind === 'DIRECT'" class="muted">直发入库</span>
         </div>
         <span v-else-if="column.key === 'warehouse'">{{
           record.warehouseName

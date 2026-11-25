@@ -12,6 +12,10 @@ import {
 } from '#/api/fdmplatform/warehouse';
 
 import { errorText } from '../../data';
+import {
+  inSubject,
+  outSubject,
+} from '../../inventory-center/components/doc-model';
 
 import './stock-dialog.css';
 
@@ -23,7 +27,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   close: [];
-  saved: [code: string];
+  saved: [];
 }>();
 
 const reason = ref('');
@@ -35,18 +39,18 @@ let idempotencyKey = '';
 const open = computed(() =>
   Boolean(props.stockIn || props.stockOut || props.transfer),
 );
-const code = computed(
-  () =>
-    props.stockIn?.code ?? props.stockOut?.code ?? props.transfer?.code ?? '',
-);
 const title = computed(() => {
-  if (props.stockIn) return '入库单';
-  return props.transfer ? '调拨单' : '出库单';
+  if (props.stockIn) return inSubject(props.stockIn);
+  if (props.stockOut) return outSubject(props.stockOut);
+  const transfer = props.transfer;
+  return transfer
+    ? `调拨 · ${transfer.fromWarehouseName} → ${transfer.toWarehouseName}`
+    : '';
 });
 const effect = computed(() => {
   if (props.stockIn)
     return props.stockIn.directShip
-      ? `合格数从库存扣回，采购单可以重新入库；直发生成的出库单 ${props.stockIn.stockOutCode} 一起作废，合同出货随之冲回。`
+      ? '合格数从库存扣回，采购单可以重新入库；直发生成的出库单一起作废，合同出货随之冲回。'
       : '合格数按原入库成本从库存扣回，合同到货冲回，采购单可以重新入库。货已出库时请先作废相关出库单。';
   if (props.transfer)
     return `从${props.transfer.toWarehouseName}按调拨成本扣回，加回${props.transfer.fromWarehouseName}。调入的货已出库时不能作废。`;
@@ -73,7 +77,7 @@ async function save() {
     if (props.stockIn) await voidStockIn(props.stockIn.id, data);
     else if (props.transfer) await voidTransfer(props.transfer.id, data);
     else await voidStockOut(props.stockOut!.id, data);
-    emit('saved', code.value);
+    emit('saved');
   } catch (error_) {
     error.value = errorText(error_);
   } finally {
@@ -85,7 +89,7 @@ async function save() {
 <template>
   <Modal
     :open="open"
-    :title="`作废${title} ${code}`"
+    :title="`作废 ${title}`"
     width="520px"
     :mask-closable="false"
     @cancel="emit('close')"

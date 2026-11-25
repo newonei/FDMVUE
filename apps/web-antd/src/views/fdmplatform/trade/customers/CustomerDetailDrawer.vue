@@ -448,7 +448,7 @@ function close() {
               </Radio.Group>
               <Input
                 v-model:value="keyword"
-                placeholder="搜索单号、合同或供应商"
+                placeholder="搜索主题、内部单号或供应商"
                 allow-clear
                 class="activity-search"
                 @press-enter="load(true)"
@@ -537,12 +537,6 @@ function close() {
                         "
                         >{{ row.supplierName }}</RelatedLink></span>
                   </div>
-                  <div
-                    v-else-if="row.type === 'CONTRACT' && row.contractName"
-                    class="activity-meta"
-                  >
-                    {{ row.contractName }}
-                  </div>
                   <Tag v-if="row.status" :color="statusColor(row.status)">
                     {{ label(row.status) }}
                   </Tag>
@@ -586,9 +580,6 @@ function close() {
                     >
                       {{ contractText(record as CustomerActivityRecord) }}
                     </RelatedLink>
-                    <span v-else-if="record.type === 'CONTRACT'">{{
-                      record.contractName || '—'
-                    }}</span>
                     <span v-else>—</span>
                   </template>
                   <template v-else-if="column.key === 'supplier'">

@@ -23,6 +23,7 @@ import { createJournal, updateJournal } from '#/api/fdmcaiwu/journal';
 import { convertReceiptToRmb } from '#/api/fdmplatform/exchange-rates';
 
 import {
+  ACCOUNT_TYPE_LABELS,
   CURRENCY_OPTIONS,
   DIRECTION_LABELS,
   emptyForm,
@@ -77,6 +78,50 @@ const companyOptions = computed(() =>
     ...new Set([...props.companyNames, ...(props.options?.companyNames ?? [])]),
   ]),
 );
+
+const configuredAccounts = computed(() => props.options?.accountOptions ?? []);
+const accountOptions = computed(() => {
+  const accounts = configuredAccounts.value;
+  const names = new Set(accounts.map((account) => account.name));
+  return [
+    ...accounts.map((account) => ({
+      label: [
+        account.name,
+        account.accountName !== account.name ? account.accountName : undefined,
+        ACCOUNT_TYPE_LABELS[account.accountType],
+      ]
+        .filter(Boolean)
+        .join(' · '),
+      value: account.id,
+    })),
+    ...(props.options?.bankAccounts ?? [])
+      .filter((name) => !names.has(name))
+      .map((name) => ({ label: name, value: name })),
+  ];
+});
+
+const accountHint = computed(() => {
+  if (form.bankAccountId != null) {
+    const account = configuredAccounts.value.find((item) => item.id === form.bankAccountId);
+    return account ? `已关联${ACCOUNT_TYPE_LABELS[account.accountType]}` : '已关联账户';
+  }
+  return form.bankAccount?.trim() ? '手工填写，未关联账户' : undefined;
+});
+
+function changeAccountText(value: unknown) {
+  if (typeof value === 'number') return;
+  form.bankAccount = typeof value === 'string' ? value : undefined;
+  const name = form.bankAccount?.trim();
+  const matches = configuredAccounts.value.filter((account) => account.name === name);
+  form.bankAccountId = matches.length === 1 ? matches[0]?.id ?? null : null;
+}
+
+function selectAccount(value: unknown) {
+  if (typeof value !== 'number') return;
+  const account = configuredAccounts.value.find((item) => item.id === value);
+  form.bankAccount = account?.name;
+  form.bankAccountId = account?.id ?? null;
+}
 
 /** 整体换表单内容时不触发取汇率和自动折算，编辑时保留原来的汇率 */
 let resetting = false;
@@ -158,6 +203,7 @@ function payload(): Api.SaveReq {
   for (const [key, value] of Object.entries(data)) {
     if (typeof value === 'string') data[key] = value.trim() || undefined;
   }
+  data.bankAccountId = form.bankAccountId ?? null;
   data.companyId = undefined;
   if (!isForeign.value) {
     data.exchangeRate = undefined;
@@ -322,12 +368,16 @@ function onKeydown(event: KeyboardEvent) {
                 placeholder="可输入简称"
               />
             </FormItem>
-            <FormItem :label="text.bank">
+            <FormItem :label="text.bank" :extra="accountHint">
               <AutoComplete
-                v-model:value="form.bankAccount"
-                :options="toOptions(options?.bankAccounts)"
-                :filter-option="filterOption"
+                :value="form.bankAccount"
+                :options="accountOptions"
+                :filter-option="(input: string, option: { label?: unknown }) =>
+                  String(option.label ?? '').toLowerCase().includes(input.trim().toLowerCase())"
                 allow-clear
+                placeholder="选择账户或手工输入"
+                @change="changeAccountText"
+                @select="selectAccount"
               />
             </FormItem>
             <FormItem label="类别">

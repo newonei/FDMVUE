@@ -7,7 +7,7 @@ import { Alert, Modal } from 'ant-design-vue';
 import BigNumber from 'bignumber.js';
 
 import InvoiceUpload from '../../../finance/procurement/components/InvoiceUpload.vue';
-import { batchInvoiceLines, batchPrepaidCodes } from '../batch-model';
+import { batchInvoiceLines, batchPrepaidLabels } from '../batch-model';
 
 /**
  * 集中收票（月结）：同一供应商的多张采购单，供应商合开一张发票，登记成一张付款发票，
@@ -19,7 +19,7 @@ const emit = defineEmits<{ close: []; done: [] }>();
 const lines = computed(() => batchInvoiceLines(props.orders));
 const first = computed(() => props.orders.find((order) => !order.ended));
 /** 已经付过款的单：从发票增加付款时按关联金额折算进这些单，超过它们没付的部分会被拦下 */
-const prepaid = computed(() => batchPrepaidCodes(props.orders));
+const prepaid = computed(() => batchPrepaidLabels(props.orders));
 /** 默认发票金额：各单未开票合计（读不到未开票的单不计） */
 const remaining = computed(() => {
   let sum = new BigNumber(0);

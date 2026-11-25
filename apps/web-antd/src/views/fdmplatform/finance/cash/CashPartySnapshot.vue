@@ -121,10 +121,7 @@ function target(fact: CashFactView): RelatedTarget | undefined {
               <td class="num">{{ fact.date ?? '—' }}</td>
               <td class="ref">
                 <RelatedLink :target="target(fact)">
-                  {{
-                    fact.contractCode ||
-                    (fact.bulk ? `集中${words.act}` : `${words.act}记录`)
-                  }}
+                  {{ fact.bulk ? `集中${words.act}` : `${words.act}记录` }}
                 </RelatedLink>
                 <span class="tag">{{ factSource(fact) }}</span>
               </td>

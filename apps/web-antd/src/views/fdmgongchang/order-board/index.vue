@@ -30,12 +30,12 @@ const loading = ref(false);
 const error = ref(false);
 const initialized = ref(false);
 const noFactory = computed(() => initialized.value && factory.factoryId.value === null);
-const filters = reactive({ keyword: '', ownerUserId: undefined as number | undefined, status: undefined as Api.Order['status'] | undefined });
+const filters = reactive({ keyword: '', ownerUserId: undefined as number | undefined, status: undefined as Api.PageReq['status'] });
 const pageNo = ref(1);
 const pageSize = ref(10);
 const owners = ref<Api.Owner[]>([]);
 const ownerOptions = computed(() => owners.value.map((owner) => ({ label: owner.name, value: owner.userId })));
-const statusOptions = Object.entries(ORDER_STATUS).map(([value, status]) => ({ label: status.label, value }));
+const statusOptions = (['ACCEPTED', 'COMPLETED'] as const).map((value) => ({ label: ORDER_STATUS[value].label, value }));
 const updatedAt = ref('');
 const autoRefresh = ref(true);
 let requestVersion = 0;
@@ -56,7 +56,7 @@ const ownerOrder = ref<Api.Order>();
 const ownerId = ref<number>();
 const ownerSaving = ref(false);
 const pageSummary = computed(() => ({
-  pending: rows.value.filter((order) => order.status === 'SUBMITTED').length,
+  completed: rows.value.filter((order) => order.status === 'COMPLETED').length,
   running: rows.value.filter((order) => order.status === 'ACCEPTED').length,
   unassigned: rows.value.filter((order) => !order.ownerUserId).length,
 }));
@@ -243,7 +243,7 @@ async function saveOwner() {
       </Result>
       <section v-else class="board-panel rounded-xl border border-border bg-card p-4">
         <div class="board-filters">
-          <Input v-model:value="filters.keyword" allow-clear class="board-search" aria-label="搜索订单" placeholder="订单号、采购单、合同、客户、负责人" />
+          <Input v-model:value="filters.keyword" allow-clear class="board-search" aria-label="搜索订单" placeholder="订单号、采购单、合同内部单号、客户、负责人" />
           <Select v-model:value="filters.status" :options="statusOptions" allow-clear placeholder="全部订单状态" class="w-40" aria-label="订单状态" />
           <Select v-model:value="filters.ownerUserId" :options="ownerOptions" allow-clear show-search option-filter-prop="label" placeholder="全部负责人" class="w-40" aria-label="按负责人筛选" />
           <Button v-if="filters.keyword || filters.status || filters.ownerUserId" @click="resetFilters">重置筛选</Button>
@@ -254,7 +254,7 @@ async function saveOwner() {
           <span class="legend-dot legend-dot--partial">部分完成</span>
           <span class="legend-dot legend-dot--done">已达标 / 完成</span>
           <span class="legend-dot legend-dot--reported">已报工，待核对</span>
-          <span class="text-muted-foreground">本页：待接单 {{ pageSummary.pending }} · 生产中 {{ pageSummary.running }} · 未分配负责人 {{ pageSummary.unassigned }}</span>
+          <span class="text-muted-foreground">本页：生产中 {{ pageSummary.running }} · 已完成 {{ pageSummary.completed }} · 未分配负责人 {{ pageSummary.unassigned }}</span>
         </div>
         <Alert v-if="error" class="mb-3" type="warning" show-icon message="刷新失败，当前显示上次加载的订单，请稍后重试。" />
         <Table
@@ -268,13 +268,17 @@ async function saveOwner() {
           :pagination="{ current: pageNo, pageSize, total, showSizeChanger: true, pageSizeOptions: ['10', '20', '50'], showTotal: (count: number) => `共 ${count} 张订单` }"
           @change="(page) => { pageNo = page.current ?? 1; pageSize = page.pageSize ?? 10; load(); }"
         >
-          <template #emptyText><div class="py-10 text-muted-foreground">{{ filters.keyword || filters.status || filters.ownerUserId ? '没有符合筛选条件的订单' : '当前工厂还没有生产订单' }}</div></template>
+          <template #emptyText><div class="py-10 text-muted-foreground">{{ filters.keyword || filters.status || filters.ownerUserId ? '没有符合筛选条件的订单' : '当前工厂还没有已接单的订单' }}</div></template>
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'order'">
               <div class="flex flex-col gap-2">
                 <div class="flex flex-wrap items-center gap-2"><Tag :color="ORDER_STATUS[record.status as Api.Order['status']]?.color" class="m-0">{{ record.statusLabel }}</Tag><span class="text-xs font-medium">{{ currentStage(record as Api.Order) }}</span></div>
                 <button type="button" class="text-left font-semibold text-primary hover:underline" @click="openDetail(record as Api.Order)">{{ record.orderNo }}</button>
-                <div v-if="record.sourceOrderCode || record.sourceContractCode" class="text-xs text-muted-foreground">{{ [record.sourceOrderCode, record.sourceContractCode].filter(Boolean).join(' · ') }}</div>
+                <div v-if="record.sourceOrderCode" class="text-xs text-muted-foreground">采购单号：{{ record.sourceOrderCode }}</div>
+                <div v-if="record.sourceContractId || record.sourceContractName || record.sourceContractCode" class="break-words text-xs">
+                  <span class="text-muted-foreground">合同内部单号：</span><b>{{ record.sourceContractName || '—' }}</b>
+                </div>
+                <div v-if="record.sourceContractCode" class="break-words text-xs text-muted-foreground">合同编号：{{ record.sourceContractCode }}</div>
                 <div class="text-xs">{{ record.customerName || record.purpose || (record.sourceType === 'RESTOCK' ? '系统补库' : '内部生产需求') }}</div>
                 <div class="flex items-center gap-2 border-t border-border pt-2 text-xs">
                   <span class="text-muted-foreground">负责人</span>
@@ -313,7 +317,8 @@ async function saveOwner() {
             <Descriptions.Item label="订单状态"><Tag :color="ORDER_STATUS[detail.status]?.color">{{ detail.statusLabel }}</Tag>{{ currentStage(detail) }}</Descriptions.Item>
             <Descriptions.Item label="订单负责人">{{ detail.ownerName || '未分配' }} <Button v-if="canAssign" type="link" size="small" @click="assignOwner(detail)">分配 / 更换</Button></Descriptions.Item>
             <Descriptions.Item label="来源采购单">{{ detail.sourceOrderCode || '—' }}</Descriptions.Item>
-            <Descriptions.Item label="关联合同">{{ detail.sourceContractCode || '—' }}</Descriptions.Item>
+            <Descriptions.Item label="合同内部单号">{{ detail.sourceContractName || '—' }}</Descriptions.Item>
+            <Descriptions.Item label="合同编号">{{ detail.sourceContractCode || '—' }}</Descriptions.Item>
             <Descriptions.Item label="客户 / 用途">{{ detail.customerName || detail.purpose || '—' }}</Descriptions.Item>
             <Descriptions.Item label="下单人">{{ detail.requesterName || '—' }} · {{ detail.requesterDeptName || '—' }}</Descriptions.Item>
             <Descriptions.Item label="需求交期">{{ dateText(detail.requiredDate) || '待确认' }}</Descriptions.Item>

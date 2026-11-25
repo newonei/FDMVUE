@@ -26,8 +26,10 @@ import {
   getProcurementSettings,
 } from '#/api/fdmplatform/procurement';
 import { getProcurementFinance } from '#/api/fdmplatform/procurement-finance';
+import PostingMatchField from '#/views/fdmcaiwu/bank-account/modules/posting-match-field.vue';
 
 import { costCategories, errorText, money, rows } from '../../../data';
+import { documentLabel } from '../../../document-label';
 import OrderPicker from '../../../purchase/manage/components/OrderPicker.vue';
 import {
   allocationDifference,
@@ -40,7 +42,9 @@ import {
   procurementLineAmount,
   procurementOrderAmount,
 } from '../model';
+import PaymentCashAccountField from './PaymentCashAccountField.vue';
 import SourcePicker from './SourcePicker.vue';
+
 const props = defineProps<{
   context?: Record<string, unknown>;
   files: ProcurementFinanceFile[];
@@ -75,6 +79,10 @@ const payerOptions = computed(() =>
     .filter((entry) => entry.active && entry.usages?.includes('PAY'))
     .map((entry) => ({ value: entry.id, label: entry.name })),
 );
+const payerCompanyId = computed(
+  () =>
+    entities.value.find((entry) => entry.id === form.payerEntityId)?.companyId,
+);
 const costOptions = computed(() =>
   entities.value
     .filter((entry) => entry.active && entry.usages?.includes('COST'))
@@ -99,8 +107,10 @@ async function loadSource() {
   try {
     const value = await getProcurementFinance(id);
     if (form.sourceDocumentId !== id) return;
-    sourceLabel.value = `${value.code} · ${value.name}`;
+    sourceLabel.value = documentLabel(value, '已选择单据');
     sourceNeedsCompanies.value = needsCompanies(value);
+    if (props.type === 'PAYMENT' && !form.payerEntityId && value.payerEntityId)
+      form.payerEntityId = value.payerEntityId;
     if (
       props.type === 'COST_ALLOCATION' &&
       form.sourceType === 'REIMBURSEMENT'
@@ -115,8 +125,11 @@ async function loadSource() {
 async function loadExpenseOrder(contractId: string, orderId: string) {
   if (!contractId || !orderId) return;
   const value = await getProcurementOrder(contractId, orderId);
-  expenseLabels.value[orderId] =
-    `${value.contractCode} · ${value.order.supplierName}`;
+  expenseLabels.value[orderId] = documentLabel(
+    value.order,
+    String(value.order.supplierName ?? '已关联采购单'),
+    value.contractCode,
+  );
   expenseChoices.value[orderId] = rows(value.order.lines).map((line) => ({
     value: String(line.contractItemId),
     label: String(
@@ -142,7 +155,11 @@ async function loadOrder() {
     const value = await getProcurementOrder(selectedContract, selectedOrder);
     if (selectedContract !== form.contractId || selectedOrder !== form.orderId)
       return;
-    orderLabel.value = `${value.contractCode} · ${value.order.supplierName}`;
+    orderLabel.value = documentLabel(
+      value.order,
+      String(value.order.supplierName ?? '已关联采购单'),
+      value.contractCode,
+    );
     if (!props.record && props.type === 'REQUEST' && !form.payeeName)
       form.payeeName = String(value.order.supplierName ?? '');
     sourceLines.value = rows(value.order.lines).map((line) => ({
@@ -233,7 +250,7 @@ async function chooseOrder(row: DocumentRow) {
 }
 function chooseSource(record: ProcurementFinanceRecord) {
   sourcePickerOpen.value = false;
-  sourceLabel.value = `${record.code} · ${record.name}`;
+  sourceLabel.value = documentLabel(record, '已选择单据');
   sourceNeedsCompanies.value = needsCompanies(record);
   if (props.type === 'COST_ALLOCATION')
     form.groups = allocationGroupsAfterSourceChange(
@@ -245,6 +262,11 @@ function chooseSource(record: ProcurementFinanceRecord) {
   form.contractId = record.contractId ?? '';
   form.orderId = record.orderId ?? '';
   form.currency = record.currency;
+  if (props.type === 'PAYMENT') {
+    form.payerBankAccountId = undefined;
+    form.existingJournalEntryId = undefined;
+    form.payerAccount = '';
+  }
   form.payerEntityId = record.payerEntityId ?? '';
   form.payeeName = String(record.payeeName ?? '');
   form.payeeAccount = String(record.payeeAccount ?? '');
@@ -264,6 +286,10 @@ function selectSourceType() {
 }
 function costScopeChanged() {
   form.groups = [newGroup()];
+}
+function selectBankAccount(id?: number) {
+  form.payerBankAccountId = id;
+  form.existingJournalEntryId = undefined;
 }
 function validate() {
   if (linkedOrderNeeded.value && (!form.contractId || !form.orderId))
@@ -359,6 +385,14 @@ defineExpose({ payload });
           show-search
           option-filter-prop="label"
           placeholder="选择实际付款主体"
+          @change="
+            () => {
+              if (type === 'PAYMENT') {
+                selectBankAccount(undefined);
+                form.payerAccount = '';
+              }
+            }
+          "
         />
 </Form.Item><Form.Item v-if="sourceNeedsCompanies" label="费用所属公司">
         <Select
@@ -418,7 +452,29 @@ defineExpose({ payload });
             type="date"
           />
 </Form.Item><Form.Item label="付款账户">
-          <Input :disabled="saving" v-model:value="form.payerAccount" />
+          <PaymentCashAccountField
+            :account-id="form.payerBankAccountId"
+            :account-text="form.payerAccount"
+            :company-id="payerCompanyId"
+            :disabled="saving"
+            :payer-selected="!!form.payerEntityId"
+            @update:account-id="selectBankAccount"
+            @update:account-text="(label) => (form.payerAccount = label ?? '')"
+          />
+          <PostingMatchField
+            v-if="form.payerBankAccountId"
+            :account-id="form.payerBankAccountId"
+            :amount="form.amount"
+            :company-id="payerCompanyId"
+            :currency="form.currency"
+            :date="form.paidAt"
+            :disabled="saving"
+            :value="form.existingJournalEntryId"
+            direction="EXPENSE"
+            @update:value="
+              (id) => (form.existingJournalEntryId = id ?? undefined)
+            "
+          />
         </Form.Item>
 </template><Form.Item v-if="type === 'REIMBURSEMENT'" label="垫付人">
         <Input

@@ -8,6 +8,7 @@ import type {
   ContractItem,
   Directory,
   MasterRecord,
+  ReceiptAccountSnapshot,
 } from '#/api/fdmplatform';
 import type { ContractBoardRow } from '#/api/fdmplatform/contract-board';
 import type { Customer } from '#/api/fdmplatform/customers';
@@ -53,12 +54,14 @@ import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import CreationAttachments from '../../components/CreationAttachments.vue';
 import RemoteMasterSelect from '../../components/RemoteMasterSelect.vue';
+import SalesCashAccountSelect from '../../components/SalesCashAccountSelect.vue';
 import {
   productCategoryOptions,
   validProductCategory,
 } from '../../contract-categories';
 import { errorText, money } from '../../data';
 import { personLabel } from '../../directory';
+import { documentLabel } from '../../document-label';
 import {
   contractInternalOrderNo,
   DOMESTIC_CURRENCY,
@@ -108,12 +111,15 @@ const emit = defineEmits<{
   saved: [contract: Contract];
 }>();
 const access = ref<Access>();
-/** 新建时回填的系统建议订单号；保存时没改过就重新取号，改过就按手填 */
 const orderCompanies = computed(() =>
   contractCompanyOptions(access.value?.companies ?? [], props.contract),
 );
+function editableInternalOrderNo(contract?: Contract) {
+  return documentLabel({ name: contract?.name }, '', contract?.code);
+}
 const form = reactive({
   companyId: undefined as number | undefined,
+  receiptAccountId: undefined as number | undefined,
   name: '',
   customerId: '',
   businessType: (props.defaultBusinessType ?? 'DOMESTIC') as string,
@@ -129,6 +135,7 @@ const form = reactive({
   deliveryRequirement: '',
   attachmentIds: [] as string[],
 });
+const receiptAccountSnapshot = ref<ReceiptAccountSnapshot>();
 const companyChange = reactive({
   companyId: undefined as number | undefined,
   error: '',
@@ -569,9 +576,11 @@ watch(
     batchDate.value = '';
     key.value = newIdempotencyKey();
     expectedVersion.value = contract?.version ?? 0;
+    receiptAccountSnapshot.value = contract?.receiptAccount ?? undefined;
     Object.assign(form, {
       companyId: contract?.companyId,
-      name: contract?.name ?? '',
+      receiptAccountId: contract?.receiptAccount?.id,
+      name: editableInternalOrderNo(contract),
       customerId: contract?.customerId ?? '',
       businessType: contract
         ? (contract.businessType ?? 'FOREIGN')
@@ -876,6 +885,8 @@ async function saveCompanyChange() {
     );
     if (run !== editorSequence) return;
     form.companyId = result.companyId;
+    form.receiptAccountId = result.receiptAccount?.id;
+    receiptAccountSnapshot.value = result.receiptAccount ?? undefined;
     expectedVersion.value = result.version;
     key.value = newIdempotencyKey();
     companyChange.open = false;
@@ -903,7 +914,13 @@ async function save(activate = false) {
     panelError.value = '请补齐合同主体、客户、负责人和签订日期';
     return;
   }
-  const name = form.name.trim();
+  const enteredName = form.name.trim();
+  const original = props.contract;
+  // 保存其他字段时保留历史值，填写新内部单号后再替换。
+  const name =
+    original && enteredName === editableInternalOrderNo(original)
+      ? original.name?.trim()
+      : enteredName;
   if (!name) {
     panelError.value = '请填写内部单号';
     return;
@@ -978,6 +995,7 @@ async function save(activate = false) {
       salesCharges: charges.value,
       ...(itemFileBindings.length > 0 ? { itemFileBindings } : {}),
       companyId: form.companyId,
+      receiptAccountId: form.receiptAccountId ?? null,
       customerName:
         customerChoices.value.find((record) => record.id === form.customerId)
           ?.name ??
@@ -1111,6 +1129,7 @@ async function save(activate = false) {
                 placeholder="请选择签约的合同主体（公司）"
                 show-search
                 option-filter-prop="label"
+                @change="form.receiptAccountId = undefined"
               />
               <Button
                 v-if="
@@ -1122,6 +1141,16 @@ async function save(activate = false) {
                 更正主体
               </Button>
             </div>
+          </Form.Item>
+          <Form.Item
+            label="默认收款账户"
+            extra="登记回款时默认带入，财务确认时可选择实际到账账户。"
+          >
+            <SalesCashAccountSelect
+              v-model:value="form.receiptAccountId"
+              :company-id="form.companyId"
+              :snapshot="receiptAccountSnapshot"
+            />
           </Form.Item>
           <Form.Item label="内部单号" required>
             <Input

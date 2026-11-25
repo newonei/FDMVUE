@@ -16,13 +16,16 @@ import {
 } from 'ant-design-vue';
 import BigNumber from 'bignumber.js';
 
+import { listCashPostingMatches } from '#/api/fdmcaiwu/bank-account';
 import { getProcurementSettings } from '#/api/fdmplatform/procurement';
 import {
   getProcurementFinanceSummary,
   registerOrderPayment,
 } from '#/api/fdmplatform/procurement-finance';
+import PostingMatchField from '#/views/fdmcaiwu/bank-account/modules/posting-match-field.vue';
 
 import { errorText } from '../../../data';
+import PaymentCashAccountField from '../../../finance/procurement/components/PaymentCashAccountField.vue';
 import {
   payerAccountLabel,
   paymentMethods,
@@ -59,6 +62,10 @@ let base = '';
 let batchNo = '';
 
 const active = computed(() => props.orders.filter((order) => !order.ended));
+const payerCompanyId = computed(
+  () =>
+    payers.value.find((row) => row.id === form.value.payerEntityId)?.companyId,
+);
 const total = computed(() => {
   let sum = new BigNumber(0);
   for (const value of Object.values(amounts.value)) {
@@ -116,9 +123,22 @@ watch(
 );
 
 function pickPayer(id: string) {
+  if (form.value.payerEntityId === id) return;
   form.value.payerEntityId = id;
-  const label = payerAccountLabel(payers.value.find((row) => row.id === id));
-  if (label) form.value.payerAccount = label;
+  selectBankAccount(undefined);
+  form.value.payerAccount = payerAccountLabel(
+    payers.value.find((row) => row.id === id),
+  );
+}
+
+function selectBankAccount(id?: number) {
+  form.value.payerBankAccountId = id;
+  form.value.journalMatches = {};
+}
+
+function matchJournal(orderKey: string, entryId?: null | number) {
+  form.value.journalMatches ??= {};
+  form.value.journalMatches[orderKey] = entryId ?? undefined;
 }
 
 async function submit() {
@@ -132,12 +152,42 @@ async function submit() {
   saving.value = true;
   results.value = [];
   let created = 0;
-  const pending = batchPaymentInputs(
+  const payments = batchPaymentInputs(
     active.value,
     amounts.value,
     form.value,
     batchNo,
-  ).filter(({ order }) => !finished.value.has(order.key));
+  );
+  const pending = payments.filter(
+    ({ order }) => !finished.value.has(order.key),
+  );
+  const accountId = form.value.payerBankAccountId;
+  if (accountId && payments.length > 1 && pending.length > 0) {
+    let amount = new BigNumber(0);
+    for (const { input } of payments) {
+      amount = amount.plus(input.amount);
+    }
+    try {
+      const matches = await listCashPostingMatches({
+        accountId,
+        amount: amount.toFixed(0),
+        companyId: payerCompanyId.value,
+        currency: payments[0]!.order.currency,
+        date: form.value.paidAt!,
+        direction: 'EXPENSE',
+      });
+      if (matches.length > 0) {
+        error.value =
+          '日记账已有与本批付款总额匹配的流水。请先核对并拆分流水，再逐笔关联采购付款。';
+      }
+    } catch (error_) {
+      error.value = errorText(error_);
+    }
+    if (error.value) {
+      saving.value = false;
+      return;
+    }
+  }
   for (const { order, input } of pending) {
     try {
       // 幂等键按采购单区分：中途失败后再点提交，已登记的不会重复
@@ -147,10 +197,10 @@ async function submit() {
       );
       created += 1;
       finished.value.add(order.key);
-      results.value.push(`${order.code}：${paymentSavedMessage(record)}`);
+      results.value.push(`${order.label}：${paymentSavedMessage(record)}`);
     } catch (error_) {
       attempts.set(order.key, (attempts.get(order.key) ?? 0) + 1);
-      results.value.push(`${order.code}：失败，${errorText(error_)}`);
+      results.value.push(`${order.label}：失败，${errorText(error_)}`);
     }
   }
   saving.value = false;
@@ -182,6 +232,7 @@ async function submit() {
           <span><em>*</em>所属公司（付款公司）</span>
           <Select
             :value="form.payerEntityId"
+            :disabled="saving || finished.size > 0"
             :options="
               payers.map((entry) => ({
                 value: entry.id,
@@ -194,9 +245,14 @@ async function submit() {
         </label>
         <label>
           <span><em>*</em>付款方式（付款账户）</span>
-          <Input
-            v-model:value="form.payerAccount"
-            placeholder="如：湖北飞德慕网商银行（8831）"
+          <PaymentCashAccountField
+            v-model:account-text="form.payerAccount"
+            :account-id="form.payerBankAccountId"
+            :company-id="payerCompanyId"
+            :disabled="saving || finished.size > 0"
+            :open="open"
+            :payer-selected="!!form.payerEntityId"
+            @update:account-id="selectBankAccount"
           />
         </label>
         <label>
@@ -232,7 +288,7 @@ async function submit() {
         </thead>
         <tbody>
           <tr v-for="order in active" :key="order.key">
-            <td>{{ order.code }}</td>
+            <td>{{ order.label }}</td>
             <td class="num">
               {{ order.currency }}
               {{ new BigNumber(available[order.key] ?? 0).toFormat(2) }}
@@ -246,6 +302,23 @@ async function submit() {
                 :disabled="loading || saving || finished.has(order.key)"
                 placeholder="不付留空"
                 style="width: 100%"
+              />
+              <PostingMatchField
+                v-if="
+                  open &&
+                  form.payerBankAccountId &&
+                  !finished.has(order.key) &&
+                  new BigNumber(amounts[order.key] ?? 0).gt(0)
+                "
+                :account-id="form.payerBankAccountId"
+                :amount="amounts[order.key]"
+                :company-id="payerCompanyId"
+                :currency="order.currency"
+                :date="form.paidAt"
+                :disabled="saving"
+                :value="form.journalMatches?.[order.key]"
+                direction="EXPENSE"
+                @update:value="(id) => matchJournal(order.key, id)"
               />
             </td>
           </tr>

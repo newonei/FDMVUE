@@ -227,28 +227,37 @@ vi.mock('../../../components/ActionDialog.vue', () => ({
     setup(props, { emit, slots }) {
       return () =>
         props.open
-          ? h('section', { 'data-action-dialog': true }, [
-              h(
-                'div',
-                { 'data-fields': true },
-                JSON.stringify(props.definition.fields),
-              ),
-              slots.attachments?.(),
-              h('div', props.error),
-              h(
-                'button',
-                {
-                  'data-confirm-action': true,
-                  onClick: () =>
-                    emit(
-                      'submit',
-                      { reason: '已核验' },
-                      'stable-finance-operation',
-                    ),
-                },
-                '确认办理',
-              ),
-            ])
+          ? h(
+              'section',
+              {
+                'data-action-dialog': true,
+                'data-cash-posting': JSON.stringify(
+                  props.definition.cashPosting,
+                ),
+              },
+              [
+                h(
+                  'div',
+                  { 'data-fields': true },
+                  JSON.stringify(props.definition.fields),
+                ),
+                slots.attachments?.(),
+                h('div', props.error),
+                h(
+                  'button',
+                  {
+                    'data-confirm-action': true,
+                    onClick: () =>
+                      emit(
+                        'submit',
+                        { reason: '已核验' },
+                        'stable-finance-operation',
+                      ),
+                  },
+                  '确认办理',
+                ),
+              ],
+            )
           : null;
     },
   }),
@@ -719,10 +728,10 @@ describe('财务关联单据在原详情内办理', () => {
       expect.objectContaining({ id: 'payment' }),
     );
     expect(
-      host.querySelector<HTMLElement>('[data-title="采购请款单 · QK-1"]'),
+      host.querySelector<HTMLElement>('[data-title="采购请款单 · 申请"]'),
     ).toBeTruthy();
     const child = host.querySelector<HTMLElement>(
-      '[data-title="采购付款记录 · FK-1"]',
+      '[data-title="采购付款记录 · 申请"]',
     )!;
     (
       child.querySelector<HTMLElement>(
@@ -771,7 +780,7 @@ describe('财务关联单据在原详情内办理', () => {
       costScope: 'ORDER',
     });
     expect(
-      host.querySelector<HTMLElement>('[data-title="费用报销单 · QK-1"]'),
+      host.querySelector<HTMLElement>('[data-title="费用报销单 · 申请"]'),
     ).toBeTruthy();
   });
 
@@ -808,7 +817,7 @@ describe('财务关联单据在原详情内办理', () => {
     });
     expect(host.querySelectorAll('[data-drawer]')).toHaveLength(2);
     expect(
-      host.querySelector<HTMLElement>('[data-title="付款计划 · QK-1"]'),
+      host.querySelector<HTMLElement>('[data-title="付款计划 · 申请"]'),
     ).toBeTruthy();
   });
 });
@@ -928,6 +937,29 @@ describe('采购财务直接生效与历史单据兼容', () => {
     expect(first[2][0].name).toBe('payment-evidence.pdf');
     expect(retry[1]).toEqual(first[1]);
     expect(retry[2]).toEqual(first[2]);
+  });
+
+  it('采购退款按原付款账户与实际退款日期匹配日记账', async () => {
+    mocks.read.mockResolvedValue({
+      ...document('CONFIRMED'),
+      type: 'PAYMENT',
+      allowedActions: ['REVERSE'],
+      payerBankAccountId: 18,
+      payerBankAccountCompanyId: 21,
+      payerSnapshot: { companyId: 37 },
+    });
+    const host = await mount({ type: 'PAYMENT' });
+    click(host, '退款 / 冲销');
+    await nextTick();
+    const dialog = host.querySelector<HTMLElement>('[data-action-dialog]');
+    expect(JSON.parse(dialog!.dataset.cashPosting!)).toEqual({
+      accountId: 18,
+      amountField: 'amount',
+      companyId: 21,
+      currency: 'CNY',
+      dateField: 'occurredDate',
+      direction: 'INCOME',
+    });
   });
 
   it('采购登记的付款显示财务审核进度，财务可确认付款或填写原因退回', async () => {

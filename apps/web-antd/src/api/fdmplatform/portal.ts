@@ -26,6 +26,7 @@ export interface PortalPayment {
   id: string;
   contractId?: string;
   contractCode?: string;
+  contractName?: string;
   party?: string;
   name?: string;
   time?: string;
@@ -37,6 +38,7 @@ export interface PortalMovement {
   kind: 'OUTBOUND' | 'RETURN';
   contractId: string;
   contractCode: string;
+  contractName?: string;
   product: string;
   unit: string;
   quantity: number | string;

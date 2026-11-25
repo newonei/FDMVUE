@@ -18,6 +18,7 @@ import {
   money as formatMoney,
   rows,
 } from '../../../data';
+import { documentLabel } from '../../../document-label';
 import { contractReferenceText } from '../../../documents/migration-display';
 import { contractTarget, documentTarget } from '../../../documents/navigation';
 import RelatedLink from '../../../documents/RelatedLink.vue';
@@ -138,8 +139,7 @@ function factName(value: unknown) {
     <header class="reimbursement-heading">
       <div>
         <span class="eyebrow">费用报销</span>
-        <h2>{{ record.name }}</h2>
-        <span class="muted">{{ record.code }}</span>
+        <h2>{{ documentLabel(record, '费用报销') }}</h2>
       </div>
       <Space wrap>
         <Tag color="blue">{{ expenseStatus(record) }}</Tag><Tag>{{ paymentLabel }}</Tag>
@@ -310,7 +310,12 @@ function factName(value: unknown) {
                 )
               "
             >
-              {{ expense.orderCode || '查看关联采购单' }}
+              {{
+                documentLabel(
+                  { subject: expense.orderSubject, code: expense.orderCode },
+                  '查看关联采购单',
+                )
+              }}
             </RelatedLink>
             <span v-if="!expense.contractId && !expense.orderId" class="muted">不关联业务单据</span>
           </Space>

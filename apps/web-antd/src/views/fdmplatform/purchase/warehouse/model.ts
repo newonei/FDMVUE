@@ -56,7 +56,7 @@ export interface InRow {
   /** 批量转入库时一张对话框里有多张采购单 */
   orderId?: string;
   contractId?: string;
-  orderCode?: string;
+  orderLabel?: string;
   /** 空表示用表头的入库仓库 */
   warehouseId?: string;
   split?: boolean;
@@ -77,7 +77,6 @@ export function inboundRows(lines: InboundLine[]): InRow[] {
     orderLineId: line.orderLineId,
     orderId: line.orderId,
     contractId: line.contractId ?? '',
-    orderCode: line.orderCode ?? undefined,
     productName: line.productName || '产品未注明',
     specification: line.specification ?? '',
     unit: line.unit ?? '',

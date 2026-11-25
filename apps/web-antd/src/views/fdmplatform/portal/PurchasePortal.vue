@@ -15,11 +15,12 @@ import { Alert, Button } from 'ant-design-vue';
 import { getPortalSummary } from '#/api/fdmplatform/portal';
 
 import { errorText } from '../data';
+import { contractLabel } from '../document-label';
 import PurchaseTrendBars from '../purchase/components/PurchaseTrendBars.vue';
 import TopSupplierBars from '../purchase/components/TopSupplierBars.vue';
 import { localDate } from '../purchase/quotes/comparison';
 import { rmb } from '../purchase/suppliers/model';
-import { dueBadge, shortTitle } from '../purchase/tasks/model';
+import { dueBadge, shortTitle, workItemTitle } from '../purchase/tasks/model';
 import {
   formatNumber,
   greeting,
@@ -225,8 +226,10 @@ function openTask(task: ProcurementWorkItem) {
             @click="openTask(task)"
           >
             <span class="row-main">
-              <b :title="task.title">{{ shortTitle(task.title) }}</b>
-              <span>{{ task.row.contractCode }} ·
+              <b :title="workItemTitle(task)">{{
+                shortTitle(workItemTitle(task))
+              }}</b>
+              <span>{{ contractLabel({ name: task.row.contractName }) }} ·
                 {{ task.row.customerName || '客户未注明' }}</span>
             </span>
             <span class="pill" :class="dueBadge(task.dueDate, today).tone">{{

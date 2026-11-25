@@ -28,6 +28,7 @@ import { getCustomsSource } from '#/api/fdmplatform/customs';
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { errorText } from '../data';
+import { contractLabel, documentLabel } from '../document-label';
 import CreationAttachments from './CreationAttachments.vue';
 import {
   canSelectCustomsShipment,
@@ -85,7 +86,7 @@ let searchTimer: ReturnType<typeof setTimeout> | undefined;
 const options = computed(() => {
   const result = contracts.value.map((item) => ({
     value: item.id,
-    label: `${item.code} · ${item.name}`,
+    label: contractLabel(item),
   }));
   if (
     selectedContractId.value &&
@@ -93,8 +94,9 @@ const options = computed(() => {
   )
     result.unshift({
       value: selectedContractId.value,
-      label:
-        props.batch?.contractCode ?? source.value?.contractCode ?? '当前合同',
+      label: contractLabel({
+        name: source.value?.contractName ?? props.batch?.contractName,
+      }),
     });
   return result;
 });
@@ -142,9 +144,7 @@ function search(keyword: string) {
 async function loadSource(value?: string) {
   if (props.lockContract && value !== props.contractId) return;
   const request = ++sequence;
-  const previousDefaultName = source.value
-    ? `${source.value.contractCode} 报关批次`
-    : undefined;
+  const previousDefaultName = source.value && customsDefaultName(source.value);
   source.value = undefined;
   purchaseOrderIds.value = [];
   lines.value = [];
@@ -172,12 +172,28 @@ async function loadSource(value?: string) {
     shipments.value = selections.shipments;
     purchaseOrderIds.value = selections.purchaseOrderIds;
     if (!name.value || name.value === previousDefaultName)
-      name.value = `${result.contractCode} 报关批次`;
+      name.value = customsDefaultName(result);
   } catch (error) {
     if (request === sequence) sourceError.value = errorText(error);
   } finally {
     if (request === sequence) loading.value = false;
   }
+}
+function customsDefaultName(value: CustomsSource) {
+  const contractName = documentLabel(
+    { name: value.contractName },
+    '',
+    value.contractCode,
+  );
+  return [contractName, '报关批次'].filter(Boolean).join(' ');
+}
+function editableCustomsName(batch?: CustomsBatch) {
+  const stored = batch?.details?.name ?? batch?.name;
+  return documentLabel(
+    { name: stored, code: batch?.code },
+    stored ? '报关批次' : '',
+    batch?.contractCode,
+  );
 }
 function close() {
   if (props.saving) return;
@@ -203,7 +219,13 @@ function submit() {
     sourceError.value = '请先选择合同并等待资料加载完成。';
     return;
   }
-  if (!name.value.trim()) {
+  const enteredName = name.value.trim();
+  const batch = props.batch;
+  const batchName =
+    batch && enteredName === editableCustomsName(batch)
+      ? (batch.details?.name ?? batch.name)?.trim()
+      : enteredName;
+  if (!batchName) {
     sourceError.value = '请填写批次名称。';
     return;
   }
@@ -233,7 +255,7 @@ function submit() {
     contractId: selectedContractId.value,
     contractVersion: source.value.contractVersion,
     details: {
-      name: name.value.trim(),
+      name: batchName,
       required: required.value,
       notRequiredReason: notRequiredReason.value,
       plannedDate: plannedDate.value || undefined,
@@ -270,7 +292,7 @@ watch(
     }
     draftFiles.value = [];
     const data = props.batch?.details ?? props.batch;
-    name.value = data?.name ?? '';
+    name.value = editableCustomsName(props.batch);
     required.value = data?.required ?? true;
     notRequiredReason.value = data?.notRequiredReason ?? '';
     plannedDate.value = data?.plannedDate ?? '';
@@ -325,7 +347,7 @@ onBeforeUnmount(() => {
             show-search
             :filter-option="false"
             :options="options"
-            placeholder="搜索合同编号或名称"
+            placeholder="搜索合同内部单号"
             @search="search"
             @change="
               (value) =>
@@ -412,8 +434,11 @@ onBeforeUnmount(() => {
             :options="
               (source?.purchaseOrders ?? []).map((order) => ({
                 value: order.id,
-                label: String(
-                  order.name ?? order.code ?? order.supplierName ?? order.id,
+                label: documentLabel(
+                  order,
+                  typeof order.supplierName === 'string'
+                    ? order.supplierName
+                    : '采购订单',
                 ),
               }))
             "

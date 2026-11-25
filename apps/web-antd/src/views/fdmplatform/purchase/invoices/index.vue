@@ -40,6 +40,7 @@ import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewSt
 
 import FilePreviewButton from '../../components/FilePreviewButton.vue';
 import { errorText } from '../../data';
+import { documentLabel } from '../../document-label';
 import { referenceId } from '../../documents/navigation';
 import { useOwnedRoute } from '../../documents/useOwnedRoute';
 import { useRouteOwner } from '../../documents/useRouteOwner';
@@ -53,6 +54,7 @@ import {
   invoicePaymentStates,
 } from '../../finance/procurement/invoice-model';
 import OrderPicker from '../manage/components/OrderPicker.vue';
+import { purchaseRowLabels } from '../manage/model';
 import InvoiceDetail from './components/InvoiceDetail.vue';
 
 /**
@@ -211,7 +213,7 @@ async function orderPicked(row: DocumentRow) {
   await openUpload(
     row.standaloneId ? 'standalone' : String(row.contractId ?? ''),
     String(row.standaloneId ?? row.id),
-    String(row.record?.code ?? row.record?.orderCode ?? '采购单'),
+    purchaseRowLabels(row).title,
   );
 }
 function openSourceOrder(order: InvoiceSourceOrder) {
@@ -243,7 +245,7 @@ function edit(row: PurchaseInvoice) {
   const contractId =
     String((row as unknown as Record<string, unknown>).contractId ?? '') ||
     'standalone';
-  void openUpload(contractId, row.orderId, row.orderCode ?? '采购单', row);
+  void openUpload(contractId, row.orderId, '采购单', row);
 }
 /** 登记 / 修改发票前取采购单的币种、付款记录和未收票金额 */
 async function openUpload(
@@ -278,7 +280,7 @@ async function openUpload(
         )
         .map((entry) => ({
           value: String(entry.id),
-          label: `${String(entry.code)} · ${String(entry.paidAt ?? '')} · ${money(entry.amount)}`,
+          label: `${documentLabel(entry, '付款记录')} · ${String(entry.paidAt ?? '')} · ${money(entry.amount)}`,
         })),
     };
   } catch (error) {
@@ -309,7 +311,7 @@ watch(active, (value) => value && void load(), { immediate: true });
           <Input.Search
             v-model:value="keyword"
             allow-clear
-            placeholder="发票编号、号码、采购单号、供应商、付款单号"
+            placeholder="发票号码、供应商"
             style="width: 320px"
             @search="search"
           />
@@ -381,7 +383,7 @@ watch(active, (value) => value && void load(), { immediate: true });
               ellipsis: true,
             },
             { title: '关联采购单', key: 'order', width: 190 },
-            { title: '发票编号 / 号码', key: 'invoiceNo', width: 200 },
+            { title: '发票号码', key: 'invoiceNo', width: 200 },
             { title: '收票日期', key: 'receivedAt', width: 100 },
             { title: '开票日期', dataIndex: 'invoiceDate', width: 100 },
             { title: '票据类型', key: 'type', width: 130 },
@@ -464,12 +466,11 @@ watch(active, (value) => value && void load(), { immediate: true });
               size="small"
               @click="openOrder(record as PurchaseInvoice)"
             >
-              {{ record.orderCode || '查看采购单' }}
+              查看采购单
             </Button>
-            <span v-else-if="column.key === 'invoiceNo'" class="stack">
-              <span>{{ record.code || '—' }}</span>
-              <span class="muted">{{ record.invoiceNo || '无号码' }}</span>
-            </span>
+            <span v-else-if="column.key === 'invoiceNo'">{{
+              record.invoiceNo || '无号码'
+            }}</span>
             <span v-else-if="column.key === 'receivedAt'">
               {{ String(record.createdAt ?? '').slice(0, 10) || '—' }}
             </span>
@@ -488,7 +489,7 @@ watch(active, (value) => value && void load(), { immediate: true });
               taxOf(record as PurchaseInvoice)
             }}</span>
             <span v-else-if="column.key === 'payment'">{{
-              record.paymentCode || '—'
+              record.paymentId || record.paymentCode ? '已关联付款' : '—'
             }}</span>
             <template v-else-if="column.key === 'file' && record.file">
               <Button
@@ -606,7 +607,6 @@ watch(active, (value) => value && void load(), { immediate: true });
         paying
           ? {
               id: paying.id,
-              code: paying.code,
               invoiceNo: paying.invoiceNo,
               amount: paying.amount,
               paidAmount: paying.paidAmount,

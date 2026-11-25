@@ -342,15 +342,15 @@ export function createProcurementOrder(data: PurchaseOrderEntry) {
     data,
   );
 }
-/** 「已新建采购单 CG001」；拆单时「已按供应商拆成 2 张采购单：CG001、CG002」。 */
+/** 采购单创建结果提示，拆单时带上张数。 */
 export function createdOrdersText(
   value: CreatedProcurementOrders,
   single = '已新建采购单',
 ) {
   const orders = value.orders ?? [];
   return orders.length > 1
-    ? `已按供应商拆成 ${orders.length} 张采购单：${orders.map((order) => order.code).join('、')}`
-    : `${single} ${value.code}`;
+    ? `已按供应商拆成 ${orders.length} 张采购单`
+    : single;
 }
 /** 保存采购草稿的表头和明细，submit 时同时提交审核。 */
 export function updateProcurementOrder(

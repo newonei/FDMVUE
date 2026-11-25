@@ -12,6 +12,7 @@ import AiReviewStatus from '#/views/fdmaicheck/components/AiReviewStatus.vue';
 import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewStatuses';
 
 import { errorText, label, money } from '../data';
+import { documentRowLabel } from '../document-label';
 import { documentRowAiReviewTarget } from './ai-check-types';
 import BusinessDocumentDetail from './BusinessDocumentDetail.vue';
 import { withoutDetailQuery } from './navigation';
@@ -119,22 +120,22 @@ function close() {
     <Space>
       <Input.Search
         v-model:value="keyword"
-        :placeholder="`搜索${title}编号、名称或产品`"
+        :placeholder="`搜索${title}主题或产品`"
         allow-clear
         @search="
           page = 1;
           load();
         "
       /><Button :loading="loading" @click="refreshDocuments">
-刷新
-</Button>
+        刷新
+      </Button>
 </Space><Alert v-if="pageError" type="error" :message="pageError" /><Table
       :data-source="records"
       row-key="id"
       :loading="loading"
       :pagination="{ current: page, pageSize, total, showSizeChanger: true }"
       :columns="[
-        { title: '单号 / 名称', key: 'name' },
+        { title: '单据主题', key: 'name' },
         { title: '状态', key: 'status' },
         { title: '数量 / 单位', key: 'quantity' },
         { title: '金额 / 币种', key: 'amount' },
@@ -161,11 +162,7 @@ function close() {
           {{
             column.key === 'action'
               ? '查看 / 办理'
-              : record.code ||
-                record.record.code ||
-                record.name ||
-                record.record.name ||
-                '查看单据'
+              : documentRowLabel(record as DocumentRow, '查看单据')
           }}
 </Button><Tag v-else-if="column.key === 'status'">
           {{ label(record.record.status) }}

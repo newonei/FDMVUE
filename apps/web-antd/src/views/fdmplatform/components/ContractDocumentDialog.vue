@@ -28,6 +28,7 @@ import AiReviewStatus from '#/views/fdmaicheck/components/AiReviewStatus.vue';
 import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewStatuses';
 
 import { errorText, label, receiptStatusLabel } from '../data';
+import { contractLabel, documentRowLabel } from '../document-label';
 import {
   contractRecordAiCheckTypes,
   documentRowAiReviewTarget,
@@ -45,6 +46,7 @@ import {
 } from '../documents/model';
 import RecordDetail from '../documents/RecordDetail.vue';
 import { receiptFxDisplay } from '../finance/exchange-rates/model';
+import { contractInternalOrderNo, salesChannelOf } from '../sales-channel';
 import {
   contractDocumentLaunch,
   contractDocumentQuery,
@@ -126,6 +128,15 @@ const title = computed(() =>
     ? '报关跟进'
     : documentDefinitions[currentKind.value].title,
 );
+const contractName = computed(() => {
+  const { contract } = props;
+  return contract
+    ? contractInternalOrderNo(
+        contract,
+        salesChannelOf(contract.businessType),
+      ) || '内部单号待补齐'
+    : '';
+});
 const actions = computed(() =>
   currentKind.value === 'customs' ? [] : definition.value.create,
 );
@@ -301,13 +312,9 @@ function cell(row: DocumentRow, key: string) {
   );
 }
 function recordTitle(row: DocumentRow) {
-  return String(
-    row.code ||
-      row.record.code ||
-      row.record.invoiceNumber ||
-      row.record.name ||
-      row.record.batchNo ||
-      definition.value.title,
+  return documentRowLabel(
+    row,
+    contractLabel({ name: row.contractName }, definition.value.title),
   );
 }
 function contribution(key: string) {
@@ -379,7 +386,7 @@ onBeforeUnmount(() => {
   <FdmResizableDrawer
     resize-key="contract-document"
     :open="open"
-    :title="`${title} · ${contract?.code || contract?.name || ''}`"
+    :title="contractName ? `${title} · ${contractName}` : title"
     width="min(1220px, 97vw)"
     :closable="!nestedOpen"
     :mask-closable="!nestedOpen"
@@ -389,7 +396,7 @@ onBeforeUnmount(() => {
     <div class="contract-documents">
       <Descriptions v-if="contract" bordered size="small" :column="2">
         <Descriptions.Item label="关联合同">
-          {{ contract.code }} · {{ contract.name }}
+          {{ contractName }}
         </Descriptions.Item>
         <Descriptions.Item label="客户">
           {{ contract.customerName || '未注明' }}
@@ -442,7 +449,7 @@ onBeforeUnmount(() => {
             v-model:value="keyword"
             :disabled="nestedOpen"
             allow-clear
-            placeholder="搜索本合同单据"
+            placeholder="搜索本合同单据主题"
             @press-enter="
               page = 1;
               load();

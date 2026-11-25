@@ -34,6 +34,7 @@ import {
 } from '#/api/fdmplatform/customers';
 
 import { errorText } from '../../data';
+import { documentLabel } from '../../document-label';
 import { activityLabel, activityName } from '../../products/activity-model';
 
 const props = defineProps<{ active: boolean; customer: Customer }>();
@@ -320,9 +321,8 @@ function displayTime(value: string) {
 function businessDetails(record: CustomerFollowUp) {
   return [
     record.topic && topicLabels[record.topic],
-    record.relatedDocumentNo ||
-      (record.relatedDocumentId &&
-        `关联单据 ${record.relatedDocumentId.split(':').at(-1)?.slice(0, 8)}`),
+    record.relatedDocumentId &&
+      documentLabel({ name: record.relatedDocumentNo }, '已关联单据'),
     record.productSpec,
     record.expectedQuantity,
     record.tradeTerms,
@@ -439,7 +439,7 @@ function businessDetails(record: CustomerFollowUp) {
               :loading="documentsLoading"
               :options="documentOptions"
               option-label-prop="label"
-              placeholder="按单号或合同搜索"
+              placeholder="搜索单据主题或内部单号"
               allow-clear
               show-search
               @change="documentChanged"

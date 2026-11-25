@@ -18,6 +18,7 @@ import { getProcurementFinanceSummary } from '#/api/fdmplatform/procurement-fina
 import { createPurchaseReturn } from '#/api/fdmplatform/warehouse';
 
 import { errorText } from '../../data';
+import { inSubject } from '../../inventory-center/components/doc-model';
 import { localDate } from '../quotes/comparison';
 import { money, qty } from './model';
 import {
@@ -71,7 +72,7 @@ watch(
   { immediate: true },
 );
 
-/** 不再补货使采购金额减少；货款已付过头时提醒去原付款单登记退款，并带上退货单号作为依据。 */
+/** 不再补货使采购金额减少；货款已付过头时提醒去原付款单登记退款，并带上退货日期作为依据。 */
 async function remindRefund(stockIn: StockIn, created: PurchaseReturn) {
   try {
     const summary = await getProcurementFinanceSummary(
@@ -83,7 +84,7 @@ async function remindRefund(stockIn: StockIn, created: PurchaseReturn) {
     const currency = String(summary.currency ?? stockIn.currency ?? 'CNY');
     Modal.warning({
       title: '货款已多付，请登记供应商退款',
-      content: `退货后采购金额 ${money(summary.orderAmount, currency)}，已付 ${money(summary.paidAmount, currency)}，多付 ${money(over, currency)}。供应商退回货款后，请在采购单「付款与费用」打开原付款单登记「退款 / 冲销」，原因写「采购退货 ${created.code}」。`,
+      content: `退货后采购金额 ${money(summary.orderAmount, currency)}，已付 ${money(summary.paidAmount, currency)}，多付 ${money(over, currency)}。供应商退回货款后，请在采购单「付款与费用」打开原付款单登记「退款 / 冲销」，原因写「采购退货 ${created.returnedDate}」。`,
     });
   } catch {
     // 只是提醒，读取付款汇总失败不影响退货结果
@@ -121,7 +122,7 @@ async function save() {
 <template>
   <Modal
     :open="Boolean(stockIn)"
-    :title="`采购退货 · ${stockIn?.code ?? ''}`"
+    :title="stockIn ? `采购退货 · ${inSubject(stockIn)}` : '采购退货'"
     width="860px"
     :mask-closable="false"
     @cancel="emit('close')"
@@ -130,8 +131,8 @@ async function save() {
       <Alert v-if="error" type="error" :message="error" show-icon />
       <div class="sheet">
         <div class="field">
-          <span>采购单 / 供应商</span>
-          <b>{{ stockIn.orderCode }} · {{ stockIn.supplierName }}</b>
+          <span>供应商</span>
+          <b>{{ stockIn.supplierName || '—' }}</b>
         </div>
         <div class="field">
           <span>仓库</span>

@@ -176,9 +176,7 @@ async function submit() {
     );
     const orders = createdOrders(current, updated);
     message.success(
-      orders.length > 0
-        ? `已生成采购单 ${orders.map((order) => order.code || order.id).join('、')}`
-        : '已生成采购单',
+      orders.length > 0 ? `已生成 ${orders.length} 张采购单` : '已生成采购单',
     );
     emit('ordered', updated, orders);
   } catch (error) {

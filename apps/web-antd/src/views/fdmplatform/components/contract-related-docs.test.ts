@@ -37,6 +37,7 @@ describe('loadContractRelatedDocs', () => {
                 id: 'o1',
                 code: 'PO-1',
                 contractId: 'c1',
+                contractName: 'FYY18020261123-1Y',
                 record: { supplierName: '甲厂', status: 'CANCELLED' },
               },
             ],
@@ -76,7 +77,7 @@ describe('loadContractRelatedDocs', () => {
         : Promise.resolve(empty),
     );
 
-    const groups = await loadContractRelatedDocs('c1');
+    const groups = await loadContractRelatedDocs('c1', 'FYY18020261123-1Y');
 
     expect(groups.map((group) => group.title)).toEqual([
       '采购单',
@@ -87,8 +88,10 @@ describe('loadContractRelatedDocs', () => {
       expect.objectContaining({ contractId: 'c1' }),
     );
     const [order] = groups[0]!.rows;
-    expect(order).toMatchObject({ code: 'PO-1', voided: true });
+    expect(order).toMatchObject({ title: 'FYY18020261123-1Y', voided: true });
     expect(groups[0]!.columns).not.toContain('状态');
+    expect(groups[1]!.rows[0]!.title).toBe('FYY18020261123-1Y');
+    expect(groups[2]!.rows[0]!.title).toBe('快递费');
     expect(groups[1]!.rows[0]!.cells).toEqual([
       '采购入库',
       '主仓',

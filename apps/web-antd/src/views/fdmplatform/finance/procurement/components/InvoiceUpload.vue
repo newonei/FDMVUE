@@ -379,7 +379,7 @@ async function submit(chosen: File | undefined) {
           </thead>
           <tbody>
             <tr v-for="line in lines" :key="line.key">
-              <td>{{ line.code }}</td>
+              <td>{{ line.label ?? '采购单' }}</td>
               <td class="right num">
                 {{
                   line.remaining === undefined

@@ -19,11 +19,14 @@ import {
   procurementFinanceAction,
   uploadProcurementFinanceFile,
 } from '#/api/fdmplatform/procurement-finance';
+import PostingMatchField from '#/views/fdmcaiwu/bank-account/modules/posting-match-field.vue';
 
 import FilePreviewButton from '../../../components/FilePreviewButton.vue';
 import { errorText, money } from '../../../data';
+import { documentLabel } from '../../../document-label';
 import { localDate } from '../../../purchase/quotes/comparison';
 import { payerAccountLabel, paymentMethods } from '../model';
+import PaymentCashAccountField from './PaymentCashAccountField.vue';
 
 /**
  * 财务确认付款：核对采购登记的金额和收款方，转账后填实际付款日期，可改付款公司、账户和分类，
@@ -43,8 +46,10 @@ const emit = defineEmits<{
 const today = localDate();
 const payers = ref<ProcurementSetting[]>([]);
 const form = ref<{
+  existingJournalEntryId?: number;
   paidAt?: string;
   payerAccount?: string;
+  payerBankAccountId?: number;
   payerEntityId?: string;
   paymentMethod?: string;
   reason?: string;
@@ -59,6 +64,10 @@ let version: number | undefined;
 const amountText = computed(() =>
   money(props.record?.amount, props.record?.currency, '—'),
 );
+const payerCompanyId = computed(
+  () =>
+    payers.value.find((row) => row.id === form.value.payerEntityId)?.companyId,
+);
 
 watch(
   () => [props.open, props.record?.id],
@@ -69,9 +78,11 @@ watch(
     error.value = '';
     files.value = [];
     form.value = {
-      paidAt: today,
+      paidAt: props.record.paidAt ?? today,
       payerEntityId: props.record.payerEntityId,
       payerAccount: props.record.payerAccount,
+      payerBankAccountId: props.record.payerBankAccountId,
+      existingJournalEntryId: props.record.existingJournalEntryId,
       paymentMethod: props.record.paymentMethod,
     };
     try {
@@ -87,9 +98,17 @@ watch(
 );
 
 function pickPayer(id: string) {
+  if (form.value.payerEntityId === id) return;
   form.value.payerEntityId = id;
-  const label = payerAccountLabel(payers.value.find((row) => row.id === id));
-  if (label) form.value.payerAccount = label;
+  form.value.payerBankAccountId = undefined;
+  form.value.existingJournalEntryId = undefined;
+  form.value.payerAccount = payerAccountLabel(
+    payers.value.find((row) => row.id === id),
+  );
+}
+function selectBankAccount(id?: number) {
+  form.value.payerBankAccountId = id;
+  form.value.existingJournalEntryId = undefined;
 }
 function pickFiles(event: Event) {
   const input = event.target as HTMLInputElement;
@@ -103,7 +122,7 @@ async function confirm() {
   if (!form.value.paidAt) error.value = '请填写实际付款日期';
   else if (form.value.paidAt > today) error.value = '付款日期不能晚于今天';
   else if (!form.value.payerEntityId) error.value = '请选择付款公司';
-  else if (form.value.payerAccount?.trim()) {
+  else if (form.value.payerBankAccountId || form.value.payerAccount?.trim()) {
     error.value = '';
   } else {
     error.value = '请填写付款账户';
@@ -131,6 +150,8 @@ async function confirm() {
         paidAt: form.value.paidAt,
         payerEntityId: form.value.payerEntityId,
         payerAccount: form.value.payerAccount?.trim(),
+        payerBankAccountId: form.value.payerBankAccountId ?? null,
+        existingJournalEntryId: form.value.existingJournalEntryId ?? null,
         paymentMethod: form.value.paymentMethod?.trim() || undefined,
         reason: form.value.reason?.trim() || undefined,
       },
@@ -147,7 +168,7 @@ async function confirm() {
 <template>
   <Modal
     :open="open"
-    :title="`确认付款 · ${record?.code ?? ''}`"
+    :title="documentLabel(record, '确认付款')"
     width="680px"
     :mask-closable="false"
     @cancel="!saving && emit('close')"
@@ -209,8 +230,31 @@ async function confirm() {
         </label>
         <label>
           <span><em>*</em>付款账户</span>
-          <Input v-model:value="form.payerAccount" />
+          <PaymentCashAccountField
+            v-model:account-text="form.payerAccount"
+            :account-id="form.payerBankAccountId"
+            :company-id="payerCompanyId"
+            :disabled="saving"
+            :open="open"
+            :payer-selected="!!form.payerEntityId"
+            @update:account-id="selectBankAccount"
+          />
         </label>
+        <div v-if="open && form.payerBankAccountId" class="full">
+          <PostingMatchField
+            :account-id="form.payerBankAccountId"
+            :amount="record.amount"
+            :company-id="payerCompanyId"
+            :currency="record.currency"
+            :date="form.paidAt"
+            :disabled="saving"
+            :value="form.existingJournalEntryId"
+            direction="EXPENSE"
+            @update:value="
+              (id) => (form.existingJournalEntryId = id ?? undefined)
+            "
+          />
+        </div>
         <div class="full files">
           <span>银行回单（选填，也可以之后补传）</span>
           <div>

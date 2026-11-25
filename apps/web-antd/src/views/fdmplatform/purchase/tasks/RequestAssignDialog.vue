@@ -17,6 +17,7 @@ import {
 } from '#/api/fdmplatform';
 
 import { errorText } from '../../data';
+import { contractLabel, documentLabel } from '../../document-label';
 import ProductStructureDetails from '../../products/components/ProductStructureDetails.vue';
 import { activeAssignRows, assignPayload, assignRows } from './request-batch';
 
@@ -57,7 +58,7 @@ const pendingRequests = computed(() =>
     .filter((entry) => assignRows(contract.value!, entry.id).length > 0)
     .map((entry) => ({
       value: entry.id,
-      label: entry.code || entry.name || '采购申请',
+      label: documentLabel(entry, '采购申请'),
     })),
 );
 function chooseRequest(id: string) {
@@ -196,7 +197,8 @@ watch(
   >
     <template #title>
       分派采购申请<span v-if="contract" class="title-sub">
-        · {{ request?.name ?? '采购申请' }} · {{ contract.code }}</span>
+        · {{ documentLabel(request, '采购申请') }} ·
+        {{ contractLabel(contract) }}</span>
     </template>
     <Spin :spinning="loading">
       <Alert

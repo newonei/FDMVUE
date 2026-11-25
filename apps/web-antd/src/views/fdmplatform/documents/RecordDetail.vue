@@ -51,6 +51,7 @@ import LineTable from '../components/LineTable.vue';
 import { errorText, label, money, receiptStatusLabel, rows } from '../data';
 import { formatTemporalField } from '../date-display';
 import { personLabel } from '../directory';
+import { contractLabel, documentLabel } from '../document-label';
 import { receiptFxDisplay } from '../finance/exchange-rates/model';
 import ProcurementStatusBadge from '../purchase/components/ProcurementStatusBadge.vue';
 import {
@@ -218,12 +219,14 @@ const procurement = computed(() =>
     'tasks',
   ].includes(props.kind),
 );
-const title = computed(
-  () =>
-    record.value?.name ??
-    record.value?.invoiceNumber ??
-    record.value?.batchNo ??
-    config.value.title,
+const title = computed(() =>
+  documentLabel(
+    record.value,
+    props.kind === 'requests'
+      ? contractLabel(contract.value, config.value.title)
+      : config.value.title,
+    contract.value?.code,
+  ),
 );
 const company = computed(
   () =>
@@ -730,7 +733,7 @@ const mainAction = computed(() => {
       >
         <Descriptions.Item label="关联合同">
           <RelatedLink :target="contractTarget(contract.id)">
-            {{ contract.code }} · {{ contract.name }}
+            {{ contractLabel(contract) }}
           </RelatedLink>
 </Descriptions.Item><Descriptions.Item label="客户">
           <RelatedLink :target="entityTarget('customer', contract.customerId)">

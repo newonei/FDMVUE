@@ -11,6 +11,7 @@ export interface InvoiceOrderLine {
   contractId: string;
   orderId: string;
   code: string;
+  label?: string;
   remaining?: string;
 }
 
@@ -75,11 +76,11 @@ export function allocationProblem(
   if (positive.length === 0) return '至少一张采购单的关联金额大于 0';
   for (const order of positive) {
     const value = new BigNumber(allocations[order.key]!);
-    if (value.decimalPlaces()! > 2)
-      return `${order.code} 的关联金额最多两位小数`;
+    const name = order.label ?? '采购单';
+    if (value.decimalPlaces()! > 2) return `${name} 的关联金额最多两位小数`;
     const limit = new BigNumber(order.remaining ?? '');
     if (limit.isFinite() && value.gt(limit))
-      return `${order.code} 超额开票：剩余未开票 ${limit.toFormat(2)}`;
+      return `${name} 超额开票：剩余未开票 ${limit.toFormat(2)}`;
   }
   const sum = allocatedTotal(allocations);
   if (!sum.eq(total))

@@ -259,7 +259,7 @@ function fixture(id = 'contract-a'): Contract {
   return {
     id,
     code: id === 'contract-a' ? 'HT-A' : 'HT-B',
-    name: '订单',
+    name: id === 'contract-a' ? 'FYY20261124-1Y' : 'FYY20261125-1Y',
     companyId: 1,
     departmentId: 1,
     ownerUserId: 1,
@@ -500,13 +500,19 @@ describe('procurement quote workspace', () => {
     ).click();
     await settle();
     expect(host.querySelector('.comparison-heading')?.textContent).toContain(
-      'HT-B',
+      'FYY20261125-1Y',
     );
+    expect(
+      host.querySelector('.comparison-heading')?.textContent,
+    ).not.toContain('HT-B');
     stale.resolve(fixture());
     await settle();
     expect(host.querySelector('.comparison-heading')?.textContent).toContain(
-      'HT-B',
+      'FYY20261125-1Y',
     );
+    expect(
+      host.querySelector('.comparison-heading')?.textContent,
+    ).not.toContain('HT-B');
   });
   it('retains the comparison on refresh failure but blocks mutations until retry', async () => {
     const { host } = await mount();
@@ -642,7 +648,10 @@ describe('source task quote comparison dialog', () => {
     state.open = true;
     await settle();
     expect(host.querySelector('.comparison-heading')?.textContent).toContain(
-      'HT-B',
+      'FYY20261125-1Y',
     );
+    expect(
+      host.querySelector('.comparison-heading')?.textContent,
+    ).not.toContain('HT-B');
   });
 });

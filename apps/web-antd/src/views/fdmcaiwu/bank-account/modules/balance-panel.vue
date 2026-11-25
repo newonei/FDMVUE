@@ -3,9 +3,9 @@ import type { TableColumnsType } from 'ant-design-vue';
 
 import type { FdmcaiwuBankBalanceApi as Api } from '#/api/fdmcaiwu/journal';
 
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
+import { RouterLink } from 'vue-router';
 
-import { useAccess } from '@vben/access';
 import { IconifyIcon } from '@vben/icons';
 import { downloadFileFromBlobPart } from '@vben/utils';
 
@@ -13,8 +13,6 @@ import {
   Alert,
   Button,
   DatePicker,
-  message,
-  Popconfirm,
   Space,
   Table,
   Tag,
@@ -22,77 +20,52 @@ import {
 } from 'ant-design-vue';
 import dayjs from 'dayjs';
 
-import {
-  deleteBankAccount,
-  exportBankBalanceExcel,
-  getBankAccounts,
-  getBankBalance,
-} from '#/api/fdmcaiwu/journal';
+import { exportBankBalanceExcel, getBankBalance } from '#/api/fdmcaiwu/journal';
 
-import { formatMoney } from '../model';
-import AccountDialog from './account-dialog.vue';
+import { ACCOUNT_TYPE_LABELS, formatMoney } from '../../journal/model';
 
 /**
- * 银行余额：余额 = 期初 + 收入 − 支出。每个账户按日记账的收付款行逐月累计，
+ * 账户余额：余额 = 期初 + 收入 − 支出。每个账户按日记账的收付款记录逐月累计，
  * 列与财务原来的余额表一致：上年余额、本年收入/支出/余额，再按 1-12 月展开。
  */
-defineProps<{ bankNames: string[] }>();
-const emit = defineEmits<{ changed: [] }>();
-
-const { hasAccessByCodes } = useAccess();
-const canManage = computed(() => hasAccessByCodes(['fdmcaiwu:journal:account']));
+const props = defineProps<{
+  canManage: boolean;
+  filters: Api.BalanceFilter;
+  hiddenAccounts: Api.Account[];
+}>();
+const emit = defineEmits<{
+  edit: [account: Api.Row];
+  'edit-hidden': [account: Api.Account];
+}>();
 
 const year = ref(String(dayjs().year()));
 const table = ref<Api.Table>();
-const accounts = ref<Api.Account[]>([]);
 const loading = ref(false);
 const exporting = ref(false);
-const accountDialog = ref<InstanceType<typeof AccountDialog>>();
 
+let loadRequest = 0;
 async function load() {
+  const request = ++loadRequest;
   loading.value = true;
   try {
-    const [result, list] = await Promise.all([
-      getBankBalance(Number(year.value)),
-      getBankAccounts(),
-    ]);
+    const result = await getBankBalance(Number(year.value), props.filters);
+    if (request !== loadRequest) return;
     table.value = result;
-    accounts.value = list;
   } finally {
-    loading.value = false;
+    if (request === loadRequest) loading.value = false;
   }
 }
 defineExpose({ reload: load });
-watch(year, load);
-onMounted(load);
+watch([year, () => props.filters], load, { immediate: true });
 
 const unconfigured = computed(
   () => table.value?.rows.filter((row) => row.accountId === null) ?? [],
 );
-const hiddenAccounts = computed(() =>
-  accounts.value.filter((account) => account.enabled === false),
-);
-
-function editAccount(row: Api.Row) {
-  const account = accounts.value.find((item) => item.id === row.accountId);
-  accountDialog.value?.show(account ? { ...account } : row.name);
-}
-async function removeAccount(row: Api.Row) {
-  if (row.accountId === null) return;
-  await deleteBankAccount(row.accountId);
-  message.success('已删除账户，日记账收支不变');
-  await load();
-}
-/** 改名会改动日记账，整页一起刷新（含本表） */
-function onSaved() {
-  emit('changed');
-}
-
 async function exportExcel() {
   exporting.value = true;
   try {
-    const data = await exportBankBalanceExcel(Number(year.value));
-    downloadFileFromBlobPart({ fileName: `${year.value}年银行余额.xlsx`, source: data });
+    const data = await exportBankBalanceExcel(Number(year.value), props.filters);
+    downloadFileFromBlobPart({ fileName: `${year.value}年账户余额.xlsx`, source: data });
   } finally {
     exporting.value = false;
   }
@@ -111,7 +84,12 @@ function isFuture(month: number) {
 
 const columns = computed<TableColumnsType<Api.Row>>(() => [
   { align: 'center', fixed: 'left', key: 'seq', title: '序号', width: 56 },
-  { fixed: 'left', key: 'name', title: '开户行', width: 200 },
+  { fixed: 'left', key: 'name', title: '账户简称', width: 200 },
+  { dataIndex: 'companyName', ellipsis: true, key: 'companyName', title: '所属公司', width: 165 },
+  { dataIndex: 'accountType', key: 'accountType', title: '账户类型', width: 108 },
+  { dataIndex: 'accountName', ellipsis: true, key: 'accountName', title: '账户名称', width: 160 },
+  { dataIndex: 'bankName', ellipsis: true, key: 'bankName', title: '开户行', width: 160 },
+  { dataIndex: 'accountNo', ellipsis: true, key: 'accountNo', title: '银行账号', width: 200 },
   { dataIndex: 'nature', key: 'nature', title: '性质', width: 80 },
   { align: 'center', dataIndex: 'currency', key: 'currency', title: '币种', width: 64 },
   { align: 'right', key: 'previousBalance', title: '上年余额', width: 130 },
@@ -155,10 +133,6 @@ function monthCell(row: Api.Row, key: string) {
         </span>
       </Space>
       <Space wrap>
-        <Button v-if="canManage" @click="accountDialog?.show()">
-          <template #icon><IconifyIcon icon="lucide:plus" /></template>
-          新增账户
-        </Button>
         <Button v-access:code="['fdmcaiwu:journal:export']" :loading="exporting" @click="exportExcel">
           <template #icon><IconifyIcon icon="lucide:file-down" /></template>
           导出
@@ -171,7 +145,7 @@ function monthCell(row: Api.Row, key: string) {
       type="warning"
       show-icon
       class="mb-3"
-      :message="`${unconfigured.length} 个收付款行还没设置期初余额（${unconfigured.map((row) => row.name).join('、')}），暂按 0、从第一笔收支算起；如果和已有账户是同一个，修改那个账户时把名称统一即可。`"
+      :message="`${unconfigured.length} 个收付款账户还没设置期初余额（${unconfigured.map((row) => row.name).join('、')}），暂按 0、从第一笔收支算起；如果和已有账户是同一个，修改那个账户时把名称统一即可。`"
     />
 
     <Table
@@ -181,32 +155,46 @@ function monthCell(row: Api.Row, key: string) {
       :data-source="table?.rows ?? []"
       :loading="loading"
       :pagination="false"
-      :row-key="(row: Api.Row) => row.name"
-      :scroll="{ x: 4950 }"
+      :row-key="(row: Api.Row) => row.accountId ?? `unconfigured:${row.name}`"
+      :scroll="{ x: 5743 }"
     >
-      <template #bodyCell="{ column, record, index }">
+      <template #bodyCell="{ column, record, index, text }">
         <template v-if="column.key === 'seq'">{{ index + 1 }}</template>
         <template v-else-if="column.key === 'name'">
           <div class="flex items-center justify-between gap-1">
-            <span class="truncate" :title="record.name">{{ record.name }}</span>
+            <RouterLink
+              v-if="record.accountId != null"
+              class="truncate text-primary"
+              :title="`查看 ${record.name} 的日记账流水`"
+              :to="{ path: '/caiwu/journal', query: { bankAccountId: record.accountId, bankAccountName: record.name } }"
+            >
+              {{ record.name }}
+            </RouterLink>
+            <span v-else class="truncate" :title="record.name">{{ record.name }}</span>
             <Space :size="2" class="shrink-0">
               <Tooltip v-if="record.mismatchCount" :title="`${record.mismatchCount} 笔币种不是 ${record.currency}，未计入余额`">
                 <Tag color="warning" class="mr-0">币种</Tag>
               </Tooltip>
               <template v-if="record.accountId === null">
-                <Button v-if="canManage" size="small" type="link" class="px-1" @click="editAccount(record as Api.Row)">
+                <Button v-if="canManage" size="small" type="link" class="px-1" @click="emit('edit', record as Api.Row)">
                   设置期初
                 </Button>
                 <Tag v-else class="mr-0">未设置</Tag>
               </template>
               <template v-else-if="canManage">
-                <Button size="small" type="link" class="px-1" @click="editAccount(record as Api.Row)">修改</Button>
-                <Popconfirm title="删除这个账户？日记账收支不会删除" ok-text="删除" ok-type="danger" @confirm="removeAccount(record as Api.Row)">
-                  <Button size="small" type="link" danger class="px-1">删除</Button>
-                </Popconfirm>
+                <Button size="small" type="link" class="px-1" @click="emit('edit', record as Api.Row)">修改</Button>
               </template>
             </Space>
           </div>
+        </template>
+        <template v-else-if="column.key === 'accountType'">
+          {{ record.accountId == null ? '—' : ACCOUNT_TYPE_LABELS[(record.accountType ?? 'BANK') as Api.AccountType] }}
+        </template>
+        <template v-else-if="column.key === 'companyName'">
+          {{ text || (record.accountId == null ? '—' : '未归属主体') }}
+        </template>
+        <template v-else-if="column.key === 'accountName' || column.key === 'accountNo' || column.key === 'bankName'">
+          {{ text || '—' }}
         </template>
         <template v-else-if="column.key === 'previousBalance'">
           <Tooltip :title="record.openingMonth ? `期初 ${record.openingMonth}` : '未设置期初，按 0 起算'">
@@ -246,30 +234,30 @@ function monthCell(row: Api.Row, key: string) {
       <template #summary>
         <Table.Summary fixed>
           <Table.Summary.Row v-for="total in table?.totals ?? []" :key="total.currency">
-            <Table.Summary.Cell :index="0" :col-span="3">
+            <Table.Summary.Cell :index="0" :col-span="8">
               <span class="font-medium">合计</span>
             </Table.Summary.Cell>
-            <Table.Summary.Cell :index="3" align="center">{{ total.currency }}</Table.Summary.Cell>
-            <Table.Summary.Cell :index="4" align="right">
+            <Table.Summary.Cell :index="8" align="center">{{ total.currency }}</Table.Summary.Cell>
+            <Table.Summary.Cell :index="9" align="right">
               <span class="balance-num font-medium">{{ money(total.previousBalance) }}</span>
             </Table.Summary.Cell>
-            <Table.Summary.Cell :index="5" align="right">
+            <Table.Summary.Cell :index="10" align="right">
               <span class="balance-num font-medium is-income">{{ money(total.yearIncome, true) }}</span>
             </Table.Summary.Cell>
-            <Table.Summary.Cell :index="6" align="right">
+            <Table.Summary.Cell :index="11" align="right">
               <span class="balance-num font-medium is-expense">{{ money(total.yearExpense, true) }}</span>
             </Table.Summary.Cell>
-            <Table.Summary.Cell :index="7" align="right">
+            <Table.Summary.Cell :index="12" align="right">
               <span class="balance-num font-medium">{{ money(total.yearBalance) }}</span>
             </Table.Summary.Cell>
             <template v-for="item in total.months" :key="item.month">
-              <Table.Summary.Cell :index="5 + item.month * 3" align="right">
+              <Table.Summary.Cell :index="10 + item.month * 3" align="right">
                 <span class="balance-num is-income">{{ money(item.income, true) }}</span>
               </Table.Summary.Cell>
-              <Table.Summary.Cell :index="6 + item.month * 3" align="right">
+              <Table.Summary.Cell :index="11 + item.month * 3" align="right">
                 <span class="balance-num is-expense">{{ money(item.expense, true) }}</span>
               </Table.Summary.Cell>
-              <Table.Summary.Cell :index="7 + item.month * 3" align="right">
+              <Table.Summary.Cell :index="12 + item.month * 3" align="right">
                 <span class="balance-num font-medium">{{ money(item.balance) }}</span>
               </Table.Summary.Cell>
             </template>
@@ -280,14 +268,13 @@ function monthCell(row: Api.Row, key: string) {
     <p v-if="hiddenAccounts.length" class="mt-2 text-xs text-muted-foreground">
       已隐藏 {{ hiddenAccounts.length }} 个账户：
       <template v-for="(item, i) in hiddenAccounts" :key="item.id">
-        <a v-if="canManage" @click="accountDialog?.show({ ...item })">{{ item.name }}</a>
+        <Button v-if="canManage" type="link" size="small" class="px-0" @click="emit('edit-hidden', item)">{{ item.name }}</Button>
         <span v-else>{{ item.name }}</span>
         <span v-if="i < hiddenAccounts.length - 1">、</span>
       </template>
-      （点名称修改，打开「在余额表显示」即可）
+      <template v-if="canManage">（点名称修改余额表显示设置）</template>
     </p>
 
-    <AccountDialog ref="accountDialog" :bank-names="bankNames" @saved="onSaved" />
   </div>
 </template>
 

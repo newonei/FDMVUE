@@ -50,6 +50,7 @@ import { filePreviewKind } from '../../../components/file-preview';
 import FilePreviewButton from '../../../components/FilePreviewButton.vue';
 import RecordTable from '../../../components/RecordTable.vue';
 import { errorText, field, money, rows, selectField } from '../../../data';
+import { documentLabel } from '../../../document-label';
 import { procurementFinanceAiCheckTypes } from '../../../documents/ai-check-types';
 import { needsImportedValue } from '../../../documents/import-completion';
 import { contractReferenceText } from '../../../documents/migration-display';
@@ -79,6 +80,7 @@ import PaymentRecordDialog from './PaymentRecordDialog.vue';
 import PaymentReviewDialog from './PaymentReviewDialog.vue';
 import ReimbursementDetail from './ReimbursementDetail.vue';
 import ReimbursementForm from './ReimbursementForm.vue';
+
 const props = defineProps<{
   context?: Record<string, unknown>;
   /** 外贸、内销入口只办报销本身，付款与成本归集归采购、财务。 */
@@ -541,6 +543,22 @@ async function openAction(action: string) {
         files.value.map((file) => ({ value: file.id, label: file.name })),
       ),
     );
+  const payment = record.value;
+  const cashPosting: ActionDefinition['cashPosting'] =
+    action === 'REVERSE' &&
+    type.value === 'PAYMENT' &&
+    payment?.payerBankAccountId
+      ? {
+          accountId: payment.payerBankAccountId,
+          amountField: 'amount',
+          companyId:
+            payment.payerBankAccountCompanyId ??
+            payment.payerSnapshot?.companyId,
+          currency: payment.currency,
+          dateField: 'occurredDate',
+          direction: 'INCOME',
+        }
+      : undefined;
   actionDefinition.value = {
     action,
     title: actionNames[action] ?? action,
@@ -549,6 +567,7 @@ async function openAction(action: string) {
         ? '撤回成功后将保留在当前单据，立即开放草稿编辑。已有付款等执行记录时以后台实际阻断信息为准。'
         : '此操作保留历史记录，并按当前版本核验关联执行。',
     fields,
+    cashPosting,
   };
   actionOpen.value = true;
 }
@@ -775,16 +794,18 @@ async function relatedUpdated() {
       pageError.value = errorText(error);
   }
 }
+const drawerTitle = computed(() => {
+  const type = financeTitles[props.type];
+  if (!record.value) return `新建${type}`;
+  const subject = documentLabel(record.value, '');
+  return subject ? `${type} · ${subject}` : type;
+});
 </script>
 <template>
   <FdmResizableDrawer
     :resize-key="`finance-${type}`"
     :open="open"
-    :title="
-      record
-        ? `${financeTitles[type]} · ${record.code}`
-        : `新建${financeTitles[type]}`
-    "
+    :title="drawerTitle"
     :width="type === 'REIMBURSEMENT' ? 'min(1440px,98vw)' : 'min(1180px,97vw)'"
     :mask-closable="!busy && !childOpen"
     :closable="!busy && !childOpen"
@@ -855,7 +876,7 @@ async function relatedUpdated() {
               {{
                 contractReferenceText(
                   record.contractCode,
-                  record.contractName,
+                  record.contractInternalOrderNo ?? record.contractName,
                   record.contractId,
                 )
               }}
@@ -865,9 +886,7 @@ async function relatedUpdated() {
             v-if="record.invoiceId && (type !== 'PAYMENT' || editable)"
             label="来源（付款发票）"
           >
-            {{
-              record.invoice?.code ?? record.invoice?.invoiceNo ?? '付款发票'
-            }}
+            {{ record.invoice?.invoiceNo ?? '付款发票' }}
             · {{ record.invoice?.orderCount ?? 1 }} 个采购单
             <Button type="link" size="small" @click="sourcesOpen = true">
               {{
@@ -886,7 +905,12 @@ async function relatedUpdated() {
                 documentTarget('orders', record.contractId, record.orderId)
               "
             >
-              {{ record.orderCode ?? '查看采购单' }}
+              {{
+                documentLabel(
+                  { subject: record.orderSubject, code: record.orderCode },
+                  '查看采购单',
+                )
+              }}
             </RelatedLink>
 </Descriptions.Item><Descriptions.Item
             v-if="
@@ -1250,7 +1274,7 @@ async function relatedUpdated() {
         reloadAfterApproval();
         loadFiles();
       "
-      @done="(value) => paymentChanged(value, `已确认付款 ${value.code}`)"
+      @done="(value) => paymentChanged(value, '已确认付款')"
     />
     <PaymentRecordDialog
       v-if="paymentEdit && record"
@@ -1258,7 +1282,12 @@ async function relatedUpdated() {
       :record="record"
       :contract-id="record.contractId"
       :order-id="record.orderId"
-      :order-code="String(record.orderCode ?? '')"
+      :order-code="
+        documentLabel(
+          { subject: record.orderSubject, code: record.orderCode },
+          '',
+        )
+      "
       :currency="record.currency"
       :available="paymentEdit.available"
       :reference="paymentEdit.reference"

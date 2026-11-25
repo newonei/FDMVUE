@@ -4,6 +4,9 @@ import type {
 } from '#/api/fdmplatform/procurement-finance';
 
 import BigNumber from 'bignumber.js';
+
+import { documentLabel } from '../../document-label';
+
 export const financeTitles: Record<ProcurementFinanceType, string> = {
   PAYMENT_PLAN: '付款计划',
   REQUEST: '采购请款单',
@@ -83,6 +86,8 @@ export interface FinanceDraft {
   sourceDocumentId: string;
   paidAt: string;
   payerAccount: string;
+  payerBankAccountId?: number;
+  existingJournalEntryId?: number;
   sourceType: 'PURCHASE_ORDER' | 'REIMBURSEMENT';
   costScope: 'ORDER' | 'PRODUCT';
   costDate: string;
@@ -154,6 +159,14 @@ export function financeDraft(
     strings.map((key) => [key, String(value[key] ?? '')]),
   ) as unknown as FinanceDraft;
   result.currency ||= 'CNY';
+  result.payerBankAccountId =
+    typeof value.payerBankAccountId === 'number'
+      ? value.payerBankAccountId
+      : undefined;
+  result.existingJournalEntryId =
+    typeof value.existingJournalEntryId === 'number'
+      ? value.existingJournalEntryId
+      : undefined;
   result.sourceType =
     value.sourceType === 'REIMBURSEMENT' ? 'REIMBURSEMENT' : 'PURCHASE_ORDER';
   result.costScope = value.costScope === 'PRODUCT' ? 'PRODUCT' : 'ORDER';
@@ -236,6 +249,10 @@ export function financePayload(
       amount: value.amount || undefined,
       paidAt: value.paidAt || undefined,
       payerAccount: value.payerAccount,
+      payerBankAccountId: value.payerBankAccountId,
+      existingJournalEntryId: value.payerBankAccountId
+        ? value.existingJournalEntryId
+        : undefined,
       payeeName: value.payeeName,
       payeeAccount: value.payeeAccount,
     };
@@ -404,14 +421,16 @@ export const paymentActionNames: Record<string, string> = {
 export function paymentSavedMessage(record: {
   approvalStage?: unknown;
   code?: string;
+  name?: string;
   status?: unknown;
 }) {
-  const code = record.code ?? '';
+  const subject = documentLabel(record, '');
+  const name = subject ? `付款「${subject}」` : '付款';
   if (record.status === 'SUBMITTED' && record.approvalStage === DINGTALK_STAGE)
-    return `付款 ${code} 已提交钉钉审批，通过后计入已付`;
+    return `${name}已提交钉钉审批，通过后计入已付`;
   if (record.status === 'SUBMITTED')
-    return `付款 ${code} 已提交财务审核，财务确认付款后计入已付`;
-  return `已确认付款 ${code}`;
+    return `${name}已提交财务审核，财务确认付款后计入已付`;
+  return subject ? `已确认付款「${subject}」` : '已确认付款';
 }
 /** 钉钉审批中的提示；发起失败时说明原因和处理办法。 */
 export function dingTalkApprovalMessage(record: { approval?: unknown }) {
@@ -594,6 +613,8 @@ export interface PaymentForm {
   paidAt?: string;
   payerEntityId?: string;
   payerAccount?: string;
+  payerBankAccountId?: number;
+  existingJournalEntryId?: number;
   paymentMethod?: string;
   payeeName?: string;
   payeeAccount?: string;
@@ -615,7 +636,8 @@ export function paymentFormProblem(
   if (!form.paidAt) return '请选择付款日期';
   if (form.paidAt > today) return '付款日期不能晚于今天';
   if (!form.payerEntityId) return '请选择所属公司（付款公司）';
-  if (!form.payerAccount?.trim()) return '请填写付款方式（付款账户）';
+  if (!form.payerBankAccountId && !form.payerAccount?.trim())
+    return '请填写付款方式（付款账户）';
   if (!form.payeeName?.trim()) return '请填写收款方';
   return '';
 }

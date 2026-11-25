@@ -108,6 +108,17 @@ export interface ContractItemSpecCorrection {
     skuName?: string;
   }[];
 }
+export interface ReceiptAccountSnapshot {
+  id: number;
+  companyId?: null | number;
+  name: string;
+  accountName?: string;
+  bankName?: string;
+  accountNumberTail?: string;
+  accountType: string;
+  currency: string;
+}
+
 export interface Contract extends BusinessRecord {
   migration?: MigrationInfo;
   blockReasons?: string[];
@@ -131,6 +142,7 @@ export interface Contract extends BusinessRecord {
   businessVersion: number;
   alibabaTradeAssuranceNo?: string;
   paymentTerms?: string;
+  receiptAccount?: null | ReceiptAccountSnapshot;
   signedDate?: string;
   items: ContractItem[];
   itemSpecCorrectionBlockReasons?: Record<string, string>;

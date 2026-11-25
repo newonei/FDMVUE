@@ -54,7 +54,6 @@ const columns = [
           record.occurredOn
         }}</span>
         <div v-else-if="column.key === 'doc'" class="cell">
-          <span class="mono">{{ record.docCode }}</span>
           <span class="muted">{{ txnLabel(record as StockTxn) }}</span>
         </div>
         <span v-else-if="column.key === 'warehouse'">{{
@@ -75,7 +74,7 @@ const columns = [
           money(record.amount)
         }}</span>
         <div v-else-if="column.key === 'contract'" class="cell">
-          <span>{{ record.contractCode ?? '—' }}</span>
+          <span>{{ record.contractId ? '关联合同' : '—' }}</span>
           <span class="muted ellipsis">{{ record.partner }}</span>
         </div>
       </template>

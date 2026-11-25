@@ -6,6 +6,7 @@ import type { BusinessRecord, Contract, MasterRecord } from '#/api/fdmplatform';
 import BigNumber from 'bignumber.js';
 
 import { rows } from '../data';
+import { contractLabel, documentLabel } from '../document-label';
 import { currentDocument, documentActionDefinition } from './model';
 import { stockFinanceRelatedDefinition } from './related-stock-finance';
 
@@ -382,7 +383,7 @@ export function relatedActionDefinition(
       throw new Error('当前报价已有新版本，请从最新报价编制方案');
     return lockContext(definition, {
       requestId: assignment.requestId,
-      name: `${request.name ?? contract.code}采购方案`,
+      name: `${documentLabel(request, contractLabel(contract, '采购'), contract.code)} · 采购方案`,
       lines: [
         {
           assignmentId: assignment.id,

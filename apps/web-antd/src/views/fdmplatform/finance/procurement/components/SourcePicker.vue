@@ -17,6 +17,7 @@ import {
 import { getProcurementFinancePage } from '#/api/fdmplatform/procurement-finance';
 
 import { errorText } from '../../../data';
+import { documentLabel } from '../../../document-label';
 import { hasPayableBalance, payableBalance } from '../model';
 const props = defineProps<{ open: boolean; reimbursementOnly?: boolean }>();
 const emit = defineEmits<{
@@ -74,7 +75,7 @@ watch(
     <Space direction="vertical" style="width: 100%">
       <Input.Search
         v-model:value="keyword"
-        placeholder="搜索单据号或名称"
+        placeholder="搜索单据主题"
         @search="
           page = 1;
           load();
@@ -90,8 +91,7 @@ watch(
         row-key="id"
         :pagination="{ current: page, pageSize: 10, total }"
         :columns="[
-          { title: '单据号', dataIndex: 'code' },
-          { title: '名称', dataIndex: 'name' },
+          { title: '单据主题', key: 'name' },
           { title: '金额', dataIndex: 'amount' },
           { title: '币种', dataIndex: 'currency' },
           { title: '可付款余额', key: 'balance' },
@@ -105,7 +105,10 @@ watch(
         "
       >
         <template #bodyCell="{ column, record }">
-          <span v-if="column.key === 'balance'">{{
+          <span v-if="column.key === 'name'">{{
+            documentLabel(record, '来源单据')
+          }}</span>
+          <span v-else-if="column.key === 'balance'">{{
             payableBalance(record as ProcurementFinanceRecord)
           }}</span><Button
             v-else-if="column.key === 'action'"

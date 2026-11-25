@@ -39,6 +39,7 @@ import {
 
 import FilePreviewButton from '../../../components/FilePreviewButton.vue';
 import { errorText, expenseCategories } from '../../../data';
+import { documentLabel } from '../../../document-label';
 import { currencyOptions } from '../../../products/model';
 import { downloadBlob } from '../../../purchase/manage/model';
 import ExpenseSourcePicker from './ExpenseSourcePicker.vue';
@@ -141,7 +142,10 @@ async function loadSource(line: ReimbursementLine) {
   if (productChoices[key]) return;
   try {
     const source = await getExpenseSource(line.contractId, line.orderId);
-    sourceLabels[key] = source.label;
+    sourceLabels[key] = documentLabel(
+      { name: source.label },
+      line.orderId ? '已关联采购单' : '已关联合同',
+    );
     productChoices[key] = source.products;
   } catch (error) {
     pageError.value = errorText(error);
@@ -305,7 +309,6 @@ defineExpose({ payload, pendingAttachments, isDirty, markSaved });
       <div>
         <span class="editor-kicker">费用报销</span>
         <h2>{{ record ? '编辑报销单' : '新建费用报销' }}</h2>
-        <p>{{ record?.code || '单号在首次保存后自动生成' }}</p>
       </div>
       <div class="editor-actions">
         <Button :disabled="saving" :loading="saving" @click="save()">
@@ -368,11 +371,6 @@ defineExpose({ payload, pendingAttachments, isDirty, markSaved });
                 :maxlength="200"
                 placeholder="例如：10 月办公用品采购"
               />
-            </Form.Item>
-            <Form.Item label="报销单号">
-              <div class="readonly-value">
-                {{ record?.code || '保存后自动生成' }}
-              </div>
             </Form.Item>
             <Form.Item label="申请人 / 申请日期">
               <div class="readonly-value">

@@ -30,7 +30,7 @@ const summary: PortalSummary = {
     {
       key: 'receipt',
       count: 2,
-      preview: 'HT-2 · USD 10 待确认',
+      preview: 'HT-20261125-000004 · USD 10 待确认',
       contractId: 'c2',
     },
     { key: 'history', count: 11_708, preview: '金智导入合同' },
@@ -87,6 +87,8 @@ describe('department portal page', () => {
     expect(host.querySelector('[data-todo="receipt"]')?.textContent).toContain(
       '2',
     );
+    expect(host.textContent).toContain('USD 10 待确认');
+    expect(host.textContent).not.toContain('HT-20261125-000004');
     expect(
       host.querySelector('[data-todo="receipt"]')?.classList.contains('hot'),
     ).toBe(true);

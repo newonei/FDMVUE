@@ -337,7 +337,7 @@ describe('采购付款记录的财务审核', () => {
         status: 'SUBMITTED',
         approvalStage: 'FINANCE',
       }),
-    ).toBe('付款 CGFK-1 已提交财务审核，财务确认付款后计入已付');
+    ).toBe('付款已提交财务审核，财务确认付款后计入已付');
     expect(
       paymentSavedMessage({
         code: 'CGFK-1',
@@ -346,7 +346,7 @@ describe('采购付款记录的财务审核', () => {
       }),
     ).toContain('钉钉审批');
     expect(paymentSavedMessage({ code: 'CGFK-1', status: 'CONFIRMED' })).toBe(
-      '已确认付款 CGFK-1',
+      '已确认付款',
     );
   });
 });

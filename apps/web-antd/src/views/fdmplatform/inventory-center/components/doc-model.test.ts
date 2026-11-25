@@ -50,12 +50,12 @@ const stockOut = (patch: Partial<StockOut>): StockOut =>
   }) as StockOut;
 
 describe('inventory documents', () => {
-  it('names documents like 金智: 【类型】对应单据 对方', () => {
-    expect(inSubject(stockIn({}))).toBe('【采购入库】CG-001 康美');
+  it('uses business subjects in place of generated document numbers', () => {
+    expect(inSubject(stockIn({}))).toBe('【采购入库】康美');
     expect(inSubject(stockIn({ kind: 'OTHER', source: '客户退回' }))).toBe(
       '【常规入库】客户退回',
     );
-    expect(outSubject(stockOut({}))).toBe('【销售出库】JXS365-1N Henry Liu');
+    expect(outSubject(stockOut({}))).toBe('【销售出库】Henry Liu');
     expect(
       outSubject(
         stockOut({ kind: 'OTHER', contractCode: null, destination: '样品' }),

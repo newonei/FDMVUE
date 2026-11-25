@@ -2,6 +2,8 @@ import type { DocumentKind } from '../../documents/model';
 
 import type { ProcurementWorkItem } from '#/api/fdmplatform/procurement-workbench';
 
+import { documentLabel } from '../../document-label';
+
 export const procurementStages = [
   { key: 'all', label: '全部待办', hint: '按交期排序' },
   { key: 'intake', label: '待接单', hint: '外贸提交的申请' },
@@ -162,6 +164,16 @@ export function mainlineStates(stage: string): ('active' | 'done' | 'todo')[] {
     if (index < current) return 'done';
     return index === current ? 'active' : 'todo';
   });
+}
+
+export function workItemTitle(entry: ProcurementWorkItem) {
+  return documentLabel(
+    { name: entry.title },
+    documentLabel(entry.row.record, '采购待办'),
+    entry.row.record.code,
+    entry.row.record.id,
+    entry.row.contractCode,
+  );
 }
 
 /** Long multi-product requests show the first product and a count; the full list stays in the tooltip. */

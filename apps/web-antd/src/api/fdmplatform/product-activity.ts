@@ -46,6 +46,7 @@ export interface ProductActivityRecord {
   supplierId?: null | string;
   supplierName?: null | string;
   name: null | string;
+  displayName?: null | string;
   status?: null | string;
   occurredAt?: null | number | string;
   businessDate?: null | string;

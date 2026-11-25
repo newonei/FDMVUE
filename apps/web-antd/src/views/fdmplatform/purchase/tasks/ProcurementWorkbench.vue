@@ -70,6 +70,7 @@ import {
   shortTitle,
   visibleStages,
   workbenchAction,
+  workItemTitle,
 } from './model';
 import RequestAssignDialog from './RequestAssignDialog.vue';
 import RequestQuoteDialog from './RequestQuoteDialog.vue';
@@ -299,7 +300,7 @@ function performSecondary(entry: ProcurementWorkItem) {
 function claim(entry: ProcurementWorkItem) {
   Modal.confirm({
     title: '接下这条采购申请？',
-    content: `「${shortTitle(entry.title)}」剩余的 ${quantityText(entry)} 会交给你办理，接单后可以直接「开采购单」。要交给别的采购员，请点「分派…」。`,
+    content: `「${shortTitle(workItemTitle(entry))}」剩余的 ${quantityText(entry)} 会交给你办理，接单后可以直接「开采购单」。要交给别的采购员，请点「分派…」。`,
     okText: '接单',
     cancelText: '取消',
     onOk: async () => {
@@ -610,7 +611,7 @@ onBeforeUnmount(() => {
           <Input.Search
             v-model:value="keyword"
             allow-clear
-            placeholder="搜索产品、内部单号、合同号或客户"
+            placeholder="搜索产品、内部单号或客户"
             class="workbench-search"
             :disabled="childOpen"
             @search="applyFilters"
@@ -741,11 +742,13 @@ onBeforeUnmount(() => {
                 <button
                   type="button"
                   class="workbench-record-link"
-                  :title="record.title"
+                  :title="workItemTitle(record as ProcurementWorkItem)"
                   :disabled="childOpen"
                   @click="select(record as ProcurementWorkItem, $event)"
                 >
-                  {{ shortTitle(record.title) }}
+                  {{
+                    shortTitle(workItemTitle(record as ProcurementWorkItem))
+                  }}
 </button><span
                   class="procurement-muted workbench-subtitle"
                   :title="record.subtitle"
@@ -757,8 +760,8 @@ onBeforeUnmount(() => {
                 <RelatedLink :target="contractTarget(record.row.contractId)">
                   {{
                     contractReferenceText(
-                      record.row.contractName,
                       record.row.contractCode,
+                      record.row.contractName,
                       record.row.contractId,
                     )
                   }}
@@ -871,13 +874,13 @@ onBeforeUnmount(() => {
                   :disabled="childOpen"
                   @click="select(entry, $event)"
                 >
-                  {{ shortTitle(entry.title) }}
+                  {{ shortTitle(workItemTitle(entry)) }}
                 </button>
                 <p class="procurement-muted">
                   {{
                     contractReferenceText(
-                      entry.row.contractName,
                       entry.row.contractCode,
+                      entry.row.contractName,
                       entry.row.contractId,
                     )
                   }}
@@ -957,7 +960,7 @@ onBeforeUnmount(() => {
             :status="selected.stage"
             :label="procurementStageLabel(selected.stage)"
           />
-          <h2>{{ selected.title }}</h2>
+          <h2>{{ workItemTitle(selected) }}</h2>
           <p v-if="selected.subtitle" class="procurement-muted">
             {{ selected.subtitle }}
           </p>
@@ -967,8 +970,8 @@ onBeforeUnmount(() => {
               <RelatedLink :target="contractTarget(selected.row.contractId)">
                 {{
                   contractReferenceText(
-                    selected.row.contractName,
                     selected.row.contractCode,
+                    selected.row.contractName,
                     selected.row.contractId,
                   )
                 }}

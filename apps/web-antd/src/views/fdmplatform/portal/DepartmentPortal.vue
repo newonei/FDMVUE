@@ -23,7 +23,9 @@ import {
 } from '../components/contract-mainline';
 import { contractWorkboard } from '../components/contract-workboard';
 import { errorText } from '../data';
+import { contractLabel, documentLabel } from '../document-label';
 import { nativeMoney } from '../documents/migration-display';
+import { contractInternalOrderNo, salesChannelOf } from '../sales-channel';
 import {
   actionableCount,
   contractLink,
@@ -90,8 +92,8 @@ const todos = computed(() =>
     };
     return {
       ...entry,
-      todo,
       count: Number(todo.count) || 0,
+      preview: documentLabel({ name: todo.preview }, '点击查看'),
       link: entry.target(todo),
     };
   }),
@@ -134,7 +136,11 @@ const contractRows = computed(() =>
       stages,
       contractWorkboard(contract),
     );
-    return { contract, stages, next };
+    const name = contractInternalOrderNo(
+      contract,
+      salesChannelOf(contract.businessType),
+    );
+    return { contract, stages, next, name };
   }),
 );
 </script>
@@ -189,9 +195,7 @@ const contractRows = computed(() =>
                   <span>{{ entry.label }}</span><b>{{ summary ? formatNumber(entry.count, 0) : '—' }}</b>
                 </span>
                 <span class="todo-preview">{{
-                  entry.count > 0
-                    ? entry.todo.preview || '点击查看'
-                    : entry.empty
+                  entry.count > 0 ? entry.preview : entry.empty
                 }}</span>
                 <span class="todo-go">去处理 →</span>
               </button>
@@ -219,7 +223,7 @@ const contractRows = computed(() =>
                 @click="go(contractLink(row.contract.id, department))"
               >
                 <span class="list-main">
-                  <b>{{ row.contract.code }}</b>
+                  <b>{{ row.name || '内部单号待补齐' }}</b>
                   <span>{{ row.contract.customerName }} ·
                     {{
                       nativeMoney(row.contract.amount, row.contract.currency)
@@ -260,7 +264,7 @@ const contractRows = computed(() =>
                   <b>{{ movement.kind === 'OUTBOUND' ? '发货' : '客户退货' }} ·
                     {{ movement.product || '产品' }}
                     {{ formatNumber(movement.quantity) }} {{ movement.unit }}</b>
-                  <span>{{ movement.contractCode }} ·
+                  <span>{{ contractLabel({ name: movement.contractName }) }} ·
                     {{ movement.time.slice(0, 10) }}</span>
                 </span>
                 <span></span>

@@ -16,6 +16,7 @@ import AiReviewStatus from '#/views/fdmaicheck/components/AiReviewStatus.vue';
 import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewStatuses';
 
 import { errorText, money } from '../../data';
+import { contractLabel, documentLabel } from '../../document-label';
 import { documentRowAiReviewTarget } from '../../documents/ai-check-types';
 import BusinessDocumentDetail from '../../documents/BusinessDocumentDetail.vue';
 import DocumentAction from '../../documents/DocumentAction.vue';
@@ -83,8 +84,8 @@ let locateSequence = 0;
 
 const scopeLabel = computed(() =>
   selectedContract.value && selectedContract.value.id === contractId.value
-    ? selectedContract.value.code
-    : contractId.value,
+    ? contractLabel(selectedContract.value)
+    : '已选合同',
 );
 const actionDisabled = computed(
   () => comparisonLoading.value || Boolean(comparisonError.value),
@@ -395,7 +396,7 @@ onBeforeUnmount(() => {
             <Input.Search
               v-model:value="keyword"
               allow-clear
-              placeholder="搜索内部单号、合同号、客户或供应商"
+              placeholder="搜索内部单号、客户或供应商"
               @search="search"
             />
             <Button
@@ -439,12 +440,10 @@ onBeforeUnmount(() => {
                 >
                   <span class="record-supplier">{{
                       row.record.supplierName ||
-                      row.record.name ||
-                      row.name ||
-                      '供应商待补齐'
+                      documentLabel(row.record, '供应商待补齐')
                     }}<span v-if="row.standaloneId" class="migration-label">历史单据</span></span>
                   <span class="record-order procurement-muted">{{
-                    row.contractCode || row.contractName || '关联订单待补齐'
+                    contractLabel({ name: row.contractName }, '关联订单待补齐')
                   }}</span>
                   <span
                     v-if="row.customerName"

@@ -58,6 +58,7 @@ import {
 } from '../../../components/line-table-model';
 import RemoteMasterSelect from '../../../components/RemoteMasterSelect.vue';
 import { errorText, money, rows as records } from '../../../data';
+import { contractLabel } from '../../../document-label';
 import { navigationRoute } from '../../../documents/navigation';
 import ProductStructureDetails from '../../../products/components/ProductStructureDetails.vue';
 import { productStructure } from '../../../products/structure';
@@ -598,7 +599,7 @@ async function searchContracts(keyword = '') {
   });
   contracts.value = page.list.map((row) => ({
     value: row.id,
-    label: `${row.code} · ${row.customerName ?? ''}`,
+    label: [contractLabel(row), row.customerName].filter(Boolean).join(' · '),
   }));
 }
 async function searchProducts(keyword = '') {
@@ -624,7 +625,9 @@ async function chooseContract(value: unknown) {
       contracts.value = [
         {
           value: current.id,
-          label: `${current.code} · ${current.customerName ?? ''}`,
+          label: [contractLabel(current), current.customerName]
+            .filter(Boolean)
+            .join(' · '),
         },
         ...contracts.value,
       ];
@@ -1044,7 +1047,7 @@ async function save(submit = false) {
             :filter-option="false"
             :options="contracts"
             :disabled="!!contractId || !!editOf"
-            placeholder="搜索内部单号或合同号；不选则为独立采购单"
+            placeholder="搜索合同内部单号；不选则为独立采购单"
             @search="searchContracts"
             @update:value="chooseContract"
           />
@@ -1520,7 +1523,7 @@ async function save(submit = false) {
   <Modal
     v-if="contract && contractReviewOpen"
     :open="open"
-    :title="`合同订单 ${contract.code}`"
+    :title="`合同订单 ${contractLabel(contract)}`"
     width="min(1080px, 92vw)"
     :footer="null"
     @cancel="contractReviewOpen = false"

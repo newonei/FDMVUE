@@ -19,6 +19,10 @@ import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewSt
 
 import { errorText } from '../../../data';
 import { referenceId } from '../../../documents/navigation';
+import {
+  inSubject,
+  returnSubject,
+} from '../../../inventory-center/components/doc-model';
 import { money, qty } from '../../warehouse/model';
 import PurchaseReturnDialog from '../../warehouse/PurchaseReturnDialog.vue';
 import { canReturn, canVoidStockIn } from '../../warehouse/return-model';
@@ -146,7 +150,7 @@ watch(() => props.orderId, load, { immediate: true });
           (record: StockIn) => (record.status === 'VOIDED' ? 'voided' : '')
         "
         :columns="[
-          { title: '入库单号', key: 'code', width: 190 },
+          { title: '入库主题', key: 'subject', width: 190 },
           { title: '入库日期', dataIndex: 'receivedDate', width: 100 },
           { title: '仓库', dataIndex: 'warehouseName', width: 100 },
           { title: '实收 / 合格', key: 'quantity', width: 110, align: 'right' },
@@ -158,8 +162,8 @@ watch(() => props.orderId, load, { immediate: true });
       >
         <template #emptyText>这张采购单还没有入库</template>
         <template #bodyCell="{ column, record }">
-          <div v-if="column.key === 'code'" class="cell">
-            <b class="mono">{{ record.code }}</b>
+          <div v-if="column.key === 'subject'" class="cell">
+            <b>{{ inSubject(record as StockIn) }}</b>
             <Space :size="4">
               <Tag v-if="record.status === 'VOIDED'" :title="record.voidReason">
                 已作废
@@ -174,9 +178,7 @@ watch(() => props.orderId, load, { immediate: true });
               >
                 工厂完工 · {{ record.warehouseName }}
               </Tag>
-              <Tag v-if="record.directShip" color="blue">
-                直发 · {{ record.stockOutCode }}
-              </Tag>
+              <Tag v-if="record.directShip" color="blue"> 直发出库 </Tag>
             </Space>
           </div>
           <span v-else-if="column.key === 'quantity'" class="num">
@@ -248,7 +250,7 @@ watch(() => props.orderId, load, { immediate: true });
         ]"
       >
         <template #bodyCell="{ column, record }">
-          <b v-if="column.key === 'code'" class="mono">{{
+          <b v-if="column.key === 'subject'" class="mono">{{
             record.evidenceRef || '—'
           }}</b>
           <span v-else-if="column.key === 'time'">{{
@@ -289,7 +291,7 @@ watch(() => props.orderId, load, { immediate: true });
         :pagination="false"
         :scroll="{ x: 1030 }"
         :columns="[
-          { title: '退货单号', key: 'code', width: 190 },
+          { title: '退货主题', key: 'subject', width: 190 },
           { title: '退货日期', dataIndex: 'returnedDate', width: 100 },
           { title: '原入库单', key: 'stockIn', width: 150 },
           { title: '数量', key: 'quantity', width: 80, align: 'right' },
@@ -300,14 +302,12 @@ watch(() => props.orderId, load, { immediate: true });
       >
         <template #emptyText>这张采购单没有退过货</template>
         <template #bodyCell="{ column, record }">
-          <div v-if="column.key === 'code'" class="cell">
-            <b class="mono">{{ record.code }}</b>
+          <div v-if="column.key === 'subject'" class="cell">
+            <b>{{ returnSubject(record as PurchaseReturn) }}</b>
             <Tag v-if="record.noReplacement" color="orange">不再补货</Tag>
             <Tag v-else color="blue">供应商补发</Tag>
           </div>
-          <span v-else-if="column.key === 'stockIn'" class="mono">{{
-            record.stockInCode
-          }}</span>
+          <span v-else-if="column.key === 'stockIn'">关联入库单</span>
           <span v-else-if="column.key === 'quantity'" class="num">{{
             qty(sum(record.lines))
           }}</span>
@@ -332,11 +332,9 @@ watch(() => props.orderId, load, { immediate: true });
       :order-id="orderId"
       @close="receiving = false"
       @saved="
-        (value, all) => {
+        (_value, all) => {
           receiving = false;
-          changed(
-            `已入库 ${all.map((entry) => entry.code).join('、') || value.code}`,
-          );
+          changed(`已生成 ${all.length || 1} 张入库单`);
         }
       "
     />
@@ -344,9 +342,9 @@ watch(() => props.orderId, load, { immediate: true });
       :stock-in="returning"
       @close="returning = undefined"
       @saved="
-        (value) => {
+        () => {
           returning = undefined;
-          changed(`已办理采购退货 ${value.code}`);
+          changed('已办理采购退货');
         }
       "
     />
@@ -354,9 +352,9 @@ watch(() => props.orderId, load, { immediate: true });
       :stock-in="voiding"
       @close="voiding = undefined"
       @saved="
-        (code) => {
+        () => {
           voiding = undefined;
-          changed(`已作废 ${code}`);
+          changed('已作废入库单');
         }
       "
     />

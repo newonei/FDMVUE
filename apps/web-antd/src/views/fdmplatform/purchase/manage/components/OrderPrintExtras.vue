@@ -1226,7 +1226,7 @@ defineExpose({
       <Space direction="vertical" style="width: 100%">
         <Input.Search
           v-model:value="copyKeyword"
-          placeholder="搜索采购主题、内部单号、合同号或供应商"
+          placeholder="搜索采购主题、内部单号或供应商"
           @search="loadCopyRows(true)"
         />
         <Alert v-if="copyError" type="error" :message="copyError" />

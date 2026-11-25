@@ -7,6 +7,7 @@ import { documentActionDefinition } from './model';
 
 const contract = {
   id: 'contract-1',
+  companyId: 6,
   code: 'HT-20260917-000001',
   name: '客户订单名称',
   status: 'CONFIRMED',
@@ -21,6 +22,12 @@ const contract = {
     'CREATE_QUOTE',
   ],
   finance: { receipts: [], invoices: [] },
+  receiptAccount: {
+    id: 21,
+    name: '合同收款',
+    currency: 'CNY',
+    accountType: 'BANK',
+  },
 } as unknown as Contract;
 
 function requestAction(target: typeof contract) {
@@ -46,34 +53,39 @@ function financeAction(
 }
 
 describe('contract optimization form defaults', () => {
-  it('defaults a purchase request name to the real contract code, not the name or id', () => {
+  it('defaults the purchase request subject to the contract internal number', () => {
     const { action, nameField } = requestAction(contract);
-    expect(nameField.default).toBe(contract.code);
+    expect(nameField.default).toBe(contract.name);
     expect(nameField.disabled).not.toBe(true);
     expect(action.lineKey).toBe('items');
   });
 
   it('rebuilds the default name when the bound contract changes', () => {
-    const second = { ...contract, code: 'HT-20260917-000002' };
-    expect(requestAction(second).nameField.default).toBe(second.code);
-    expect(requestAction(contract).nameField.default).toBe(contract.code);
+    const second = { ...contract, name: 'FYY-002' };
+    expect(requestAction(second).nameField.default).toBe(second.name);
+    expect(requestAction(contract).nameField.default).toBe(contract.name);
   });
 
   it('keeps a typed request name when the definition is rebuilt for the same contract', () => {
     const edited = '人工申请名称';
-    expect(requestAction(contract).nameField.default).toBe(contract.code);
+    expect(requestAction(contract).nameField.default).toBe(contract.name);
     expect(edited).not.toBe(requestAction(contract).nameField.default);
   });
 
-  it('omits receipt account and evidence fields while keeping source, amount, currency and date', () => {
+  it('offers an optional receipt account alongside source, amount, currency and date', () => {
     const fields = financeAction('CREATE_RECEIPT').fields;
     expect(fields.map((field) => field.key)).toEqual([
       'sourceKey',
       'amount',
       'currency',
       'receivedAt',
+      'accountId',
       'paymentMethod',
     ]);
+    expect(fields.find((field) => field.key === 'accountId')?.required).toBe(
+      false,
+    );
+    expect(fields.find((field) => field.key === 'accountId')?.default).toBe(21);
     expect(fields.find((field) => field.key === 'currency')?.default).toBe(
       'CNY',
     );
@@ -108,6 +120,9 @@ describe('contract optimization form defaults', () => {
       throw new Error('CONFIRM_RECEIPT receiptId missing');
     }
     expect(receiptField.key).toBe('receiptId');
+    expect(
+      confirm.fields.find((field) => field.key === 'accountId')?.label,
+    ).toBe('实际到账账户');
   });
 
   it('exposes the same request and receipt create actions through document definitions', () => {
@@ -126,14 +141,16 @@ describe('contract optimization form defaults', () => {
       [],
     );
     expect(request.fields.find((field) => field.key === 'name')?.default).toBe(
-      contract.code,
+      contract.name,
     );
     expect(receipt.fields.map((field) => field.key)).toEqual([
       'sourceKey',
       'amount',
       'currency',
       'receivedAt',
+      'accountId',
       'paymentMethod',
     ]);
+    expect(receipt.receiptCash?.companyId).toBe(6);
   });
 });

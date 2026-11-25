@@ -9,6 +9,7 @@ import type {
 
 import BigNumber from 'bignumber.js';
 
+import { contractLabel } from '../../document-label';
 import { activityLabel } from '../../products/activity-model';
 
 export const customerFields = [
@@ -417,7 +418,7 @@ export function customerCsv(
       stats?.contractCount ?? '',
       stats?.firstSignedDate,
       stats?.lastSignedDate,
-      stats?.lastContractCode,
+      contractLabel({ name: stats?.lastContractName }, ''),
       stats?.contractCount ? currencyLabel(stats.currency) : '',
       stats?.contractAmount,
       stats?.recent12Amount,

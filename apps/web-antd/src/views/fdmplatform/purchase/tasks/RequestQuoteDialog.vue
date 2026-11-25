@@ -27,6 +27,7 @@ import { contractActionWithAttachments } from '#/api/fdmplatform/submissions';
 import CreationAttachments from '../../components/CreationAttachments.vue';
 import RemoteMasterSelect from '../../components/RemoteMasterSelect.vue';
 import { errorText, money } from '../../data';
+import { contractLabel, documentLabel } from '../../document-label';
 import ProductStructureDetails from '../../products/components/ProductStructureDetails.vue';
 import { localDate } from '../quotes/comparison';
 import {
@@ -248,7 +249,8 @@ watch(
   >
     <template #title>
       按单录入报价<span v-if="contract" class="title-sub">
-        · {{ request?.name ?? '采购申请' }} · {{ contract.code }}</span>
+        · {{ documentLabel(request, '采购申请') }} ·
+        {{ contractLabel(contract) }}</span>
     </template>
     <Spin :spinning="loading">
       <Alert

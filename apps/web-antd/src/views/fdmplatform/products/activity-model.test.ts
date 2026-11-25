@@ -174,7 +174,17 @@ describe('product activity navigation and quantity display', () => {
           documentId: 'abc12345-6789',
         }),
       ),
-    ).toBe('蓝海工厂 · 采购单 · abc12345');
+    ).toBe('采购单');
+    expect(
+      activityName(
+        record({
+          type: 'PURCHASE_ORDER',
+          name: 'HT-20261125-000004',
+          contractCode: 'HT-20261125-000004',
+          contractName: 'FYY18020261123-1Y',
+        }),
+      ),
+    ).toBe('FYY18020261123-1Y');
     expect(activityName(record({ type: 'STOCK_EVENT', name: 'RESERVE' }))).toBe(
       '预留',
     );

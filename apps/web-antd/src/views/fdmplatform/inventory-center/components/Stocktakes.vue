@@ -44,7 +44,7 @@ const { active, linkedId } = useWarehouseDocumentLink(
   'stocktakeId',
   getStocktake,
   (document) => {
-    keyword.value = document.code;
+    keyword.value = '';
     warehouseId.value = undefined;
     pageNo.value = 1;
     rows.value = [document];
@@ -62,7 +62,7 @@ const { statusFor, refresh: refreshReviewStatuses } = useAiReviewStatuses(() =>
 );
 
 const columns = [
-  { title: '盘点单号', key: 'code', width: 180 },
+  { title: '盘点主题', key: 'subject', width: 180 },
   { title: '仓库', key: 'warehouse', width: 120 },
   { title: '盘点 / 有差异', key: 'count', width: 130, align: 'right' as const },
   { title: '盘盈金额', key: 'gain', width: 130, align: 'right' as const },
@@ -95,8 +95,8 @@ function saved(value: Stocktake) {
   creating.value = false;
   message.success(
     value.changedCount > 0
-      ? `已过账 ${value.code}，调整了 ${value.changedCount} 行库存`
-      : `已过账 ${value.code}，账实相符`,
+      ? `已过账，调整了 ${value.changedCount} 行库存`
+      : '已过账，账实相符',
   );
   void load(true);
 }
@@ -119,7 +119,7 @@ onMounted(async () => {
       <Input.Search
         v-model:value="keyword"
         allow-clear
-        placeholder="盘点单号、产品"
+        placeholder="产品、备注"
         style="width: 280px"
         @search="load(true)"
       />
@@ -207,7 +207,7 @@ onMounted(async () => {
         </table>
       </template>
       <template #bodyCell="{ column, record }">
-        <b v-if="column.key === 'code'" class="mono">{{ record.code }}</b>
+        <b v-if="column.key === 'subject'">{{ record.warehouseName }}盘点</b>
         <span v-else-if="column.key === 'warehouse'">{{
           record.warehouseName
         }}</span>

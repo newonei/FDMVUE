@@ -54,7 +54,7 @@ watch(
   <Modal
     :open="open"
     :title="`${title ?? '集中收票'} · 查看来源${
-      sources ? `（${sources.code ?? sources.invoiceNo ?? ''}）` : ''
+      sources ? `（${sources.invoiceNo ?? ''}）` : ''
     }`"
     width="1080px"
     :footer="null"

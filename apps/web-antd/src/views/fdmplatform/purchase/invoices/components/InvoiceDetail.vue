@@ -29,6 +29,7 @@ import AiCheckPanel from '#/views/fdmaicheck/components/AiCheckPanel.vue';
 
 import FilePreviewButton from '../../../components/FilePreviewButton.vue';
 import { errorText } from '../../../data';
+import { documentLabel } from '../../../document-label';
 import InvoiceSourceTable from '../../../finance/procurement/components/InvoiceSourceTable.vue';
 import { invoicePaymentStates } from '../../../finance/procurement/invoice-model';
 import { financeStatus } from '../../../finance/procurement/model';
@@ -110,7 +111,7 @@ async function download() {
   <FdmResizableDrawer
     resize-key="purchase-invoice"
     :open="open"
-    :title="`付款发票 · ${detail?.code ?? detail?.invoiceNo ?? ''}`"
+    :title="detail?.invoiceNo ? `付款发票 · ${detail.invoiceNo}` : '付款发票'"
     width="min(1180px,97vw)"
     @close="emit('close')"
   >
@@ -126,9 +127,6 @@ async function download() {
         <section>
           <h4>发票信息</h4>
           <Descriptions size="small" bordered :column="3">
-            <DescriptionsItem label="发票编号">
-              {{ detail.code ?? '—' }}
-            </DescriptionsItem>
             <DescriptionsItem label="供应商">
               {{ detail.supplierName ?? '—' }}
             </DescriptionsItem>
@@ -213,7 +211,7 @@ async function download() {
             :pagination="false"
             :data-source="detail.payments"
             :columns="[
-              { title: '付款单号', key: 'code', width: 200 },
+              { title: '付款主题', key: 'subject', width: 200 },
               { title: '付款日期', dataIndex: 'paidAt', width: 110 },
               {
                 title: '本次付款金额',
@@ -229,12 +227,12 @@ async function download() {
             <template #emptyText>还没有付款</template>
             <template #bodyCell="{ column, record }">
               <Button
-                v-if="column.key === 'code'"
+                v-if="column.key === 'subject'"
                 type="link"
                 size="small"
                 @click="emit('openPayment', String(record.id))"
               >
-                {{ record.code }}
+                {{ documentLabel(record, '查看付款记录') }}
               </Button>
               <span v-else-if="column.key === 'amount'" class="num">
                 {{ money(record.amount) }}

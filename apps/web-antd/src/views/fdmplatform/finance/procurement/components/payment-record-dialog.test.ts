@@ -8,6 +8,9 @@ const registerOrderPayment = vi.hoisted(() => vi.fn());
 vi.mock('@vben/access', () => ({
   useAccess: () => ({ hasAccessByCodes: () => false }),
 }));
+vi.mock('#/api/fdmcaiwu/bank-account', () => ({
+  listCashAccountOptions: () => Promise.resolve([]),
+}));
 vi.mock('#/api/fdmplatform/procurement', () => ({
   getProcurementSettings: () =>
     Promise.resolve([

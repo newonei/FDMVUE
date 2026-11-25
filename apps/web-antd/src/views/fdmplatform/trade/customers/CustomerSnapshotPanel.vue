@@ -9,6 +9,7 @@ import BigNumber from 'bignumber.js';
 import { getCustomerSnapshot } from '#/api/fdmplatform/customers';
 
 import { errorText, label } from '../../data';
+import { contractLabel } from '../../document-label';
 import RelatedLink from '../../documents/RelatedLink.vue';
 import { quantityText } from '../../products/activity-model';
 import { customerMissingFields, customerRegion, moneyShort } from './model';
@@ -142,7 +143,7 @@ const profile = computed(() => {
             <RelatedLink
               :target="{ type: 'contract', contractId: contract.id }"
             >
-              <span class="ellipsis">{{ contract.code || '未编号合同' }}</span>
+              <span class="ellipsis">{{ contractLabel(contract) }}</span>
             </RelatedLink>
             <span class="figure">{{
               moneyShort(contract.amount, contract.currency)

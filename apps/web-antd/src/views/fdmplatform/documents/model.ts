@@ -18,6 +18,7 @@ import {
   statusLabels,
 } from '../data';
 import { formatTemporalField } from '../date-display';
+import { contractLabel, documentLabel } from '../document-label';
 import { requestLineDefaults } from '../products/feedback-model';
 export function actionTitle(action: string): string {
   return (
@@ -307,6 +308,7 @@ export const documentDefinitions: Record<DocumentKind, DocumentDefinition> = {
     route: `${finance}refunds`,
     fields: [
       'kind|类型',
+      'cashMovementDate|退款 / 冲销日期',
       'amount|原币金额',
       'currency|币种',
       'rmbAmount|人民币金额',
@@ -769,7 +771,7 @@ export function documentActionDefinition(
     )
     .map((plan) => ({
       value: plan.id,
-      label: `${plan.name} · 第 ${plan.version} 版 · ${label(plan.status)}`,
+      label: `${documentLabel(plan, '采购方案', contract.code)} · 第 ${plan.version} 版 · ${label(plan.status)}`,
       fill: { planVersion: plan.version ?? 1 },
     }));
   const optionsByKey: Record<string, Option[]> = {
@@ -782,7 +784,14 @@ export function documentActionDefinition(
     })),
     requestId: (contract.requests ?? [])
       .filter((request) => request.status !== 'CANCELLED')
-      .map((request) => ({ value: request.id, label: String(request.name) })),
+      .map((request) => ({
+        value: request.id,
+        label: documentLabel(
+          request,
+          contractLabel(contract, '采购申请'),
+          contract.code,
+        ),
+      })),
     requestItemId: (contract.requests ?? []).flatMap((request) =>
       rows(request.items).map((item) => ({
         value: item.id,
@@ -852,7 +861,7 @@ export function documentActionDefinition(
     ),
     arrivalId: rows(contract.arrivals).map((arrival) => ({
       value: arrival.id,
-      label: `${arrival.batchNo} · ${itemName(arrival.contractItemId)} · 到货 ${arrival.quantity}`,
+      label: `${documentLabel(arrival, '到货单')} · ${itemName(arrival.contractItemId)} · 到货 ${arrival.quantity}`,
     })),
     poolId: pools
       .filter(

@@ -38,6 +38,7 @@ export namespace FactoryOrderBoardApi {
 
   export interface PageReq extends OrderApi.PageReq {
     ownerUserId?: number;
+    status?: 'ACCEPTED' | 'COMPLETED';
   }
 
   export interface Owner {

@@ -12,7 +12,10 @@ export namespace FdmcaiwuJournalApi {
   export interface Entry {
     amount: Decimal;
     bankAccount?: null | string;
+    bankAccountId?: null | number;
     billType?: null | string;
+    businessSourceId?: null | number;
+    businessSourceType?: null | string;
     category?: null | string;
     companyId?: null | number;
     companyName?: null | string;
@@ -35,7 +38,7 @@ export namespace FdmcaiwuJournalApi {
     paymentMethod?: null | string;
     remark?: null | string;
     rmbAmount: Decimal;
-    source?: 'IMPORT' | 'MANUAL';
+    source?: 'BUSINESS' | 'IMPORT' | 'MANUAL';
     sourceRef?: null | string;
     summary?: null | string;
     updateTime?: string;
@@ -43,10 +46,13 @@ export namespace FdmcaiwuJournalApi {
 
   type WithoutNull<T> = { [K in keyof T]: Exclude<T[K], null> };
 
-  /** 表单里空值用 undefined，接口返回的 null 先经 toSaveReq 转换 */
+  /** 可选表单值用 undefined，显式传 null 的 bankAccountId 取消关联 */
   export type SaveReq = WithoutNull<
     Omit<
       Entry,
+      | 'bankAccountId'
+      | 'businessSourceId'
+      | 'businessSourceType'
       | 'createTime'
       | 'entryMonth'
       | 'id'
@@ -56,6 +62,7 @@ export namespace FdmcaiwuJournalApi {
       | 'updateTime'
     >
   > & {
+    bankAccountId?: null | number;
     entryMonth?: string;
     id?: number;
     rmbAmount?: Decimal;
@@ -63,6 +70,7 @@ export namespace FdmcaiwuJournalApi {
 
   export interface Filter {
     bankAccount?: string;
+    bankAccountId?: number;
     category?: string;
     companyName?: string;
     deptName?: string;
@@ -84,6 +92,12 @@ export namespace FdmcaiwuJournalApi {
   }
 
   export interface Options {
+    accountOptions: {
+      accountName?: null | string;
+      accountType: FdmcaiwuBankBalanceApi.AccountType;
+      id: number;
+      name: string;
+    }[];
     bankAccounts: string[];
     billTypes: string[];
     categories: string[];
@@ -160,7 +174,7 @@ export function getJournal(id: number) {
   });
 }
 
-/** 以前填过的收付款行、类别、部门、经手人等，按使用次数排序 */
+/** 可关联的账户，以及以前填过的账户名称、类别、部门等 */
 export function getJournalOptions(direction?: FdmcaiwuJournalApi.Direction) {
   return requestClient.get<FdmcaiwuJournalApi.Options>(`${baseUrl}/options`, {
     params: { direction },
@@ -217,9 +231,17 @@ export function applyJournalImport(file: File) {
 
 export namespace FdmcaiwuBankBalanceApi {
   type Decimal = FdmcaiwuJournalApi.Decimal;
+  export type AccountType = 'BANK' | 'PRIVATE';
 
-  /** 开户行名称与日记账「收款行/付款行」一致；期初余额是期初月份月初的余额 */
+  /** 账户简称用于匹配日记账历史名称；期初余额是期初月份月初的余额 */
   export interface Account {
+    accountName?: null | string;
+    accountNo?: null | string;
+    accountType: AccountType;
+    active?: boolean;
+    bankName?: null | string;
+    companyId?: null | number;
+    companyName?: null | string;
     currency: string;
     enabled?: boolean;
     id?: number;
@@ -229,6 +251,29 @@ export namespace FdmcaiwuBankBalanceApi {
     openingMonth: string;
     remark?: string;
     sort?: number;
+  }
+
+  export type AccountSaveReq = Omit<
+    Account,
+    'accountName' | 'accountNo' | 'bankName' | 'companyName'
+  > & {
+    accountName: string;
+    accountNo: string;
+    bankName: string;
+  };
+
+  export interface CompanyOption {
+    id: number;
+    name: string;
+  }
+
+  export interface BalanceFilter {
+    accountId?: number;
+    accountType?: AccountType;
+    active?: boolean;
+    /** 0 查询未归属主体的账户 */
+    companyId?: number;
+    currency?: string;
   }
 
   export interface Month {
@@ -242,6 +287,13 @@ export namespace FdmcaiwuBankBalanceApi {
   export interface Row {
     /** 只在日记账里出现、还没设置成账户时为空 */
     accountId: null | number;
+    accountName?: null | string;
+    accountNo?: null | string;
+    accountType: AccountType | null;
+    active?: null | boolean;
+    bankName?: null | string;
+    companyId?: null | number;
+    companyName?: null | string;
     currency: string;
     /** 外币账户里币种不同、未计入的笔数 */
     mismatchCount: number;
@@ -269,8 +321,14 @@ export function getBankAccounts() {
   );
 }
 
-/** 新增或修改；改名时日记账里的收付款行一起改 */
-export function saveBankAccount(data: FdmcaiwuBankBalanceApi.Account) {
+export function getBankAccountCompanies() {
+  return requestClient.get<FdmcaiwuBankBalanceApi.CompanyOption[]>(
+    `${baseUrl}/bank-account/companies`,
+  );
+}
+
+/** 新增或修改账户；历史名称变更会同步日记账 */
+export function saveBankAccount(data: FdmcaiwuBankBalanceApi.AccountSaveReq) {
   return requestClient.post<number>(`${baseUrl}/bank-account/save`, data);
 }
 
@@ -280,15 +338,21 @@ export function deleteBankAccount(id: number) {
   });
 }
 
-export function getBankBalance(year: number) {
+export function getBankBalance(
+  year: number,
+  filters?: FdmcaiwuBankBalanceApi.BalanceFilter,
+) {
   return requestClient.get<FdmcaiwuBankBalanceApi.Table>(`${baseUrl}/balance`, {
-    params: { year },
+    params: { ...filters, year },
   });
 }
 
-export function exportBankBalanceExcel(year: number) {
+export function exportBankBalanceExcel(
+  year: number,
+  filters?: FdmcaiwuBankBalanceApi.BalanceFilter,
+) {
   return requestClient.download(`${baseUrl}/balance/export-excel`, {
-    params: { year },
+    params: { ...filters, year },
   });
 }
 

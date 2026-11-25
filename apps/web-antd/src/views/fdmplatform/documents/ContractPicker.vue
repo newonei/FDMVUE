@@ -11,6 +11,7 @@ import { getBusinessPage, getDirectory } from '#/api/fdmplatform';
 
 import { contractQuickActionReason } from '../components/contract-workflow';
 import { errorText, label, money } from '../data';
+import { contractLabel } from '../document-label';
 import { actionTitle } from './model';
 const props = defineProps<{
   action?: string;
@@ -107,7 +108,7 @@ const columns = [
       <p>选择本次「{{ operation }}」对应的合同，自动带入客户和订单所属公司。</p>
       <Input.Search
         v-model:value="keyword"
-        placeholder="内部单号 / 合同号 / 名称 / 客户"
+        placeholder="内部单号 / 客户"
         allow-clear
         autofocus
         @search="search"
@@ -153,7 +154,9 @@ const columns = [
           </Space>
         </template>
         <template #bodyCell="{ column, record }">
-          <span v-if="column.key === 'contract'">{{ record.code }}<br />{{ record.name }}</span><span v-else-if="column.key === 'companyName'">{{
+          <span v-if="column.key === 'contract'">{{
+            contractLabel({ name: record.name })
+          }}</span><span v-else-if="column.key === 'companyName'">{{
             directory?.companies.find(
               (company) => company.companyId === record.companyId,
             )?.companyName ??

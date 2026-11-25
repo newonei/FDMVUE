@@ -69,6 +69,7 @@ import {
   selectField,
 } from './data';
 import { personLabel, withDirectory } from './directory';
+import { contractLabel, documentRowLabel } from './document-label';
 import BusinessDocumentList from './documents/BusinessDocumentList.vue';
 import { completionFilter, scopeFromQuery } from './documents/completion-scope';
 import DocumentAction from './documents/DocumentAction.vue';
@@ -1326,14 +1327,13 @@ onMounted(async () => {
                         type="link"
                         @click="openDocument(record as DocumentRow)"
                       >
-                        {{ record.contractName }}
+                        {{
+                          documentRowLabel(
+                            record as DocumentRow,
+                            contractLabel({ name: record.contractName }),
+                          )
+                        }}
                       </Button>
-                      <div
-                        class="contract-code fdm-cell-line"
-                        :title="record.code"
-                      >
-                        {{ record.contractCode }}
-                      </div>
                     </template>
                     <span v-else-if="column.key === 'company'">{{
                       companyName(record.companyId)
@@ -1355,6 +1355,14 @@ onMounted(async () => {
                         recordValue(record as DocumentRow, String(column.key))
                       }}
                     </Tag>
+                    <span v-else-if="column.key === 'name'">
+                      {{
+                        documentRowLabel(
+                          record as DocumentRow,
+                          contractLabel({ name: record.contractName }),
+                        )
+                      }}
+                    </span>
                     <span v-else>{{
                       recordValue(record as DocumentRow, String(column.key))
                     }}</span>

@@ -7,6 +7,7 @@ import BigNumber from 'bignumber.js';
 
 import { label, rows } from '../data';
 import { formatTemporalField } from '../date-display';
+import { contractLabel, documentLabel } from '../document-label';
 import {
   currentDocument,
   pendingRequestItems,
@@ -54,13 +55,11 @@ export function contractWorkboard(contract: Contract): WorkboardGroup[] {
         item.id === (record.contractItemId ?? assignment?.contractItemId),
     );
     const parts = [
-      record.code ||
-        record.name ||
+      documentLabel(record, '', contract.code) ||
         record.supplierName ||
-        record.batchNo ||
         (record.receivedAt
           ? formatTemporalField('receivedAt', record.receivedAt)
-          : undefined),
+          : contractLabel(contract, '')),
       product?.skuName,
     ];
     if (kind === 'tasks')
@@ -69,8 +68,11 @@ export function contractWorkboard(contract: Contract): WorkboardGroup[] {
         record.quantity === null || record.quantity === undefined
           ? undefined
           : `${record.quantity} ${product?.unit ?? ''}`,
-        contract.requests?.find((request) => request.id === record.requestId)
-          ?.name,
+        documentLabel(
+          contract.requests?.find((request) => request.id === record.requestId),
+          '',
+          contract.code,
+        ),
       );
     if (kind === 'quotes')
       parts.push(

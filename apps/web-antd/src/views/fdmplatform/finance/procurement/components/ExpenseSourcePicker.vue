@@ -8,6 +8,7 @@ import { Alert, Input, Modal, Table } from 'ant-design-vue';
 import { getExpenseSources } from '#/api/fdmplatform/expense';
 
 import { errorText } from '../../../data';
+import { contractLabel } from '../../../document-label';
 
 /** 报销关联合同或采购单。全员都能用，所以只查编号和名称，不看金额和客户。 */
 const props = defineProps<{ open: boolean; type: 'CONTRACT' | 'ORDER' }>();
@@ -62,9 +63,7 @@ watch(
     <Input.Search
       v-model:value="keyword"
       allow-clear
-      :placeholder="
-        type === 'ORDER' ? '搜索合同编号或供应商' : '搜索合同编号或名称'
-      "
+      :placeholder="type === 'ORDER' ? '搜索内部单号或供应商' : '搜索内部单号'"
       @search="load(true)"
     />
     <Alert v-if="pageError" type="error" :message="pageError" show-icon />
@@ -78,12 +77,11 @@ watch(
         type === 'ORDER'
           ? [
               { title: '供应商', dataIndex: 'supplierName' },
-              { title: '合同', dataIndex: 'contractCode' },
+              { title: '合同内部单号', key: 'contract' },
               { title: '', key: 'action', width: 70 },
             ]
           : [
-              { title: '合同编号', dataIndex: 'code' },
-              { title: '名称', dataIndex: 'name' },
+              { title: '合同内部单号', key: 'contract' },
               { title: '', key: 'action', width: 70 },
             ]
       "
@@ -95,8 +93,11 @@ watch(
       "
     >
       <template #bodyCell="{ column, record }">
+        <span v-if="column.key === 'contract'">
+          {{ contractLabel({ name: record.name }) }}
+        </span>
         <a
-          v-if="column.key === 'action'"
+          v-else-if="column.key === 'action'"
           @click="emit('select', record as ExpenseSourceRow)"
           >选择</a>
       </template>

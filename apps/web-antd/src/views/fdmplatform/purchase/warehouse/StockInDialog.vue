@@ -44,7 +44,7 @@ const props = defineProps<{
   open: boolean;
   orderId?: string;
   /** 列表「转入库」：多张同供应商采购单一起登记，每张单、每个仓库各一张入库单 */
-  targets?: { code: string; contractId: string; orderId: string }[];
+  targets?: { contractId: string; label: string; orderId: string }[];
 }>();
 /** 分仓时会一次生成多张入库单，saved 带回全部 */
 const emit = defineEmits<{
@@ -108,7 +108,7 @@ async function loadOrders(keyword = '') {
       return {
         value: String(row.standaloneId ?? row.id),
         contractId: row.contractId ? String(row.contractId) : '',
-        label: `${labels.order} · ${labels.supplier} · ${row.contractCode ?? '未关联合同'}`,
+        label: `${labels.title} · ${labels.supplier} · ${labels.contract}`,
       };
     });
 }
@@ -129,10 +129,7 @@ async function loadLines() {
         ...row,
         orderId: sources[index]!.orderId,
         contractId: sources[index]!.contractId,
-        orderCode:
-          'code' in sources[index]!
-            ? String(sources[index]!.code)
-            : row.orderCode,
+        orderLabel: props.targets?.[index]?.label,
       })),
     );
   } catch (error_) {
@@ -207,7 +204,7 @@ async function save() {
   } catch (error_) {
     error.value =
       created.length > 0
-        ? `已生成 ${created.map((entry) => entry.code).join('、')}，其余仓库失败：${errorText(error_)}`
+        ? `已生成 ${created.length} 张入库单，其余仓库失败：${errorText(error_)}`
         : errorText(error_);
   } finally {
     saving.value = false;
@@ -233,7 +230,7 @@ async function save() {
             show-search
             :filter-option="false"
             :options="orders"
-            placeholder="搜索采购单号、内部单号、合同号或供应商"
+            placeholder="搜索采购主题、内部单号或供应商"
             @search="loadOrders"
           />
         </label>
@@ -309,7 +306,7 @@ async function save() {
             >
               <td>
                 <template v-if="!row.split">
-                  <span v-if="multi" class="hint">{{ row.orderCode }}</span>
+                  <span v-if="multi" class="hint">{{ row.orderLabel }}</span>
                   <b>{{ row.productName }}</b>
                   <span v-if="row.specification" class="hint">{{
                     row.specification

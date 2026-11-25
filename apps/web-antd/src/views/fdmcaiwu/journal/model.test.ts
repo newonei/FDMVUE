@@ -30,6 +30,7 @@ describe('journal model', () => {
       ...emptyForm('EXPENSE'),
       amount: '88',
       bankAccount: '工行',
+      bankAccountId: 42,
       entryDate: '2026-10-01',
       handlerName: '张三',
       invoiceNo: 'F001',
@@ -38,6 +39,7 @@ describe('journal model', () => {
     const next = nextForm(form);
     expect(next.entryDate).toBe('2026-10-01');
     expect(next.bankAccount).toBe('工行');
+    expect(next.bankAccountId).toBe(42);
     expect(next.handlerName).toBe('张三');
     expect(next.amount).toBe('');
     expect(next.summary).toBeUndefined();
@@ -49,6 +51,8 @@ describe('journal model', () => {
     const copy = copyForm({
       ...emptyForm('INCOME'),
       amount: '5',
+      bankAccount: '代收账户',
+      bankAccountId: 28,
       entryDate: '2020-01-01',
       entryMonth: '2020-01',
       id: 9,
@@ -59,6 +63,8 @@ describe('journal model', () => {
     expect(copy.entryDate).toBe(dayjs().format('YYYY-MM-DD'));
     expect(copy.entryMonth).toBeUndefined();
     expect(copy.amount).toBe('5');
+    expect(copy.bankAccount).toBe('代收账户');
+    expect(copy.bankAccountId).toBe(28);
   });
 
   it('builds month presets', () => {

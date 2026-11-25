@@ -8,6 +8,7 @@ import { Alert, Button, Input, Modal, Space, Table } from 'ant-design-vue';
 import { getBusinessPage } from '#/api/fdmplatform';
 
 import { errorText } from '../../../data';
+import { purchaseRowLabels } from '../model';
 const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{ close: []; selected: [row: DocumentRow] }>();
 const records = ref<DocumentRow[]>([]);
@@ -58,7 +59,7 @@ watch(
     <Space direction="vertical" style="width: 100%">
       <Input.Search
         v-model:value="keyword"
-        placeholder="搜索内部单号、合同号、客户或供应商"
+        placeholder="搜索采购主题、内部单号、客户或供应商"
         @search="load(true)"
       /><Alert v-if="pageError" type="error" :message="pageError" /><Table
         :data-source="records"
@@ -66,9 +67,9 @@ watch(
         row-key="id"
         :pagination="{ current: page, pageSize: 10, total }"
         :columns="[
+          { title: '采购主题', key: 'subject' },
           { title: '采购单供应商', key: 'supplier' },
-          { title: '关联合同', dataIndex: 'contractCode' },
-          { title: '合同名称', dataIndex: 'contractName' },
+          { title: '关联合同', key: 'contract' },
           { title: '选择', key: 'action' },
         ]"
         @change="
@@ -79,9 +80,16 @@ watch(
         "
       >
         <template #bodyCell="{ column, record }">
-          <span v-if="column.key === 'supplier'">{{
-            record.record.supplierName
-          }}</span><Button
+          <span v-if="column.key === 'subject'">{{
+            purchaseRowLabels(record as DocumentRow).title
+          }}</span>
+          <span v-else-if="column.key === 'supplier'">{{
+            purchaseRowLabels(record as DocumentRow).supplier
+          }}</span>
+          <span v-else-if="column.key === 'contract'">{{
+            purchaseRowLabels(record as DocumentRow).contract
+          }}</span>
+          <Button
             v-else-if="column.key === 'action'"
             type="link"
             @click="emit('selected', record as DocumentRow)"

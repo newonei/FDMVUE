@@ -66,6 +66,7 @@ import { customsCategories, customsLabel, customsStatuses } from '../customs';
 import { errorText, money } from '../data';
 import { formatTemporalField } from '../date-display';
 import { personLabel } from '../directory';
+import { contractLabel, documentLabel } from '../document-label';
 import LinkedRecordTable from '../documents/LinkedRecordTable.vue';
 import {
   contractTarget,
@@ -211,11 +212,18 @@ const currentFiles = computed(() => {
   );
   return files.value.filter((file) => !replaced.has(file.id));
 });
+function customsBatchTitle(batch?: CustomsBatch) {
+  return documentLabel(
+    { name: batch?.name, code: batch?.code },
+    '报关批次',
+    batch?.contractCode,
+  );
+}
 const summary = computed(() => {
   const value = selected.value;
   if (!value) return [];
   return [
-    ['关联合同', value.contractCode],
+    ['关联合同', contractLabel({ name: value.contractName })],
     ['负责人', personLabel(directory.value, value.ownerUserId)],
     ['办理状态', customsLabel(value.status)],
     ['资料状态', customsLabel(value.documentStatus)],
@@ -772,7 +780,7 @@ onBeforeUnmount(() => {
     <Space wrap class="customs-toolbar">
       <Input
         v-model:value="keyword"
-        placeholder="合同编号、批次名称或外部编号"
+        placeholder="内部单号、批次名称或外部编号"
         allow-clear
         class="customs-search"
         @press-enter="search"
@@ -832,10 +840,10 @@ onBeforeUnmount(() => {
             class="customs-name"
             @click="openDetail(record as CustomsBatch)"
           >
-            {{ record.name }}
+            {{ customsBatchTitle(record as CustomsBatch) }}
           </Button>
           <div class="customs-muted">
-            {{ record.contractCode }} · {{ record.code }}
+            {{ contractLabel({ name: record.contractName }) }}
           </div>
         </div>
         <span v-else-if="column.key === 'owner'">{{
@@ -881,7 +889,7 @@ onBeforeUnmount(() => {
       resize-key="customs-detail"
       :open="detailOpen && (embedded || routeActive)"
       @close="closeDetail"
-      :title="selected?.name ?? '报关跟进'"
+      :title="customsBatchTitle(selected)"
       width="min(1120px, 97vw)"
       :mask-closable="!nestedBusy"
       :closable="!nestedBusy"

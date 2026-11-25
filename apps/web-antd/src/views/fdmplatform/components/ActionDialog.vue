@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import type { ActionDefinition, Field } from '../data';
 
+import type { ReceiptAccountSnapshot } from '#/api/fdmplatform';
+
 import { computed, nextTick, ref, toRaw, watch } from 'vue';
 
 import {
@@ -18,6 +20,7 @@ import {
 } from 'ant-design-vue';
 
 import { newIdempotencyKey } from '#/api/fdmplatform';
+import PostingMatchField from '#/views/fdmcaiwu/bank-account/modules/posting-match-field.vue';
 
 import {
   fieldVisible,
@@ -30,6 +33,7 @@ import ReceiptFxPreview from '../finance/exchange-rates/ReceiptFxPreview.vue';
 import BuyerInvoicePanel from './BuyerInvoicePanel.vue';
 import RemoteMasterSelect from './RemoteMasterSelect.vue';
 import RemoteStockSelect from './RemoteStockSelect.vue';
+import SalesCashAccountSelect from './SalesCashAccountSelect.vue';
 
 type Value = (number | string)[] | boolean | number | string | undefined;
 type FormValues = Record<string, Value>;
@@ -48,6 +52,67 @@ const emit = defineEmits<{
 const automatic = new WeakMap<FormValues, FormValues>();
 const values = ref<FormValues>({});
 const lines = ref<FormValues[]>([]);
+const selectedReceipt = computed(() =>
+  props.definition?.receiptCash?.receipts?.find(
+    (receipt) => receipt.id === values.value.receiptId,
+  ),
+);
+const receiptAccountSnapshot = computed(() => {
+  const receiptAccount = selectedReceipt.value?.accountSnapshot;
+  const snapshot =
+    receiptAccount && typeof receiptAccount === 'object'
+      ? (receiptAccount as ReceiptAccountSnapshot)
+      : undefined;
+  return snapshot && snapshot.id === numericId(values.value.accountId)
+    ? snapshot
+    : props.definition?.receiptCash?.account;
+});
+const cashPosting = computed(() => {
+  const definition = props.definition;
+  if (definition?.cashPosting) {
+    const { amountField, dateField, ...posting } = definition.cashPosting;
+    return {
+      ...posting,
+      amount: scalarValue(values.value[amountField]),
+      date: textValue(values.value[dateField]),
+    };
+  }
+  const receipt = selectedReceipt.value;
+  if (!definition?.receiptCash || !receipt) return undefined;
+  const reversal = definition.action === 'REVERSE_RECEIPT';
+  if (!reversal && definition.action !== 'CONFIRM_RECEIPT') return undefined;
+  const accountId = numericId(
+    reversal ? receipt.accountId : values.value.accountId,
+  );
+  const date = reversal
+    ? textValue(values.value.postingDate)
+    : String(receipt.receivedAt ?? '');
+  const currency = String(receipt.currency ?? '');
+  const amount = reversal ? scalarValue(values.value.amount) : receipt.amount;
+  if (
+    !accountId ||
+    !date ||
+    !currency ||
+    (typeof amount !== 'string' && typeof amount !== 'number') ||
+    !(Number(amount) > 0)
+  )
+    return undefined;
+  return {
+    accountId,
+    amount,
+    companyId: definition.receiptCash.companyId,
+    currency,
+    date,
+    direction: reversal ? ('EXPENSE' as const) : ('INCOME' as const),
+  };
+});
+watch(
+  cashPosting,
+  () => {
+    values.value.existingJournalEntryId = undefined;
+  },
+  { flush: 'sync' },
+);
 const excessHint = computed(
   () => props.definition?.requestExcessHint?.(lines.value) ?? '',
 );
@@ -110,6 +175,21 @@ function scalarValue(value: Value) {
 }
 function textValue(value: Value) {
   return typeof value === 'string' ? value : undefined;
+}
+function numericId(value: unknown) {
+  const id = typeof value === 'string' && value.trim() ? Number(value) : value;
+  return typeof id === 'number' && Number.isSafeInteger(id) && id >= 0
+    ? id
+    : undefined;
+}
+function defaultConfirmationAccount() {
+  const definition = props.definition;
+  if (definition?.action === 'CONFIRM_RECEIPT' && selectedReceipt.value) {
+    values.value.accountId =
+      numericId(selectedReceipt.value.accountId) ??
+      definition.receiptCash?.account?.id ??
+      0;
+  }
 }
 
 function selectMode(item: Field) {
@@ -192,6 +272,7 @@ watch(
         );
     }
     settle(values.value, props.definition?.fields ?? []);
+    defaultConfirmationAccount();
     for (const line of lines.value)
       settle(line, props.definition?.lineFields ?? []);
     if (
@@ -378,6 +459,8 @@ function setValue(target: FormValues, key: string, value: unknown) {
   const auto = automatic.get(toRaw(target));
   if (auto) auto[key] = undefined;
   settle(target, fields ?? []);
+  if (target === values.value && key === 'receiptId')
+    defaultConfirmationAccount();
   if (target === values.value)
     for (const line of lines.value)
       settle(line, props.definition?.lineFields ?? []);
@@ -452,8 +535,17 @@ function setValue(target: FormValues, key: string, value: unknown) {
                 : item.hint
           "
         >
+          <SalesCashAccountSelect
+            v-if="item.key === 'accountId' && definition.receiptCash"
+            :allow-unlinked="definition.action === 'CONFIRM_RECEIPT'"
+            :company-id="definition.receiptCash.companyId"
+            :disabled="item.disabled || saving"
+            :snapshot="receiptAccountSnapshot"
+            :value="numericId(values[item.key])"
+            @update:value="(value) => setValue(values, item.key, value)"
+          />
           <RemoteMasterSelect
-            v-if="item.masterType"
+            v-else-if="item.masterType"
             :value="textValue(values[item.key])"
             :type="item.masterType"
             :disabled="item.disabled || saving"
@@ -528,6 +620,15 @@ function setValue(target: FormValues, key: string, value: unknown) {
           />
         </Form.Item>
       </Form>
+      <PostingMatchField
+        v-if="open && cashPosting"
+        v-bind="cashPosting"
+        :disabled="saving"
+        :value="numericId(values.existingJournalEntryId)"
+        @update:value="
+          (value) => setValue(values, 'existingJournalEntryId', value)
+        "
+      />
       <ReceiptFxPreview
         v-if="definition.action === 'CREATE_RECEIPT' && !definition.rmbOnly"
         :open="open"

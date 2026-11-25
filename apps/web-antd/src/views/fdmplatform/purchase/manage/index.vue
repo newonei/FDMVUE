@@ -88,6 +88,7 @@ import LineColumnSettings from '../../components/LineColumnSettings.vue';
 import RecordTable from '../../components/RecordTable.vue';
 import { useListColumns } from '../../components/useListColumns';
 import { errorText, field, rows } from '../../data';
+import { contractLabel, documentLabel } from '../../document-label';
 import BusinessDocumentDetail from '../../documents/BusinessDocumentDetail.vue';
 import {
   completionFilter,
@@ -120,7 +121,6 @@ import {
   hasPayableBalance,
   paymentSavedMessage,
 } from '../../finance/procurement/model';
-import { contractInternalOrderNo, salesChannelOf } from '../../sales-channel';
 import ProcurementPageHeader from '../components/ProcurementPageHeader.vue';
 import ProcurementStatusBadge from '../components/ProcurementStatusBadge.vue';
 import { localDate } from '../quotes/comparison';
@@ -258,7 +258,7 @@ const selectedOrders = computed(() =>
 const batchPaymentOpen = ref(false);
 const batchInvoiceOpen = ref(false);
 const batchStockInTargets =
-  ref<{ code: string; contractId: string; orderId: string }[]>();
+  ref<{ contractId: string; label: string; orderId: string }[]>();
 function runBatch(mode: 'end' | 'invoice' | 'payment' | 'stockIn') {
   const problem = batchProblem(selectedOrders.value, mode);
   if (problem) {
@@ -270,8 +270,8 @@ function runBatch(mode: 'end' | 'invoice' | 'payment' | 'stockIn') {
   else if (mode === 'invoice') batchInvoiceOpen.value = true;
   else if (mode === 'stockIn')
     batchStockInTargets.value = active.map((order) => ({
-      code: order.code,
       contractId: order.contractId,
+      label: order.label,
       orderId: order.orderId,
     }));
   else endSelected(active);
@@ -315,7 +315,7 @@ function endSelected(orders: ReturnType<typeof batchOrders>) {
           );
           if (lines > 0) ended += 1;
         } catch (error) {
-          failed.push(`${order.code}：${errorText(error)}`);
+          failed.push(`${order.label}：${errorText(error)}`);
         }
       }
       if (ended > 0) message.success(`已结束 ${ended} 张采购单`);
@@ -931,11 +931,7 @@ function editorSaved(
 }
 function stockInSaved(value: StockIn) {
   stockInOpen.value = false;
-  message.success(
-    value.directShip
-      ? `已入库 ${value.code}，并直发出库 ${value.stockOutCode}`
-      : `已入库 ${value.code}`,
-  );
+  message.success(value.directShip ? '已入库，并直发出库' : '已入库');
   void refreshFacts();
   void loadList();
 }
@@ -1063,14 +1059,7 @@ const links = computed(() =>
     ? relatedDocumentLinks(contract.value, 'orders', view.value.order)
     : [],
 );
-const contractLinkText = computed(() => {
-  const parent = contract.value;
-  return (
-    (parent &&
-      contractInternalOrderNo(parent, salesChannelOf(parent.businessType))) ||
-    '内部单号待补齐'
-  );
-});
+const contractLinkText = computed(() => contractLabel(contract.value));
 const mainLinks = computed(() =>
   links.value.filter(
     (link) =>
@@ -1735,7 +1724,9 @@ watch(financeType, (value, previous) => {
           :class="attentionClass[row.reason]"
           @click="openAttention(row)"
         >
-          <b>{{ row.subject?.trim() || EMPTY_PURCHASE_SUBJECT }}</b>
+          <b>{{
+            documentLabel(row, EMPTY_PURCHASE_SUBJECT, row.contractCode)
+          }}</b>
           <span>{{ row.supplierName }}</span>
           <em>{{
             row.reason === 'OVERDUE'
@@ -1776,7 +1767,7 @@ watch(financeType, (value, previous) => {
           <Input.Search
             v-model:value="keyword"
             allow-clear
-            placeholder="搜索采购主题、内部单号、合同号、客户或供应商"
+            placeholder="搜索采购主题、内部单号、客户或供应商"
             class="order-search"
             @search="
               page = 1;
@@ -2481,7 +2472,7 @@ watch(financeType, (value, previous) => {
                   :key="financeRevision"
                   :contract-id="view.contractId"
                   :order-id="view.id"
-                  :order-code="String(view.order.code ?? '')"
+                  :order-code="purchaseRowLabels({ ...view }).title"
                   :supplier-name="String(view.order.supplierName ?? '')"
                   :invoiced="invoicedTotal"
                   mode="payments"
@@ -2684,7 +2675,7 @@ watch(financeType, (value, previous) => {
       :open="paymentOpen && active"
       :contract-id="view.contractId"
       :order-id="view.id"
-      :order-code="String(view.order.code ?? '')"
+      :order-code="purchaseRowLabels({ ...view }).title"
       :supplier-name="String(view.order.supplierName ?? '')"
       :currency="String(financeSummary.currency ?? view.order.currency ?? '')"
       :available="financeSummary.availablePaymentAmount"

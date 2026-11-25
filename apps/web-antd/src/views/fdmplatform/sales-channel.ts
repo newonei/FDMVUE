@@ -1,3 +1,5 @@
+import { contractLabel } from './document-label';
+
 /**
  * 业务线：外贸 / 内销。合同记在 businessType，客户档案记在 salesChannel；
  * 没有标记的历史合同和客户一律按外贸。
@@ -30,8 +32,10 @@ export function contractInternalOrderNo(
   channel: SalesChannel,
 ) {
   return (
-    contract.name?.trim() ||
-    (channel === 'DOMESTIC' ? contract.code : undefined)
+    contractLabel(contract, '') ||
+    (channel === 'DOMESTIC'
+      ? contractLabel({ name: contract.code }, '') || undefined
+      : undefined)
   );
 }
 

@@ -21,6 +21,7 @@ function row(extra: Partial<ProcurementOrderRow> = {}): ProcurementOrderRow {
     operationStatus: 'IN_PROGRESS',
     record: {
       id: 'o1',
+      subject: '瑜伽垫采购',
       supplierId: 's1',
       supplierName: '工厂甲',
       currency: 'CNY',
@@ -47,6 +48,7 @@ describe('采购单批量操作', () => {
         contractId: 'c1',
         orderId: 'o1',
         code: 'CG001',
+        label: '瑜伽垫采购',
         remaining: '2000.00',
       },
     ]);
@@ -130,10 +132,32 @@ describe('采购单批量操作', () => {
     expect(inputs[0]!.input).toMatchObject({
       orderId: 'o1',
       amount: '50',
-      name: 'CG001 付款',
+      name: '瑜伽垫采购 付款',
       batchNo: 'JZFK-1',
       payerAccount: '网商银行（8831）',
     });
     expect(batchPaymentNo('2026-10-12')).toMatch(/^JZFK-20261012-\w{4}$/);
+  });
+
+  it('keeps the selected account and reconciliation choice for each payment', () => {
+    const orders = batchOrders([row(), row({ id: 'o2', orderCode: 'CG002' })]);
+    const form = {
+      paidAt: '2026-10-10',
+      payerEntityId: 'pay',
+      payerBankAccountId: 18,
+      payeeName: '工厂甲',
+      journalMatches: { o1: 52, o2: 0 },
+    };
+    const amounts = { o1: '50', o2: '20' };
+    expect(batchPaymentProblem(form, amounts, {}, '2026-10-12')).toBe('');
+    expect(
+      batchPaymentInputs(orders, amounts, form, 'JZFK-1').map(({ input }) => ({
+        payerBankAccountId: input.payerBankAccountId,
+        existingJournalEntryId: input.existingJournalEntryId,
+      })),
+    ).toEqual([
+      { payerBankAccountId: 18, existingJournalEntryId: 52 },
+      { payerBankAccountId: 18, existingJournalEntryId: 0 },
+    ]);
   });
 });

@@ -78,7 +78,11 @@ vi.mock('./RecordDetail.vue', () => ({
   }),
 }));
 vi.mock('./BusinessDocumentDetail.vue', () => ({
-  default: defineComponent({ render: () => null }),
+  default: defineComponent({
+    props: { id: { type: String, default: undefined }, open: Boolean },
+    setup: (props) => () =>
+      props.open ? h('section', { 'data-standalone': props.id }) : null,
+  }),
 }));
 vi.mock('./RelatedLink.vue', () => ({
   default: defineComponent({
@@ -265,6 +269,46 @@ afterEach(() => {
 });
 
 describe('document list shortcuts and retained context', () => {
+  it('shows the internal contract number for a legacy purchase request and retains a manual subject', async () => {
+    const systemNumber = 'HT-20261125-000004';
+    const internalNumber = 'FYY18020261123-1Y';
+    const base = {
+      ...row(),
+      contractCode: systemNumber,
+      contractName: internalNumber,
+    };
+    mocks.page.mockResolvedValue({
+      list: [
+        {
+          ...base,
+          id: 'legacy-request',
+          standaloneId: 'legacy-request',
+          code: systemNumber,
+          record: { id: 'legacy-request', name: systemNumber },
+        },
+        {
+          ...base,
+          id: 'new-request',
+          code: 'request-system-id',
+          record: { id: 'new-request', name: '瑜伽砖补货' },
+        },
+      ],
+      total: 2,
+    });
+
+    const { host } = await mountWorkspace('requests', '');
+    expect(host.innerHTML).not.toContain(systemNumber);
+    expect(host.innerHTML).not.toContain('request-system-id');
+    button(host, internalNumber).click();
+    await settle();
+    expect(
+      host.querySelector('[data-standalone="legacy-request"]'),
+    ).not.toBeNull();
+    button(host, '瑜伽砖补货').click();
+    await settle();
+    expect(host.querySelector('[data-detail="new-request"]')).not.toBeNull();
+  });
+
   it('uses the original standalone stock ID and shows unreviewed and completed results in the list', async () => {
     mocks.page.mockResolvedValue({
       list: [

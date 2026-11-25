@@ -10,6 +10,7 @@ import AiReviewStatus from '#/views/fdmaicheck/components/AiReviewStatus.vue';
 import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewStatuses';
 
 import { contractQuickActionReason } from '../../components/contract-workflow';
+import { contractLabel } from '../../document-label';
 import ProcurementStatusBadge from '../components/ProcurementStatusBadge.vue';
 import {
   compareTaskQuotes,
@@ -135,8 +136,7 @@ watch(
         <span class="eyebrow">同一采购需求</span>
         <h2>{{ comparison.taskItem?.skuName || '产品资料待补齐' }}</h2>
         <p class="procurement-muted">
-          {{ contract.code
-          }}<span v-if="contract.name"> · {{ contract.name }}</span> ·
+          {{ contractLabel(contract) }} ·
           {{ contract.customerName || '客户待补齐' }}
         </p>
         <p v-if="comparison.taskItem?.specification" class="procurement-muted">

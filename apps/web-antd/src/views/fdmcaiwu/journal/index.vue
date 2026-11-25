@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import type { FdmcaiwuJournalApi as Api } from '#/api/fdmcaiwu/journal';
 
-import { onMounted, ref } from 'vue';
+import { computed, onActivated, onMounted, ref } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
 
-import { Tabs } from 'ant-design-vue';
+import { Button, Tabs } from 'ant-design-vue';
 
 import { getJournalOptions } from '#/api/fdmcaiwu/journal';
 import { getDataCompanySimpleList } from '#/api/fdmdata/datacompany';
@@ -14,13 +15,20 @@ import EntryForm from './modules/entry-form.vue';
 import EntryList from './modules/entry-list.vue';
 import ImportDialog from './modules/import-dialog.vue';
 import SummaryPanel from './modules/summary-panel.vue';
-import BalancePanel from './modules/balance-panel.vue';
 
 defineOptions({ name: 'FdmcaiwuJournal' });
 
-const activeTab = ref<'BALANCE' | 'EXPENSE' | 'INCOME' | 'SUMMARY'>(
-  'INCOME',
-);
+const route = useRoute();
+const router = useRouter();
+const activeTab = ref<'EXPENSE' | 'INCOME' | 'SUMMARY'>('INCOME');
+const linkedAccount = computed(() => {
+  const raw = route.query.bankAccountId;
+  if (typeof raw !== 'string' || !/^\d+$/.test(raw)) return undefined;
+  const id = Number(raw);
+  const name = route.query.bankAccountName;
+  if (!Number.isSafeInteger(id) || id <= 0) return undefined;
+  return { id, name: typeof name === 'string' ? name : undefined };
+});
 const options = ref<Record<Api.Direction, Api.Options | undefined>>({
   EXPENSE: undefined,
   INCOME: undefined,
@@ -33,13 +41,15 @@ const importOpen = ref(false);
 const incomeList = ref<InstanceType<typeof EntryList>>();
 const expenseList = ref<InstanceType<typeof EntryList>>();
 const summaryPanel = ref<InstanceType<typeof SummaryPanel>>();
-const balancePanel = ref<InstanceType<typeof BalancePanel>>();
 
+let optionsRequest = 0;
 async function loadOptions() {
+  const request = ++optionsRequest;
   const [income, expense] = await Promise.all([
     getJournalOptions('INCOME'),
     getJournalOptions('EXPENSE'),
   ]);
+  if (request !== optionsRequest) return;
   options.value = { EXPENSE: expense, INCOME: income };
   companyNames.value = [
     ...new Set([
@@ -61,6 +71,9 @@ onMounted(async () => {
   }
   await loadOptions();
 });
+onActivated(() => {
+  if (options.value.INCOME) void loadOptions();
+});
 
 function openForm(data: Api.Direction | Api.SaveReq) {
   formDirection.value = typeof data === 'string' ? data : data.direction;
@@ -71,18 +84,22 @@ function refresh() {
   incomeList.value?.reload();
   expenseList.value?.reload();
   summaryPanel.value?.reload();
-  balancePanel.value?.reload();
   loadOptions();
 }
 </script>
 
 <template>
   <Page>
-    <header class="mb-1">
-      <h1 class="mb-1 text-xl font-semibold tracking-tight">日记账</h1>
-      <p class="mb-0 text-sm text-muted-foreground">
-        逐笔登记公司收入、支出；外币按汇率中心自动折人民币，按月份汇总收支，按期初余额算出各银行账户的逐月余额。
-      </p>
+    <header class="mb-1 flex flex-wrap items-start justify-between gap-2">
+      <div>
+        <h1 class="mb-1 text-xl font-semibold tracking-tight">日记账</h1>
+        <p class="mb-0 text-sm text-muted-foreground">
+          逐笔登记收入和支出，关联银行或私账账户，按月查看收支。
+        </p>
+      </div>
+      <Button @click="router.push({ path: '/caiwu/bank-accounts', query: { tab: 'balance' } })">
+        账户余额
+      </Button>
     </header>
     <Tabs v-model:active-key="activeTab">
       <Tabs.TabPane key="INCOME" tab="收入">
@@ -90,6 +107,7 @@ function refresh() {
           ref="incomeList"
           direction="INCOME"
           :options="options.INCOME"
+          :linked-account="linkedAccount"
           :company-names="companyNames"
           @edit="openForm"
           @import="importOpen = true"
@@ -101,6 +119,7 @@ function refresh() {
           ref="expenseList"
           direction="EXPENSE"
           :options="options.EXPENSE"
+          :linked-account="linkedAccount"
           :company-names="companyNames"
           @edit="openForm"
           @import="importOpen = true"
@@ -109,13 +128,6 @@ function refresh() {
       </Tabs.TabPane>
       <Tabs.TabPane key="SUMMARY" tab="收支汇总">
         <SummaryPanel ref="summaryPanel" :company-names="companyNames" />
-      </Tabs.TabPane>
-      <Tabs.TabPane key="BALANCE" tab="银行余额">
-        <BalancePanel
-          ref="balancePanel"
-          :bank-names="options.INCOME?.bankAccounts ?? []"
-          @changed="refresh"
-        />
       </Tabs.TabPane>
     </Tabs>
 

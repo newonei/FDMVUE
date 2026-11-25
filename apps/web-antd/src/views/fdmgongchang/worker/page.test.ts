@@ -75,8 +75,8 @@ const flush = async () => {
   }
 };
 
-function clickButton(text: string) {
-  const el = [...document.querySelectorAll('button')].find(
+function clickButton(text: string, container: Document | Element = document) {
+  const el = [...container.querySelectorAll('button')].find(
     (b) => b.textContent?.replaceAll(/\s/g, '') === text,
   );
   if (!el) throw new Error(`找不到按钮：${text}`);
@@ -91,10 +91,15 @@ describe('worker page', () => {
     vi.clearAllMocks();
   });
 
-  it('lists factory people with their posts and assigns posts to someone waiting', async () => {
+  it('assigns process and management posts together and reloads both', async () => {
     mocks.options.mockResolvedValue(options);
     mocks.list.mockResolvedValue(workers);
-    mocks.save.mockResolvedValue(true);
+    mocks.save.mockImplementation(async ({ posts, status, team }: Api.WorkerSaveReq) => {
+      mocks.list.mockResolvedValue(workers.map((worker) => worker.userId === 12
+        ? { ...worker, assigned: true, posts, status, team }
+        : worker));
+      return true;
+    });
     const host = document.createElement('div');
     document.body.append(host);
     const app = createApp(WorkerPage);
@@ -113,10 +118,29 @@ describe('worker page', () => {
     clickButton('分配岗位');
     await flush();
     expect(document.body.textContent).toContain('分配岗位 · 李四');
-    const slice = [...document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].find(
-      (c) => c.value === 'SLICE',
-    );
-    slice!.click();
+    const post = (code: string) => document.querySelector<HTMLInputElement>(
+      `input[type="checkbox"][value="${code}"]`,
+    )!;
+    const slice = post('SLICE');
+    const leader = post('TEAM_LEADER');
+    slice.click();
+    await flush();
+    leader.click();
+    await flush();
+    expect(slice.checked).toBe(true);
+    expect(leader.checked).toBe(true);
+
+    slice.click();
+    await flush();
+    expect(slice.checked).toBe(false);
+    expect(leader.checked).toBe(true);
+    slice.click();
+    await flush();
+    leader.click();
+    await flush();
+    expect(slice.checked).toBe(true);
+    expect(leader.checked).toBe(false);
+    leader.click();
     await flush();
     const team = document.querySelector<HTMLInputElement>('#worker-team')!;
     team.value = '开片一组';
@@ -124,14 +148,23 @@ describe('worker page', () => {
     await flush();
     clickButton('保存');
     await flush();
-    expect(mocks.save).toHaveBeenCalledWith({
-      posts: ['SLICE'],
+    expect(mocks.save).toHaveBeenCalledExactlyOnceWith({
+      posts: ['SLICE', 'TEAM_LEADER'],
       remark: undefined,
       status: 0,
       team: '开片一组',
       userIds: [12],
       wageMode: undefined,
     });
+
+    const row = [...document.querySelectorAll('tr')].find((tr) => tr.textContent?.includes('李四'))!;
+    expect(row.textContent).toContain('开片');
+    expect(row.textContent).toContain('班组长');
+    clickButton('修改', row);
+    await flush();
+    expect(document.body.textContent).toContain('分配岗位 · 李四');
+    expect(post('SLICE').checked).toBe(true);
+    expect(post('TEAM_LEADER').checked).toBe(true);
   });
 
   it('pulls in factory people from DingTalk who never logged in', async () => {

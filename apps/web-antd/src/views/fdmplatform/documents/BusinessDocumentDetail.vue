@@ -54,6 +54,7 @@ import LineTable from '../components/LineTable.vue';
 import RecordTable from '../components/RecordTable.vue';
 import RenameFileDialog from '../components/RenameFileDialog.vue';
 import { errorText, label, money, rows } from '../data';
+import { contractLabel, documentRowLabel } from '../document-label';
 import { downloadBlob, purchaseRowLabels } from '../purchase/manage/model';
 import { standaloneAiCheckType } from './ai-check-types';
 import {
@@ -143,13 +144,20 @@ const purchaseTitle = computed(() =>
     ? purchaseRowLabels({ ...view.value }).title
     : undefined,
 );
+function subjectOf(detail: BusinessDocument, fallback: string) {
+  return documentRowLabel(
+    detail,
+    detail.type === 'PURCHASE_REQUEST'
+      ? contractLabel({ name: detail.contractName }, fallback)
+      : fallback,
+  );
+}
 const title = computed(() => {
   const detail = view.value;
   if (!detail) return '单据详情';
-  const name =
-    purchaseTitle.value ??
-    (detail.code || detail.name || detail.record.name || '');
-  return `${nativeTypeLabels[detail.type] ?? '业务单据'} · ${name}`;
+  const type = nativeTypeLabels[detail.type] ?? '业务单据';
+  const subject = purchaseTitle.value ?? subjectOf(detail, '');
+  return subject ? `${type} · ${subject}` : type;
 });
 const actions = computed(
   () =>
@@ -564,17 +572,11 @@ async function submit(
           </Space>
           <Card size="small" title="单据概要">
             <Descriptions :column="3" size="small">
-              <Descriptions.Item v-if="purchaseTitle" label="采购主题">
-                {{ purchaseTitle }}
+              <Descriptions.Item
+                :label="purchaseTitle ? '采购主题' : '单据主题'"
+              >
+                {{ purchaseTitle ?? subjectOf(view, '未填写') }}
               </Descriptions.Item>
-              <template v-else>
-                <Descriptions.Item label="单号">
-                  {{ view.code || record?.code || '未注明' }}
-                </Descriptions.Item>
-                <Descriptions.Item label="单据名称">
-                  {{ view.name || record?.name || '未注明' }}
-                </Descriptions.Item>
-              </template>
               <Descriptions.Item label="当前状态">
                 <Tag>{{ label(record?.status) }}</Tag>
               </Descriptions.Item>
@@ -788,7 +790,7 @@ async function submit(
       <Alert
         v-if="selectedContract"
         type="info"
-        :message="`将关联 ${selectedContract.code} · ${selectedContract.name}，请逐项核对对应产品。`"
+        :message="`将关联 ${contractLabel(selectedContract)}，请逐项核对对应产品。`"
       />
 </template><template #attachments>
       <CreationAttachments

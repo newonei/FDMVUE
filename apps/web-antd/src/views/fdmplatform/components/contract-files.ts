@@ -43,13 +43,21 @@ export function contractFileCounts(
   return counts;
 }
 
-export function contractFileSource(file: ContractFile): string {
-  return [file.sourceTitle, file.sourceCode].filter(Boolean).join(' ');
+export function contractFileSubject(file: ContractFile, contractName?: string) {
+  if (file.source === 'PRODUCT') return file.sourceCode?.trim() || '';
+  return file.source === 'CONTRACT' ? contractName?.trim() || '' : '';
+}
+
+export function contractFileSource(file: ContractFile, contractName?: string) {
+  return [file.sourceTitle, contractFileSubject(file, contractName)]
+    .filter(Boolean)
+    .join(' ');
 }
 
 export function filterContractFiles(
   items: readonly ContractFile[],
   filter: ContractFileFilter,
+  contractName?: string,
 ): ContractFile[] {
   const keyword = filter.keyword.trim().toLowerCase();
   return items.filter(
@@ -57,7 +65,7 @@ export function filterContractFiles(
       (filter.showSuperseded || !item.superseded) &&
       (filter.group === 'ALL' || item.group === filter.group) &&
       (!keyword ||
-        [item.name, contractFileSource(item), item.categoryLabel]
+        [item.name, contractFileSource(item, contractName), item.categoryLabel]
           .join(' ')
           .toLowerCase()
           .includes(keyword)),

@@ -33,6 +33,7 @@ import {
 
 import { newIdempotencyKey } from '#/api/fdmplatform';
 import {
+  deleteCustomer,
   getCustomer,
   getCustomerOptions,
   getCustomerOverview,
@@ -41,6 +42,7 @@ import {
 } from '#/api/fdmplatform/customers';
 
 import { errorText } from '../../data';
+import { contractLabel } from '../../document-label';
 import RelatedLink from '../../documents/RelatedLink.vue';
 import { useEntityDetail } from '../../documents/useEntityDetail';
 import CustomerDetailDrawer from './CustomerDetailDrawer.vue';
@@ -253,6 +255,12 @@ async function load(reset = false) {
       pageSize: pageSize.value,
     });
     if (run !== sequence) return;
+    const lastPage = Math.max(1, Math.ceil(result.total / pageSize.value));
+    if (page.value > lastPage) {
+      page.value = lastPage;
+      await load();
+      return;
+    }
     customers.value = result.list;
     total.value = result.total;
     if (!result.list.some((row) => expandedKeys.value.includes(row.id)))
@@ -429,9 +437,42 @@ function toggle(customer: Customer) {
     },
   });
 }
+function confirmDelete(customer: Customer) {
+  const key = newIdempotencyKey();
+  Modal.confirm({
+    title: `删除客户“${customer.name}”？`,
+    content:
+      '删除后，该客户将从客户列表和新合同的客户选项中移除。有关联合同、业务单据或跟进记录的客户可停用。',
+    okText: '删除',
+    okType: 'danger',
+    cancelText: '取消',
+    async onOk() {
+      changing.value = customer.id;
+      try {
+        await deleteCustomer(customer.id, {
+          expectedVersion: customer.version,
+          idempotencyKey: key,
+        });
+        if (selected.value?.id === customer.id) {
+          if (detailOpen.value || editorOpen.value) closeDetail();
+          selected.value = undefined;
+        }
+        message.success('客户已删除');
+        await Promise.all([load(), loadOverview()]);
+      } catch (error) {
+        panelError.value = errorText(error);
+        message.error(panelError.value);
+        throw error;
+      } finally {
+        changing.value = undefined;
+      }
+    },
+  });
+}
 function moreAction(customer: Customer, key: number | string) {
   if (key === 'okki') chooseOkki(customer);
   if (key === 'toggle') toggle(customer);
+  if (domestic.value && key === 'delete') confirmDelete(customer);
 }
 function tierOf(customer: Customer) {
   return customer.stats ? customerTiers[customer.stats.tier] : undefined;
@@ -507,7 +548,7 @@ onBeforeUnmount(() => {
           <div class="toolbar">
             <Input
               v-model:value="keyword"
-              placeholder="名称、编号、联系人、邮箱或合同号"
+              placeholder="名称、编号、联系人、邮箱或合同内部单号"
               allow-clear
               class="search-input"
               @press-enter="load(true)"
@@ -729,7 +770,7 @@ onBeforeUnmount(() => {
                       contractId: record.stats.lastContractId,
                     }"
                   >
-                    {{ record.stats.lastContractCode || '查看合同' }}
+                    {{ contractLabel({ name: record.stats.lastContractName }) }}
                   </RelatedLink>
                 </template>
                 <span v-else class="muted">暂无合同</span>
@@ -827,6 +868,9 @@ onBeforeUnmount(() => {
                       </Menu.Item>
                       <Menu.Item key="toggle" :danger="record.active">
                         {{ record.active ? '停用客户' : '启用客户' }}
+                      </Menu.Item>
+                      <Menu.Item v-if="domestic" key="delete" danger>
+                        删除客户
                       </Menu.Item>
                     </Menu>
                   </template>

@@ -13,20 +13,22 @@ import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewSt
 
 import { errorText } from '../../../data';
 import { personName } from '../../../directory';
+import { documentLabel } from '../../../document-label';
 import { money } from '../../../purchase/warehouse/model';
 
 import '../../../purchase/warehouse/warehouse-pages.css';
 
 defineOptions({ name: 'FdmPlatformProcurementRefunds' });
 
+const props = defineProps<{ contractId?: string; orderId?: string }>();
+
+const emit = defineEmits<{ openPayment: [id: string] }>();
+
 /**
  * 采购退款记录（金智「采购退款记录」）：各付款单上登记的退款 / 冲销。
  * 传 orderId 时是采购单里的精简表；不传是总列表，可按日期和关键字查。
  * 退款在原付款单上登记，点付款单号打开原付款单。
  */
-const props = defineProps<{ contractId?: string; orderId?: string }>();
-const emit = defineEmits<{ openPayment: [id: string] }>();
-
 const rows = ref<ProcurementRefund[]>([]);
 const { statusFor, refresh: refreshReviewStatuses } = useAiReviewStatuses(() =>
   rows.value.map((row) => ({ docType: 'PAYMENT', docId: row.paymentId })),
@@ -97,7 +99,7 @@ defineExpose({ load });
       <Input.Search
         v-model:value="keyword"
         allow-clear
-        placeholder="付款单号、采购单、供应商、收款人、原因"
+        placeholder="主题、供应商、收款人或原因"
         style="width: 320px"
         @search="load(true)"
       />
@@ -165,7 +167,12 @@ defineExpose({ load });
             style="padding: 0"
             @click="emit('openPayment', record.paymentId)"
           >
-            {{ record.paymentCode ?? '查看付款单' }}
+            {{
+              documentLabel(
+                { name: record.paymentName, code: record.paymentCode },
+                '查看付款单',
+              )
+            }}
           </Button>
           <span class="muted">原付 {{ money(record.paymentAmount, record.currency) }}</span>
         </div>
@@ -174,7 +181,12 @@ defineExpose({ load });
           :status="statusFor('PAYMENT', record.paymentId)"
         />
         <div v-else-if="column.key === 'order'" class="cell">
-          <span class="mono">{{ record.orderCode ?? '—' }}</span>
+          <span v-if="record.orderId">{{
+            documentLabel(
+              { subject: record.orderSubject, code: record.orderCode },
+              '关联采购单',
+            )
+          }}</span>
           <span class="muted ellipsis">{{ record.supplierName }}</span>
         </div>
         <span v-else-if="column.key === 'payee'" class="ellipsis">{{

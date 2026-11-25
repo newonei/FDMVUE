@@ -509,10 +509,7 @@ onBeforeUnmount(() => {
               }}
             </span>
             <span class="muted line">
-              {{
-                record.stats.last.contractCode ||
-                (record.stats.last.bulk ? `集中${words.act}` : '')
-              }}
+              {{ record.stats.last.bulk ? `集中${words.act}` : '' }}
               <span class="source">{{ factSource(record.stats.last) }}</span>
             </span>
           </template>

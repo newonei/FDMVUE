@@ -16,6 +16,7 @@ import { getEcInvoiceApplyPage } from '#/api/fdmdata/ecinvoiceapply';
 import { getPortalSummary } from '#/api/fdmplatform/portal';
 
 import { errorText } from '../data';
+import { contractLabel, documentLabel } from '../document-label';
 import { nativeMoney } from '../documents/migration-display';
 import CashflowChart from '../finance/cash/CashflowChart.vue';
 import { changeText, rmb } from '../finance/cash/model';
@@ -32,6 +33,7 @@ import {
 } from './model';
 
 defineOptions({ name: 'FdmPlatformFinancePortalView' });
+
 const router = useRouter();
 const userStore = useUserStore();
 const definition = portalDefinitions.finance;
@@ -512,7 +514,14 @@ const functions = computed(() =>
               <b>{{ payment.type === 'RECEIPT' ? '回款' : '采购请款' }} ·
                 {{ nativeMoney(payment.amount, payment.currency) }}</b>
               <span>{{
-                [payment.contractCode, payment.party, payment.name]
+                [
+                  contractLabel({ name: payment.contractName }, ''),
+                  payment.party,
+                  documentLabel(
+                    { name: payment.name, code: payment.contractCode },
+                    '',
+                  ),
+                ]
                   .filter(Boolean)
                   .join(' · ')
               }}</span>

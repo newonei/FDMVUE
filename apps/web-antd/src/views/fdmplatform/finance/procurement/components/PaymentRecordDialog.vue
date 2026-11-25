@@ -29,9 +29,11 @@ import {
   registerOrderPayment,
   registerOtherPayment,
 } from '#/api/fdmplatform/procurement-finance';
+import PostingMatchField from '#/views/fdmcaiwu/bank-account/modules/posting-match-field.vue';
 
 import CreationAttachments from '../../../components/CreationAttachments.vue';
 import { errorText, receiptCurrencyOptions } from '../../../data';
+import { documentLabel } from '../../../document-label';
 import { localDate } from '../../../purchase/quotes/comparison';
 import {
   payerAccountLabel,
@@ -40,6 +42,7 @@ import {
   paymentFormProblem,
   paymentMethods,
 } from '../model';
+import PaymentCashAccountField from './PaymentCashAccountField.vue';
 
 /**
  * 登记付款记录（金智「付款记录」）：采购单每付一笔钱登记一张，分期付款就是登记多张。
@@ -97,6 +100,10 @@ const canConfirm = computed(() => hasAccessByCodes([PAYMENT_AUDIT]));
 const confirmDirectly = ref(false);
 const payers = ref<ProcurementSetting[]>([]);
 const form = ref<PaymentForm>({});
+const payerCompanyId = computed(
+  () =>
+    payers.value.find((row) => row.id === form.value.payerEntityId)?.companyId,
+);
 const files = ref<File[]>([]);
 const saving = ref(false);
 const error = ref('');
@@ -127,7 +134,7 @@ const referenceItems = computed(() => {
         label: '供应商',
         text: invoice.supplierName ?? props.supplierName ?? '—',
       },
-      { label: '付款发票', text: invoice.code ?? invoice.invoiceNo ?? '—' },
+      { label: '付款发票', text: invoice.invoiceNo ?? '—' },
       { label: '发票金额', text: text(invoice.amount) },
       { label: '累计已付', text: text(invoice.paidAmount) },
       { label: '剩余可付', text: text(invoice.unpaidAmount) },
@@ -175,6 +182,8 @@ watch(
           paidAt: record.paidAt ?? today,
           payerEntityId: record.payerEntityId,
           payerAccount: record.payerAccount,
+          payerBankAccountId: record.payerBankAccountId,
+          existingJournalEntryId: record.existingJournalEntryId,
           paymentMethod: record.paymentMethod,
           payeeName: record.payeeName,
           payeeAccount: record.payeeAccount,
@@ -201,9 +210,18 @@ watch(
 );
 
 function pickPayer(id: string) {
+  if (form.value.payerEntityId === id) return;
   form.value.payerEntityId = id;
-  const label = payerAccountLabel(payers.value.find((row) => row.id === id));
-  if (label) form.value.payerAccount = label;
+  form.value.payerBankAccountId = undefined;
+  form.value.existingJournalEntryId = undefined;
+  form.value.payerAccount = payerAccountLabel(
+    payers.value.find((row) => row.id === id),
+  );
+}
+
+function selectBankAccount(id?: number) {
+  form.value.payerBankAccountId = id;
+  form.value.existingJournalEntryId = undefined;
 }
 /** 修改被退回的付款：保存表单和新附件后重新提交，保留原附件。 */
 async function resubmit(
@@ -257,7 +275,11 @@ async function save() {
       amount: form.value.amount!,
       paidAt: form.value.paidAt!,
       payerEntityId: form.value.payerEntityId!,
-      payerAccount: form.value.payerAccount!.trim(),
+      payerAccount: form.value.payerAccount?.trim() ?? '',
+      payerBankAccountId: form.value.payerBankAccountId,
+      existingJournalEntryId: form.value.payerBankAccountId
+        ? form.value.existingJournalEntryId
+        : undefined,
       paymentMethod: form.value.paymentMethod?.trim() || undefined,
       payeeName: form.value.payeeName!.trim(),
       payeeAccount: form.value.payeeAccount?.trim() || undefined,
@@ -295,7 +317,7 @@ async function save() {
         {
           ...fields,
           invoiceId: props.invoice.id,
-          name: `${props.invoice.code ?? props.invoice.invoiceNo ?? '发票'} 付款`,
+          name: `${props.invoice.invoiceNo ?? '发票'} 付款`,
         },
         key,
         mode,
@@ -307,7 +329,7 @@ async function save() {
           ...fields,
           contractId: props.contractId === 'standalone' ? '' : props.contractId,
           orderId: props.orderId,
-          name: `${props.orderCode ?? ''} 付款`.trim(),
+          name: `${documentLabel({ subject: props.orderCode }, '采购单')} 付款`.trim(),
           noInvoice: form.value.noInvoice || undefined,
         },
         key,
@@ -334,12 +356,12 @@ async function save() {
     :open="open"
     :title="
       record
-        ? `修改付款 · ${record.code}`
+        ? documentLabel(record, '修改付款')
         : other
           ? '登记其他付款'
           : invoice
-            ? `增加付款 · ${invoice.code ?? invoice.invoiceNo ?? '付款发票'}`
-            : `登记付款${orderCode ? ` · ${orderCode}` : ''}`
+            ? `增加付款 · ${invoice.invoiceNo ?? '付款发票'}`
+            : `登记付款${orderCode ? ` · ${documentLabel({ subject: orderCode }, '采购单')}` : ''}`
     "
     width="760px"
     :mask-closable="false"
@@ -422,11 +444,31 @@ async function save() {
         </label>
         <label class="wide">
           <span><em>*</em>付款方式（付款账户）</span>
-          <Input
-            v-model:value="form.payerAccount"
-            placeholder="如：湖北飞德慕网商银行（8831）"
+          <PaymentCashAccountField
+            v-model:account-text="form.payerAccount"
+            :account-id="form.payerBankAccountId"
+            :company-id="payerCompanyId"
+            :disabled="saving"
+            :open="open"
+            :payer-selected="!!form.payerEntityId"
+            @update:account-id="selectBankAccount"
           />
         </label>
+        <div v-if="open && form.payerBankAccountId" class="wide">
+          <PostingMatchField
+            :account-id="form.payerBankAccountId"
+            :amount="form.amount"
+            :company-id="payerCompanyId"
+            :currency="currencyText"
+            :date="form.paidAt"
+            :disabled="saving"
+            :value="form.existingJournalEntryId"
+            direction="EXPENSE"
+            @update:value="
+              (id) => (form.existingJournalEntryId = id ?? undefined)
+            "
+          />
+        </div>
         <label>
           <span><em>*</em>收款方</span>
           <Input v-model:value="form.payeeName" />
