@@ -19,22 +19,27 @@ interface WorkshopTaskProgress {
   label: string;
   color?: 'gold' | 'green';
   shortage?: number;
+  targetLabel?: string;
 }
 
 export function workshopTaskProgress(task: Api.Task): WorkshopTaskProgress {
   if (task.status === 'CLOSED') return { group: 'closed', label: '已关闭' };
   const good = toNumber(task.actualQuantity);
   if (task.status === 'DONE') {
+    const label = '报工已结束';
     const planned = toNumber(task.quantity);
     if (planned === undefined || planned <= 0 || good === undefined) {
-      return { group: 'pending', label: '已报工 · 数量待核对', color: 'gold' };
+      return { group: 'pending', label, color: 'gold', targetLabel: '良品数量待核对' };
     }
-    if (good >= planned) return { group: 'completed', label: '已完成', color: 'green' };
+    if (good >= planned) {
+      return { group: 'completed', label, color: 'green', targetLabel: '良品已达计划' };
+    }
     return {
       group: task.shortageHandledAt ? 'handled' : 'pending',
-      label: '已报工 · 未达计划',
+      label,
       color: 'gold',
       shortage: roundQty(planned - good),
+      targetLabel: '良品未达计划',
     };
   }
   if (task.activeOrderId) return { group: 'pending', label: '已领料 · 在做', color: 'gold' };

@@ -477,7 +477,7 @@ describe('workbench page', () => {
     const layers = (id: number) => [...row(id).querySelectorAll('[data-lamination-progress]')]
       .map((element) => element.textContent!.replaceAll(/\s+/g, ' '));
     expect(layers(31)).toEqual(['正面 · 2113 正常 96 片 · 瑕疵 4 片', '反面 · 511U 正常 90 片 · 瑕疵 10 片']);
-    expect(row(31).textContent).toContain('已贴合 90 片');
+    expect(row(31).textContent).toContain('已贴合良品 90 片');
     expect(row(31).textContent).not.toContain('已报残次');
     expect(layers(32)).toEqual(['正面 · 2113 正常 至少 90 片 · 瑕疵 未分色', '反面 · 511U 正常 至少 90 片 · 瑕疵 10 片']);
   });
@@ -498,6 +498,8 @@ describe('workbench page', () => {
     const visibleOrderKeys = () => [...document.querySelectorAll<HTMLElement>('[data-order-key]')].map((row) => row.dataset.orderKey);
     const orderText = (key: string) => document.querySelector(`[data-order-key="${key}"]`)!.textContent!;
     const taskRow = (id: number) => document.querySelector<HTMLElement>(`[data-task-id="${id}"]`)!;
+    const reportStatus = (id: number) => taskRow(id).querySelector('.ant-tag')!;
+    const outputStatus = (id: number) => taskRow(id).querySelector('.ant-tag-gold, .ant-tag-green')!;
     const changeFilter = async (label: string) => {
       document.querySelector('#workshop-status')!.closest('.ant-select')!.querySelector('.ant-select-selector')!
         .dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
@@ -507,26 +509,30 @@ describe('workbench page', () => {
     };
 
     await mount('LAMINATE');
-    expect(document.body.textContent).toMatch(/待完成任务\s*1/);
+    expect(document.body.textContent).toMatch(/待跟进任务\s*1/);
     expect(visibleOrderKeys()).toEqual([shortOrder]);
-    expect(orderText(shortOrder)).toMatch(/待完成\s*1/);
-    expect(orderText(shortOrder)).toMatch(/已完成\s*0/);
+    expect(orderText(shortOrder)).toMatch(/待跟进\s*1/);
+    expect(orderText(shortOrder)).toMatch(/良品达标\s*0/);
     await expandOrder(shortOrder);
-    expect(taskRow(926).querySelector('.ant-tag')?.textContent).toBe('已报工 · 未达计划');
+    expect(reportStatus(926).textContent).toBe('报工已结束');
+    expect(outputStatus(926).textContent).toBe('良品未达计划');
+    expect(outputStatus(926).closest('td')).not.toBe(reportStatus(926).closest('td'));
     expect(taskRow(926).dataset.progressColor).toBe('gold');
-    expect(taskRow(926).querySelector('.ant-tag')?.classList.contains('ant-tag-gold')).toBe(true);
-    expect(taskRow(926).textContent).toContain('已贴合 185 片');
-    expect(taskRow(926).textContent).toContain('良品缺口 15 片');
+    expect(outputStatus(926).classList.contains('ant-tag-gold')).toBe(true);
+    expect(outputStatus(926).closest('td')?.textContent).toContain('计划 200 片');
+    expect(outputStatus(926).closest('td')?.textContent).toContain('已贴合良品 185 片');
+    expect(outputStatus(926).closest('td')?.textContent).toContain('良品缺口 15 片');
     expect(taskRow(926).querySelector<HTMLInputElement>('input[type="checkbox"]')!.disabled).toBe(true);
 
-    await changeFilter('有已完成任务');
+    await changeFilter('有达标任务');
     expect(visibleOrderKeys()).toEqual(['HT-FULFILLED']);
-    expect(orderText('HT-FULFILLED')).toMatch(/已完成\s*2/);
+    expect(orderText('HT-FULFILLED')).toMatch(/良品达标\s*2/);
     await expandOrder('HT-FULFILLED');
     for (const id of [927, 928]) {
-      expect(taskRow(id).querySelector('.ant-tag')?.textContent).toBe('已完成');
+      expect(reportStatus(id).textContent).toBe('报工已结束');
+      expect(outputStatus(id).textContent).toBe('良品已达计划');
       expect(taskRow(id).dataset.progressColor).toBe('green');
-      expect(taskRow(id).querySelector('.ant-tag')?.classList.contains('ant-tag-green')).toBe(true);
+      expect(outputStatus(id).classList.contains('ant-tag-green')).toBe(true);
       expect(taskRow(id).textContent).not.toContain('良品缺口');
     }
 
@@ -536,15 +542,16 @@ describe('workbench page', () => {
     expect(visibleOrders).toEqual(
       expect.arrayContaining([shortOrder, 'HT-CLOSED', 'HT-FULFILLED', 'HT-HANDLED']),
     );
-    expect(orderText('HT-CLOSED')).toMatch(/已完成\s*0/);
+    expect(orderText('HT-CLOSED')).toMatch(/良品达标\s*0/);
     expect(orderText('HT-CLOSED')).toMatch(/已关闭\s*1/);
     await expandOrder('HT-CLOSED');
-    expect(taskRow(929).querySelector('.ant-tag')?.textContent).toBe('已关闭');
+    expect(reportStatus(929).textContent).toBe('已关闭');
     expect(taskRow(929).dataset.progressColor).toBeUndefined();
     expect(taskRow(929).querySelector<HTMLInputElement>('input[type="checkbox"]')!.disabled).toBe(true);
     expect(orderText('HT-HANDLED')).toMatch(/差额已处理\s*1/);
     await expandOrder('HT-HANDLED');
-    expect(taskRow(930).textContent).toContain('已报工 · 未达计划');
+    expect(reportStatus(930).textContent).toBe('报工已结束');
+    expect(outputStatus(930).textContent).toBe('良品未达计划');
     expect(taskRow(930).textContent).toContain('良品缺口 10 片');
   });
 

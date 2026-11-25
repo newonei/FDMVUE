@@ -49,7 +49,7 @@ const keyword = ref('');
 const status = ref('ACTIVE');
 const visibleOrders = computed(() => orders.value.filter((order) => orderMatches(order, keyword.value)
   && (status.value === 'ALL' || (status.value === 'ACTIVE' ? order.counts.pending : order.counts.completed) > 0)));
-const activeCount = computed(() => tasks.value.filter((task) => workshopTaskProgress(task).group === 'pending').length);
+const followUpCount = computed(() => tasks.value.filter((task) => workshopTaskProgress(task).group === 'pending').length);
 const expandedOrderKeys = ref<string[]>([]);
 const selectedIds = ref<number[]>([]);
 const selectedTasks = computed(() => tasks.value.filter((task) => selectedIds.value.includes(task.id)));
@@ -331,8 +331,8 @@ const mixOutputLines = (task: ScheduleApi.Task) => reportMixPlanLines(task).filt
       </div>
     </header>
       <div class="flex flex-wrap items-center justify-between gap-3 border-y border-border py-2">
-        <div class="flex flex-wrap gap-6 text-sm"><span>订单 <b class="text-base">{{ orders.length }}</b></span><span>待完成任务 <b class="text-base text-primary">{{ activeCount }}</b></span><span class="text-muted-foreground">重点：{{ WORKSHOP_FOCUS[props.process] }}</span></div>
-        <div class="flex flex-wrap gap-2"><Input id="workshop-keyword" v-model:value="keyword" allow-clear class="w-64 max-w-full" placeholder="搜索订单、产品或任务编号" aria-label="搜索车间订单" /><Select id="workshop-status" v-model:value="status" :options="[{ label: '有待完成任务', value: 'ACTIVE' }, { label: '全部订单', value: 'ALL' }, { label: '有已完成任务', value: 'DONE' }]" class="w-40" aria-label="订单任务状态" /></div>
+        <div class="flex flex-wrap gap-6 text-sm"><span>订单 <b class="text-base">{{ orders.length }}</b></span><span>待跟进任务 <b class="text-base text-primary">{{ followUpCount }}</b></span><span class="text-muted-foreground">重点：{{ WORKSHOP_FOCUS[props.process] }}</span></div>
+        <div class="flex flex-wrap gap-2"><Input id="workshop-keyword" v-model:value="keyword" allow-clear class="w-64 max-w-full" placeholder="搜索订单、产品或任务编号" aria-label="搜索车间订单" /><Select id="workshop-status" v-model:value="status" :options="[{ label: '有待跟进任务', value: 'ACTIVE' }, { label: '全部订单', value: 'ALL' }, { label: '有达标任务', value: 'DONE' }]" class="w-40" aria-label="订单任务状态" /></div>
       </div>
       <div class="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 rounded border border-primary/20 bg-background px-3 py-2 shadow-sm">
         <div class="text-sm">已勾选 <strong class="text-base text-primary">{{ selectedIds.length }}</strong> 个任务<span class="ml-3 text-xs text-muted-foreground">员工自报请先派工；主任代报须选实际人员，按任务用料比例自动领料。已领料任务请回原工序单报工。</span></div>
@@ -355,7 +355,7 @@ v-model:expanded-row-keys="expandedOrderKeys" class="workshop-order-table" :colu
           <template v-else-if="column.key === 'progress'">
             <div>共 <b>{{ order.tasks.length }}</b> 项任务</div>
             <div class="mt-1 text-xs text-muted-foreground">
-              待完成 {{ order.counts.pending }} · 已完成 {{ order.counts.completed }}
+              待跟进 {{ order.counts.pending }} · 良品达标 {{ order.counts.completed }}
               <span v-if="order.counts.handled"> · 差额已处理 {{ order.counts.handled }}</span>
               <span v-if="order.counts.closed"> · 已关闭 {{ order.counts.closed }}</span>
             </div>
@@ -373,7 +373,7 @@ v-model:expanded-row-keys="expandedOrderKeys" class="workshop-order-table" :colu
 >
               <template #bodyCell="{ column, record: task }">
                 <template v-if="column.key === 'task'">
-                  <div class="flex flex-wrap items-center gap-1 font-semibold">#{{ task.id }} <Tag class="!m-0" :color="task.progress.color">{{ task.progress.label }}</Tag><Tag v-if="task.output?.side" class="!m-0" :color="task.output.side === 'BACK' ? 'purple' : 'blue'">{{ task.output.side === 'FRONT' ? '正面' : task.output.side === 'BACK' ? '反面' : '整体' }}</Tag></div>
+                  <div class="flex flex-wrap items-center gap-1 font-semibold">#{{ task.id }} <Tag class="!m-0" :color="task.status === 'DONE' ? undefined : task.progress.color">{{ task.progress.label }}</Tag><Tag v-if="task.output?.side" class="!m-0" :color="task.output.side === 'BACK' ? 'purple' : 'blue'">{{ task.output.side === 'FRONT' ? '正面' : task.output.side === 'BACK' ? '反面' : '整体' }}</Tag></div>
                   <div class="mt-0.5 line-clamp-2 text-xs leading-[18px]" :title="task.product">{{ task.relatedOrderItems?.map((item: ScheduleApi.RelatedOrderItem) => item.productName || item.productCode).filter(Boolean).join('、') || task.product || '按任务要求生产' }}</div>
                   <div v-if="taskOrderNos(task as ScheduleApi.Task).length > 1" class="mt-1 text-xs text-orange-600">合并任务 · 勾选同步，只报一次<br />关联 {{ taskOrderNos(task as ScheduleApi.Task).join('、') }}</div>
                   <ul v-if="coverLines(task as ScheduleApi.Task).length > 1" class="mb-0 mt-1 list-none p-0 text-xs text-muted-foreground"><li v-for="line in coverLines(task as ScheduleApi.Task)" :key="line">{{ line }}</li></ul>
@@ -423,11 +423,12 @@ v-model:expanded-row-keys="expandedOrderKeys" class="workshop-order-table" :colu
                 <template v-else-if="column.key === 'progress'">
                   <div v-if="adjustedBoards(task as ScheduleApi.Task) !== undefined" class="text-base text-primary">选板后计划 <b>{{ formatQty(adjustedBoards(task as ScheduleApi.Task)) }}</b> {{ task.unit }}</div>
                   <div v-else class="text-base">计划 <b>{{ formatQty(task.quantity) }}</b> {{ task.unit }}</div>
+                  <div class="mt-1 text-sm">{{ props.process === 'LAMINATE' ? '已贴合良品' : '已报良品' }} {{ formatQty(task.actualQuantity) }} {{ task.unit }}</div>
+                  <Tag v-if="task.progress.targetLabel" class="!m-0 !mt-1" :color="task.progress.color">{{ task.progress.targetLabel }}</Tag>
                   <div v-if="task.progress.shortage != null" class="mt-1 text-sm font-semibold text-orange-700">
                     良品缺口 {{ formatQty(task.progress.shortage) }} {{ task.unit }}<span v-if="task.shortageHandledAt"> · 差额已处理</span>
                   </div>
                   <template v-if="props.process === 'LAMINATE'">
-                    <div class="mt-1 text-sm">已贴合 {{ formatQty(task.actualQuantity) }} {{ task.unit }}</div>
                     <div v-for="layer in reportedLaminationLayers(task as ScheduleApi.Task)" :key="layer.side" class="mt-1 text-xs" data-lamination-progress>
                       <div :class="layer.side === '正面' ? 'text-blue-700' : 'text-purple-700'">{{ layer.side }} · {{ layer.color ? colorLabel(layer.color) : '颜色未记录' }}</div>
                       <div class="text-muted-foreground">
@@ -436,9 +437,7 @@ v-model:expanded-row-keys="expandedOrderKeys" class="workshop-order-table" :colu
                       </div>
                     </div>
                   </template>
-                  <template v-else>
-                    <div class="mt-1 text-sm">已报良品 {{ formatQty(task.actualQuantity) }} {{ task.unit }}</div><div class="text-sm text-muted-foreground">已报残次 {{ formatQty(task.defectQuantity) }} {{ task.unit }}</div>
-                  </template>
+                  <div v-else class="text-sm text-muted-foreground">已报残次 {{ formatQty(task.defectQuantity) }} {{ task.unit }}</div>
                 </template>
                 <template v-else-if="column.key === 'operator'"><Select :id="`operator-${order.key}-${task.id}`" v-model:value="taskDraft(task as ScheduleApi.Task).operatorUserId" class="w-full" size="small" :options="operatorOptions" :loading="operatorsLoading" :disabled="!selected(task as ScheduleApi.Task) || busy" allow-clear show-search option-filter-prop="label" placeholder="选实际生产人员" :aria-label="`任务 ${task.id} 实际生产人员`" /><p class="mb-0 mt-1 text-xs text-muted-foreground">录入：{{ my.userName || '当前登录人' }}；计件归所选人员</p></template>
                 <template v-else-if="column.key === 'color'">
