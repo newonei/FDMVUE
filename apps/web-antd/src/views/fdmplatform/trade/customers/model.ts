@@ -155,14 +155,15 @@ export function customerSourceOptions(values: string[], current = '') {
   return options;
 }
 
+const defaultForeignCustomerSources = [
+  '阿里巴巴国际站-顶铭',
+  '阿里巴巴国际站-飞德慕',
+  '阿里巴巴国际站-月迦',
+];
+
 export function foreignCustomerSourceOptions(values: string[]) {
   return customerSourceOptions([
-    ...new Set([
-      ...values,
-      '阿里巴巴国际站-月迦',
-      '阿里巴巴国际站-顶铭',
-      '阿里巴巴国际站-飞德慕',
-    ]),
+    ...new Set([...values, ...defaultForeignCustomerSources]),
   ]);
 }
 
