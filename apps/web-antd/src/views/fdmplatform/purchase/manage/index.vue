@@ -350,7 +350,21 @@ const operation = ref<Operation | undefined>(
     ? (route.query.operation as Operation)
     : undefined,
 );
-const mine = ref(route.query.mine === 'true');
+const orderViews = [
+  { value: 'all', label: '全部可见' },
+  { value: 'responsible', label: '我负责的' },
+  { value: 'submitted', label: '我提交的' },
+] as const;
+type OrderView = (typeof orderViews)[number]['value'];
+function orderViewFromQuery(): OrderView {
+  if (route.query.submittedByMe === 'true') return 'submitted';
+  return route.query.mine === 'true' ? 'responsible' : 'all';
+}
+const orderView = ref(orderViewFromQuery());
+const orderUserFilter = computed(() => ({
+  mine: orderView.value === 'responsible' || undefined,
+  submittedByMe: orderView.value === 'submitted' || undefined,
+}));
 const loading = ref(false);
 const detailLoading = ref(false);
 const saving = ref(false);
@@ -444,6 +458,11 @@ const contractId = computed(() =>
   typeof route.query.contractId === 'string'
     ? route.query.contractId
     : undefined,
+);
+const hasFilters = computed(
+  () =>
+    !!(keyword.value || status.value || operation.value || contractId.value) ||
+    orderView.value !== 'all',
 );
 const scope = ref<CompletionScope>(
   scopeFromQuery(route.query.scope) ?? defaultCompletionScope(contractId.value),
@@ -1097,12 +1116,12 @@ function key(action: string) {
 }
 const overview = ref<ProcurementOrdersOverview>();
 let overviewSequence = 0;
-/** Native orders only; refreshed with the list so the cards follow 只看我负责的. */
+/** 新系统采购单统计，按列表的查看范围刷新。 */
 async function loadOverview() {
   if (embedded.value) return;
   const run = ++overviewSequence;
   try {
-    const result = await getProcurementOrdersOverview(mine.value);
+    const result = await getProcurementOrdersOverview(orderUserFilter.value);
     if (run === overviewSequence) overview.value = result;
   } catch {
     if (run === overviewSequence) overview.value = undefined;
@@ -1128,6 +1147,13 @@ function openAttention(row: ProcurementOrdersOverview['attention'][number]) {
 }
 function showOperation(value?: Operation) {
   operation.value = operation.value === value ? undefined : value;
+  page.value = 1;
+  void loadList();
+}
+function changeOrderView(value: OrderView) {
+  if (orderView.value === value) return;
+  orderView.value = value;
+  overview.value = undefined;
   page.value = 1;
   void loadList();
 }
@@ -1159,7 +1185,7 @@ async function loadList() {
     keyword: keyword.value.trim() || undefined,
     status: status.value,
     operation: operation.value,
-    mine: mine.value || undefined,
+    ...orderUserFilter.value,
     pendingCompletion: completionFilter(scope.value),
     purchaseDateOrder: purchaseDateOrder.value,
   };
@@ -1329,7 +1355,8 @@ async function clear() {
   keyword.value = '';
   status.value = undefined;
   operation.value = undefined;
-  mine.value = false;
+  if (orderView.value !== 'all') overview.value = undefined;
+  orderView.value = 'all';
   if (Object.keys(route.query).length > 0) await router.replace({ query: {} });
   void loadList();
 }
@@ -1605,6 +1632,9 @@ watch(
   },
   { immediate: true },
 );
+watch(orderViewFromQuery, (value) => {
+  if (active.value) changeOrderView(value);
+});
 watch(
   () => [
     route.query.documentId,
@@ -1736,7 +1766,7 @@ watch(financeType, (value, previous) => {
         </button>
       </section>
       <p
-        v-else-if="overview && overview.orders === 0"
+        v-else-if="orderView === 'all' && overview?.orders === 0"
         class="procurement-muted order-empty-hint"
       >
         新系统还没有采购单：在采购工作台或报价页「选价下单」后，采购单会出现在这里，统计卡会跟着更新。
@@ -1780,26 +1810,20 @@ watch(financeType, (value, previous) => {
               :pending-total="pendingTotal"
               @change="changeScope"
             />
-            <button
-              type="button"
-              class="mine-toggle"
-              :class="{ on: mine }"
-              :aria-pressed="mine"
-              @click="
-                mine = !mine;
-                page = 1;
-                loadList();
-              "
-            >
-              {{ mine ? '✓ ' : '' }}只看我负责的
-            </button>
+            <div class="order-view-filter" role="group" aria-label="查看范围">
+              <button
+                v-for="item in orderViews"
+                :key="item.value"
+                type="button"
+                :aria-pressed="orderView === item.value"
+                @click="changeOrderView(item.value)"
+              >
+                {{ item.label }}
+              </button>
+            </div>
             <span class="procurement-muted">当前筛选共 {{ total }} 单</span>
             <Button @click="settingsOpen = true">列设置</Button>
-            <Button
-              v-if="keyword || status || operation || contractId || mine"
-              type="text"
-              @click="clear"
-            >
+            <Button v-if="hasFilters" type="text" @click="clear">
               清除筛选
             </Button>
           </div>
@@ -1851,12 +1875,7 @@ watch(financeType, (value, previous) => {
         >
           <template #emptyText>
             <Empty description="没有符合条件的采购订单">
-              <Button
-                v-if="keyword || status || operation || contractId || mine"
-                @click="clear"
-              >
-                清除筛选
-              </Button>
+              <Button v-if="hasFilters" @click="clear"> 清除筛选 </Button>
               <Button
                 v-else
                 type="primary"
@@ -3142,7 +3161,13 @@ button.order-kpi:focus-visible {
   }
 }
 
-.mine-toggle {
+.order-view-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.order-view-filter button {
   padding: 3px 10px;
   font: inherit;
   font-size: 13px;
@@ -3153,13 +3178,13 @@ button.order-kpi:focus-visible {
   border-radius: 999px;
 }
 
-.mine-toggle.on {
+.order-view-filter button[aria-pressed='true'] {
   color: var(--procurement-accent);
   background: var(--procurement-selected);
   border-color: var(--procurement-accent);
 }
 
-.mine-toggle:focus-visible {
+.order-view-filter button:focus-visible {
   outline: 2px solid var(--procurement-accent);
   outline-offset: 2px;
 }

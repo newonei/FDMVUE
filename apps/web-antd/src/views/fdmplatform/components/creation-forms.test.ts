@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   create: vi.fn(),
   update: vi.fn(),
   getAccess: vi.fn(),
+  getAttachments: vi.fn(),
   getContract: vi.fn(),
   activate: vi.fn(),
   resolve: vi.fn(),
@@ -37,8 +38,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock('#/api/fdmplatform', () => ({
   contractAction: mocks.activate,
   getAccess: mocks.getAccess,
+  getAttachments: mocks.getAttachments,
   getContract: mocks.getContract,
-  getAttachments: vi.fn().mockResolvedValue({ items: [] }),
   newIdempotencyKey: () => `test-operation-${++mocks.counter}`,
 }));
 vi.mock('#/api/fdmplatform/submissions', () => ({
@@ -337,6 +338,7 @@ beforeEach(() => {
   mocks.create.mockReset();
   mocks.update.mockReset();
   mocks.activate.mockReset();
+  mocks.getAttachments.mockReset().mockResolvedValue({ items: [] });
   mocks.getContract.mockReset();
   mocks.counter = 0;
   mocks.getCustomerOptions.mockReset().mockResolvedValue({
@@ -531,6 +533,88 @@ describe('business creation attachment queues', () => {
     );
     expect(toRaw(mocks.create.mock.calls[1]![1][0])).toBe(file);
     expect(view.closed).toHaveBeenCalledOnce();
+  });
+  it('shows the saved draft attachments and uploads only newly selected files when saving again', async () => {
+    const draft = {
+      id: 'draft',
+      version: 2,
+      status: 'DRAFT',
+      name: '测试合同草稿',
+      companyId: 1,
+      customerId: 'customer',
+      ownerUserId: 7,
+      productCategory: 'YOGA',
+      attachmentIds: ['contract-file'],
+      items: [
+        {
+          id: 'line-1',
+          skuId: 'sku-a',
+          skuName: '测试产品',
+          quantity: '1',
+          unitPrice: '10',
+        },
+      ],
+    };
+    const fileDetails = {
+      category: 'SALES',
+      size: 100,
+      type: 'application/pdf',
+    };
+    mocks.getAttachments.mockResolvedValueOnce({
+      items: [
+        {
+          ...fileDetails,
+          id: 'contract-file',
+          name: '随草稿上传.pdf',
+          targets: [{ kind: 'CONTRACT', id: draft.id }],
+        },
+        {
+          ...fileDetails,
+          id: 'added-file',
+          name: '详情页补传.pdf',
+        },
+        {
+          ...fileDetails,
+          id: 'shipment-file',
+          name: '关联发货单.pdf',
+          targets: [{ kind: 'shipments', id: 'shipment-1' }],
+        },
+      ],
+    });
+    const saved = vi.fn();
+    mocks.update.mockResolvedValueOnce({ ...draft, version: 3 });
+    const view = mount(ContractEditor, {
+      open: false,
+      master: [],
+      contract: draft,
+      onSaved: saved,
+    });
+    view.props.open = true;
+    const savedAttachments = () =>
+      view.host.querySelector('section[aria-label="已上传附件"]')?.textContent;
+    await vi.waitFor(() =>
+      expect(savedAttachments()).toContain('随草稿上传.pdf'),
+    );
+    expect(savedAttachments()).toContain('详情页补传.pdf');
+    expect(savedAttachments()).not.toContain('关联发货单.pdf');
+    expect(mocks.getAttachments).toHaveBeenCalledWith(draft.id);
+
+    const file = new File(['test'], '本次新增.pdf', {
+      type: 'application/pdf',
+    });
+    await attach(view.host, file);
+    expect(view.host.textContent).toContain(file.name);
+    expect(savedAttachments()).not.toContain(file.name);
+    clickText(view.host, '保存草稿');
+    await vi.waitFor(() => expect(saved).toHaveBeenCalledOnce());
+    expect(mocks.update).toHaveBeenCalledExactlyOnceWith(
+      draft.id,
+      'UPDATE_CONTRACT',
+      draft.version,
+      expect.any(String),
+      expect.objectContaining({ attachmentIds: ['contract-file'] }),
+      [file],
+    );
   });
   it('disables closing and file edits while contract plus attachments are saving', async () => {
     let resolve!: (value: unknown) => void;

@@ -789,7 +789,7 @@ describe('采购订单原页执行', () => {
   });
   it('负责人筛选发送服务端条件并回第一页，刷新失败保留已有结果', async () => {
     const { host } = await mount('?page=2');
-    button(host, '只看我负责的').click();
+    button(host, '我负责的').click();
     await settle();
     expect(mocks.list).toHaveBeenLastCalledWith(
       expect.objectContaining({ mine: true, pageNo: 1 }),
@@ -853,12 +853,12 @@ describe('采购订单原页执行', () => {
   });
   it('统计卡跟随我负责的筛选，进行中卡按操作状态筛选，需要处理的采购单可直接打开', async () => {
     const { host } = await mount();
-    expect(mocks.overview).toHaveBeenLastCalledWith(false);
+    expect(mocks.overview).toHaveBeenLastCalledWith({});
     expect(host.textContent).toContain('最长超期 9 天');
     expect(host.textContent).toContain('CNY 146.00');
-    button(host, '只看我负责的').click();
+    button(host, '我负责的').click();
     await settle();
-    expect(mocks.overview).toHaveBeenLastCalledWith(true);
+    expect(mocks.overview).toHaveBeenLastCalledWith({ mine: true });
     const open = [...host.querySelectorAll('button')].find(
       (entry) =>
         entry.textContent?.includes('进行中') &&
@@ -878,6 +878,105 @@ describe('采购订单原页执行', () => {
     attention.click();
     await settle();
     expect(mocks.detail).toHaveBeenLastCalledWith('contract-a', 'po-a');
+  });
+
+  it('从我负责的切到我提交的，直接找到未关联合同的辅料采购单', async () => {
+    const { host, router } = await mount('?mine=true&page=2');
+    expect(button(host, '我负责的').getAttribute('aria-pressed')).toBe('true');
+    expect(mocks.overview).toHaveBeenLastCalledWith({ mine: true });
+    const accessorySubject = '外贸辅料采购';
+    mocks.list.mockResolvedValue({
+      list: [
+        {
+          ...row(),
+          id: 'accessory-order',
+          contractId: '',
+          contractCode: '',
+          standaloneId: 'accessory-order',
+          nativeStandalone: true,
+          record: { ...order(), id: 'accessory-order' },
+          details: { subject: accessorySubject },
+        },
+      ],
+      total: 1,
+    });
+    mocks.overview.mockResolvedValue({
+      ...overview,
+      attention: [
+        {
+          ...overview.attention[0],
+          contractId: 'standalone',
+          contractCode: '',
+          orderId: 'accessory-order',
+          subject: accessorySubject,
+        },
+      ],
+      unpaidAmount: { CNY: 20 },
+    });
+    mocks.detail.mockResolvedValue({
+      ...detail('accessory-order'),
+      contractId: 'standalone',
+    });
+
+    button(host, '我提交的').click();
+    await settle();
+    expect(button(host, '我负责的').getAttribute('aria-pressed')).toBe('false');
+    expect(button(host, '我提交的').getAttribute('aria-pressed')).toBe('true');
+    expect(mocks.list).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        keyword: undefined,
+        mine: undefined,
+        pageNo: 1,
+        submittedByMe: true,
+      }),
+    );
+    expect(mocks.overview).toHaveBeenLastCalledWith({ submittedByMe: true });
+    expect(button(host, accessorySubject)).toBeDefined();
+    expect(host.textContent).toContain('未关联合同');
+    expect(host.textContent).toContain('当前筛选共 1 单');
+    expect(host.textContent).toContain('CNY 20.00');
+    host
+      .querySelector<HTMLButtonElement>(
+        'section[aria-label="需要处理的采购单"] button',
+      )!
+      .click();
+    await settle();
+    expect(mocks.detail).toHaveBeenLastCalledWith(
+      'standalone',
+      'accessory-order',
+    );
+    expect(mocks.contract).not.toHaveBeenCalled();
+    button(host, '关闭执行详情').click();
+    await settle();
+
+    const search = host.querySelector<HTMLInputElement>('input.order-search')!;
+    search.value = '辅料';
+    search.dispatchEvent(new Event('input', { bubbles: true }));
+    button(host, '已结束').click();
+    await settle();
+    expect(mocks.list).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        keyword: '辅料',
+        operation: 'ENDED',
+        submittedByMe: true,
+      }),
+    );
+    button(host, '清除筛选').click();
+    await settle();
+    expect(button(host, '全部可见').getAttribute('aria-pressed')).toBe('true');
+    expect(mocks.list).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        keyword: undefined,
+        mine: undefined,
+        operation: undefined,
+        submittedByMe: undefined,
+      }),
+    );
+    expect(mocks.overview).toHaveBeenLastCalledWith({});
+    await router.push('/orders?mine=true');
+    await settle();
+    expect(button(host, '我负责的').getAttribute('aria-pressed')).toBe('true');
+    expect(mocks.overview).toHaveBeenLastCalledWith({ mine: true });
   });
 
   it('附件上传忙碌时不能切走页签、关闭抽屉或换单，完成后恢复操作', async () => {

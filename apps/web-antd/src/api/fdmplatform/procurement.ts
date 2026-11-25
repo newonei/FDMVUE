@@ -515,17 +515,21 @@ export interface ProcurementOrderRow extends DocumentRow {
   paidAmount?: string;
   unpaidAmount?: string;
 }
-export function getProcurementOrders(params: {
+interface ProcurementOrderUserFilter {
+  mine?: boolean;
+  submittedByMe?: boolean;
+}
+interface ProcurementOrderPageQuery extends ProcurementOrderUserFilter {
   contractId?: string;
   keyword?: string;
-  mine?: boolean;
   operation?: 'COMPLETED' | 'ENDED' | 'IN_PROGRESS';
   pageNo: number;
   pageSize: number;
   pendingCompletion?: boolean;
   purchaseDateOrder?: 'ASC' | 'DESC';
   status?: string;
-}) {
+}
+export function getProcurementOrders(params: ProcurementOrderPageQuery) {
   return requestClient.get<PageResult<ProcurementOrderRow>>(
     `${procurementBase}/orders/page`,
     { params },
@@ -563,10 +567,12 @@ export interface ProcurementOrdersOverview {
   }[];
 }
 /** Native orders only: in transit, overdue, contract not signed back, unpaid. */
-export function getProcurementOrdersOverview(mine: boolean) {
+export function getProcurementOrdersOverview(
+  params: ProcurementOrderUserFilter,
+) {
   return requestClient.get<ProcurementOrdersOverview>(
     `${procurementBase}/orders/overview`,
-    { params: { mine } },
+    { params },
   );
 }
 

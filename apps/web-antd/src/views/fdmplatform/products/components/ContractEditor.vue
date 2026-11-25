@@ -45,13 +45,18 @@ import {
 import { getContractBoard } from '#/api/fdmplatform/contract-board';
 import { getCustomer, getCustomers } from '#/api/fdmplatform/customers';
 import { resolveProducts } from '#/api/fdmplatform/products';
-import { submissionFilesError } from '#/api/fdmplatform/submission-files';
+import {
+  attachmentSize,
+  submissionFilesError,
+} from '#/api/fdmplatform/submission-files';
 import {
   contractActionWithAttachments,
   createContractWithAttachments,
 } from '#/api/fdmplatform/submissions';
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
+import { attachmentTime } from '../../components/attachment-preview';
+import { contractAttachmentCategories } from '../../components/contract-files';
 import CreationAttachments from '../../components/CreationAttachments.vue';
 import RemoteMasterSelect from '../../components/RemoteMasterSelect.vue';
 import SalesCashAccountSelect from '../../components/SalesCashAccountSelect.vue';
@@ -195,6 +200,22 @@ const key = ref('');
 const expectedVersion = ref(0);
 const batchDate = ref('');
 const attachments = ref<ContractAttachment[]>([]);
+const attachmentsLoading = ref(false);
+const attachmentsError = ref('');
+const savedAttachments = computed(() => {
+  const contractId = props.contract?.id;
+  return attachments.value.filter(
+    ({ targets }) =>
+      !targets?.length ||
+      targets.some(({ kind, id }) => kind === 'CONTRACT' && id === contractId),
+  );
+});
+const savedAttachmentColumns = [
+  { title: '附件名称', dataIndex: 'name', ellipsis: true },
+  { title: '资料分类', key: 'category', width: 110 },
+  { title: '大小', key: 'size', width: 85 },
+  { title: '上传时间', key: 'createdAt', width: 175 },
+];
 const draftFiles = ref<File[]>([]);
 const lineFiles = ref<Record<string, File[]>>({});
 const filePurposes = ref(new Map<File, string>());
@@ -205,7 +226,6 @@ const historicalCharges = computed(() =>
 const chargeTotal = computed(() =>
   salesChargesTotal(charges.value).plus(historicalCharges.value),
 );
-const attachmentsError = ref('');
 const quantityInputs = new Map<string, { focus: () => void }>();
 const priceInputs = new Map<string, { focus: () => void }>();
 /** 内销总价输入中的原值；离开输入框后改回按单价计算的总价 */
@@ -546,6 +566,22 @@ function lineAmountHint(line: ContractItem) {
     ? `按单价折算为 ${money(actual)}`
     : '';
 }
+async function loadAttachments() {
+  const contractId = props.contract?.id;
+  if (!contractId || !props.open || attachmentsLoading.value) return;
+  const run = editorSequence;
+  attachmentsLoading.value = true;
+  attachmentsError.value = '';
+  try {
+    const result = await getAttachments(contractId);
+    if (run === editorSequence && props.open) attachments.value = result.items;
+  } catch (error) {
+    if (run === editorSequence && props.open)
+      attachmentsError.value = errorText(error);
+  } finally {
+    if (run === editorSequence) attachmentsLoading.value = false;
+  }
+}
 watch(
   () => props.open,
   async (open) => {
@@ -557,6 +593,7 @@ watch(
     customerEditorOpen.value = false;
     companyChange.open = false;
     resolving.value = false;
+    attachmentsLoading.value = false;
     if (!open) return;
     const contract = props.contract;
     panelError.value = '';
@@ -626,6 +663,7 @@ watch(
     );
     customerKeyword.value = '';
     void loadCustomers(true);
+    if (contract) void loadAttachments();
     try {
       const currentAccess = await getAccess();
       if (run !== editorSequence || !props.open) return;
@@ -644,16 +682,6 @@ watch(
     } catch (error) {
       if (run !== editorSequence || !props.open) return;
       panelError.value = errorText(error);
-    }
-    if (contract) {
-      try {
-        const result = await getAttachments(contract.id);
-        if (run !== editorSequence || !props.open) return;
-        attachments.value = result.items;
-      } catch (error) {
-        if (run !== editorSequence || !props.open) return;
-        attachmentsError.value = errorText(error);
-      }
     }
   },
 );
@@ -1629,13 +1657,59 @@ async function save(activate = false) {
           {{ money(chargeTotal.plus(total).toFixed(2), form.currency) }}
         </p>
       </Card>
-      <CreationAttachments v-model:files="draftFiles" :disabled="saving" />
-      <Alert
-        v-if="attachmentsError"
-        type="warning"
-        show-icon
-        :message="`附件未加载：${attachmentsError}。已有引用保留，请刷新后再修改附件。`"
-      />
+      <CreationAttachments v-model:files="draftFiles" :disabled="saving">
+        <template v-if="contract" #saved>
+          <section class="mt-3" aria-label="已上传附件">
+            <h3 class="mb-2 text-sm font-medium">
+              已上传附件<span v-if="savedAttachments.length">
+                （{{ savedAttachments.length }}）
+              </span>
+            </h3>
+            <p v-if="attachmentsLoading" class="muted" role="status">
+              正在加载附件…
+            </p>
+            <Alert
+              v-else-if="attachmentsError"
+              type="warning"
+              show-icon
+              :message="`附件加载失败：${attachmentsError}`"
+            >
+              <template #action>
+                <Button size="small" @click="loadAttachments">重试</Button>
+              </template>
+            </Alert>
+            <Table
+              v-else-if="savedAttachments.length"
+              :data-source="savedAttachments"
+              :columns="savedAttachmentColumns"
+              :pagination="{
+                pageSize: 10,
+                hideOnSinglePage: true,
+                size: 'small',
+              }"
+              :scroll="{ x: 540 }"
+              row-key="id"
+              size="small"
+            >
+              <template #bodyCell="{ column, record }">
+                <template v-if="column.key === 'category'">
+                  {{
+                    contractAttachmentCategories[record.category] ??
+                    record.category
+                  }}
+                </template>
+                <template v-else-if="column.key === 'size'">
+                  {{ attachmentSize(Number(record.size)) }}
+                </template>
+                <template v-else-if="column.key === 'createdAt'">
+                  {{ attachmentTime(record.createdAt) }}
+                </template>
+              </template>
+            </Table>
+            <p v-else class="muted">暂无已上传附件</p>
+          </section>
+        </template>
+      </CreationAttachments>
     </div>
     <template #footer>
       <Space>

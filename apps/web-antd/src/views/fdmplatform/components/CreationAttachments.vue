@@ -183,6 +183,7 @@ function remove(index: number) {
     <div v-if="files.length" class="attachment-total">
       已选 {{ files.length }} 个附件，共 {{ attachmentSize(total) }}
     </div>
+    <slot name="saved"></slot>
     <AttachmentPreview ref="preview" @download="download(previewing)" />
     <RenameFileDialog
       v-model:open="renameOpen"
