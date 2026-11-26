@@ -1,4 +1,7 @@
-import type { FdmgongchangProductionOrderApi as OrderApi } from '#/api/fdmgongchang/production-order';
+import type {
+  FdmgongchangMaterialPlanApi as MaterialApi,
+  FdmgongchangProductionOrderApi as OrderApi,
+} from '#/api/fdmgongchang/production-order';
 import type { FdmgongchangOrderSplitApi as SplitApi } from '#/api/fdmgongchang/schedule';
 
 import { createApp, defineComponent, h, nextTick, ref } from 'vue';
@@ -8,11 +11,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import OrderSplitModal from './modules/order-split-modal.vue';
 
-const api = vi.hoisted(() => ({ advice: vi.fn(), adviceResult: vi.fn(), orders: vi.fn(), get: vi.fn(), canEdit: true, preview: vi.fn(), release: vi.fn() }));
+const api = vi.hoisted(() => ({
+  advice: vi.fn(), adviceResult: vi.fn(), orders: vi.fn(), get: vi.fn(), canEdit: true,
+  materialPlan: vi.fn(), preview: vi.fn(), release: vi.fn(), saveMaterial: vi.fn(),
+}));
 vi.mock('#/api/fdmgongchang/production-order', () => ({
+  getMaterialPlan: api.materialPlan,
   getOpenProductionOrders: api.orders,
   getProductionOrder: api.get,
+  getRecipeOptions: vi.fn().mockResolvedValue([
+    { recipeCode: 'REC-1', recipeName: '标准配方' },
+    { recipeCode: 'REC-2', recipeName: '历史配方' },
+    { recipeCode: 'REC-NEW', recipeName: '调整后配方' },
+  ]),
   getTargetOptions: vi.fn().mockResolvedValue({ colors: [{ value: 'ZI', label: '紫色' }, { value: 'LAN', label: '蓝色' }], textures: [{ value: 'SH', label: '贝壳纹' }], materials: [], patterns: [] }),
+  saveItemMaterial: api.saveMaterial,
 }));
 vi.mock('@vben/access', () => ({ useAccess: () => ({ hasAccessByCodes: () => api.canEdit }) }));
 vi.mock('../production-order/modules/item-production-config-modal.vue', () => ({
@@ -102,6 +115,17 @@ async function input(selector: string, value: string) {
   await flush();
 }
 
+async function selectOption(selector: string, label: string) {
+  document.querySelector(selector)!.closest('.ant-select')!.querySelector('.ant-select-selector')!
+    .dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+  await flush();
+  const options = document.querySelectorAll<HTMLElement>('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option');
+  const option = [...options].find((element) => element.title.startsWith(label));
+  expect(option).toBeDefined();
+  option!.click();
+  await flush();
+}
+
 describe('order selection → process preview → release', () => {
   let unmount: (() => void) | undefined;
   let setOpen: (value: boolean) => void;
@@ -129,6 +153,7 @@ describe('order selection → process preview → release', () => {
     api.orders.mockResolvedValue(orders);
     api.get.mockResolvedValue(orders[0]);
     api.canEdit = true;
+    api.materialPlan.mockImplementation(async (orderId: number): Promise<MaterialApi.Plan> => ({ items: [], orderId, orderNo: `GD-${orderId}`, shortage: false, totals: [] }));
     api.preview.mockResolvedValue(preview());
     api.release.mockResolvedValue({ scheduleId: 7, scheduleNo: 'PB-7', tasks: 3, mixTasks: 0, warnings: [], reused: false });
   });
@@ -234,6 +259,121 @@ describe('order selection → process preview → release', () => {
     expect(api.release).toHaveBeenCalledWith(expect.objectContaining({ previewKey: 'after-user-edit' }));
   });
 
+  it('edits foam setup per product before preview and recomputes it after a batch update', async () => {
+    const factoryBoard: MaterialApi.Board = {
+      boards: 10, layers: 8, name: '本厂发泡出板', perBoard: 8, piecesPerLayer: 1, size: '192×192×4.5', source: 'SETTING',
+    };
+    const mould: MaterialApi.Board = { ...factoryBoard, mouldProfileId: 9, name: '备用模具', source: 'MOULD' };
+    const materialOrder: OrderApi.Order = {
+      ...orders[0]!,
+      items: [
+        { ...orders[0]!.items[0]!, processes: ['MIX', 'SLICE', 'PUNCH', 'PACK'] },
+        { ...orders[0]!.items[1]!, processes: ['MIX', 'CUT'] },
+        { ...orders[0]!.items[0]!, id: 104, productName: '同规格灰色瑜伽垫', processes: ['MIX', 'SLICE'] },
+        orders[1]!.items[0]!,
+      ],
+    };
+    let planItems: MaterialApi.ItemPlan[] = materialOrder.items.map((item) => ({
+      board: item.id === 101 ? mould : factoryBoard, candidates: [factoryBoard, mould],
+      itemId: item.id, mouldProfileId: item.id === 101 ? 9 : null, productName: item.productName,
+      quantity: item.quantity, raws: [], recipeCode: item.id === 101 ? 'REC-1' : 'REC-2',
+      recipeSuggested: item.id !== 101, remaining: item.quantity, stock: [], targetSize: '183×61×0.6', unit: '条', warnings: [],
+    }));
+    api.materialPlan.mockImplementation(async () => ({ items: planItems, orderId: 11, orderNo: 'GD-11', shortage: false, totals: [] }));
+    api.get.mockResolvedValue(materialOrder);
+    let pendingSave: Promise<void> | undefined;
+    api.saveMaterial.mockImplementation(async ({ itemId, mouldProfileId, recipeCode }: MaterialApi.ItemMaterialReq) => {
+      await pendingSave;
+      planItems = planItems.map((item) => item.itemId === itemId ? {
+        ...item, board: mouldProfileId === 9 ? mould : factoryBoard, mouldProfileId, recipeCode, recipeSuggested: false,
+      } : item);
+      return true;
+    });
+    const foamPreview = preview({
+      orderCount: 1,
+      rows: [
+        row({ process: 'MIX', processLabel: '发泡', rowKey: '101-MIX' }),
+        row({ itemId: 102, process: 'MIX', processLabel: '发泡', rowKey: '102-MIX' }),
+        row({ itemId: 104, process: 'MIX', processLabel: '发泡', rowKey: '104-MIX' }),
+      ],
+      stockCandidates: [upstreamStock],
+    });
+    api.preview.mockResolvedValue(foamPreview);
+
+    await mount([materialOrder]);
+    const panel = document.querySelector('section[aria-label="配方和发泡模具"]')!;
+    expect(panel.textContent).toContain('已选');
+    expect(panel.textContent).toContain('按上次建议');
+    expect(panel.textContent).toContain('工厂默认');
+    expect(panel.textContent).not.toContain('绿色瑜伽垫');
+    await selectOption('#split-mp-recipe-101', '调整后配方');
+    expect(api.saveMaterial.mock.calls).toEqual([[{ itemId: 101, mouldProfileId: 9, recipeCode: 'REC-NEW' }]]);
+    expect(api.preview).not.toHaveBeenCalled();
+
+    button('预览工序任务').click();
+    await flush();
+    document.querySelector<HTMLInputElement>('[data-stock-key="101-81"] input[type="checkbox"]')!.click();
+    await flush();
+    await input('[data-stock-key="101-81"] input[role="spinbutton"]', '4');
+    button('重新计算').click();
+    await flush();
+    const stockSelections = [{ itemId: 101, quantity: 4, stockId: 81 }];
+    expect(api.preview).toHaveBeenLastCalledWith([11], stockSelections);
+    expect(button('确认下发 3 个任务').disabled).toBe(false);
+    button('批量设置').click();
+    await flush();
+    document.querySelector<HTMLInputElement>('input[aria-label="勾选 紫色瑜伽垫"]')!.click();
+    document.querySelector<HTMLInputElement>('input[aria-label="勾选 蓝色瑜伽垫"]')!.click();
+    await flush();
+    await selectOption('#split-mp-batch-recipe', '标准配方');
+    await selectOption('#split-mp-batch-board', '备用模具');
+
+    api.preview.mockResolvedValue({ ...foamPreview, previewKey: 'after-foam-update' });
+    let completeSave: () => void;
+    pendingSave = new Promise((resolve) => { completeSave = resolve; });
+    button('应用到所选产品').click();
+    await flush();
+    expect(button('确认下发 3 个任务').disabled).toBe(true);
+    expect(api.preview).toHaveBeenCalledTimes(2);
+    completeSave!();
+    await flush();
+    expect(api.saveMaterial.mock.calls.slice(1)).toEqual([
+      [{ itemId: 101, mouldProfileId: 9, recipeCode: 'REC-1' }],
+      [{ itemId: 102, mouldProfileId: 9, recipeCode: 'REC-1' }],
+    ]);
+    expect(api.preview).toHaveBeenCalledTimes(3);
+    expect(api.preview).toHaveBeenLastCalledWith([11], stockSelections);
+    button('确认下发 3 个任务').click();
+    await flush();
+    expect(api.release).toHaveBeenCalledWith(expect.objectContaining({ previewKey: 'after-foam-update', stockSelections }));
+  });
+
+  it('loads material configuration separately for each selected order', async () => {
+    const foamOrders = orders.map((order) => ({
+      ...order,
+      items: order.items.map((item) => ({ ...item, processes: ['MIX'] })),
+    }));
+    api.materialPlan.mockImplementation(async (orderId: number): Promise<MaterialApi.Plan> => {
+      const order = foamOrders.find(({ id }) => id === orderId)!;
+      return {
+        items: order.items.map((item) => ({
+          candidates: [], itemId: item.id, productName: item.productName, quantity: item.quantity,
+          raws: [], remaining: item.quantity, stock: [], warnings: [],
+        })),
+        orderId, orderNo: order.orderNo, shortage: false, totals: [],
+      };
+    });
+
+    await mount(foamOrders);
+    expect(api.materialPlan).toHaveBeenCalledExactlyOnceWith(11);
+    expect(document.querySelector('#split-mp-recipe-101')).not.toBeNull();
+    await selectOption('#split-material-order', 'GD-12');
+    expect(api.materialPlan).toHaveBeenLastCalledWith(12);
+    expect(document.querySelector('#split-mp-recipe-101')).toBeNull();
+    expect(document.querySelector('#split-mp-recipe-103')).not.toBeNull();
+    expect(api.saveMaterial).not.toHaveBeenCalled();
+  });
+
   it('invalidates the old preview even if refreshing a saved item fails', async () => {
     await mount(); button('预览工序任务').click(); await flush();
     button('修改参数与工艺').click(); await flush();
@@ -246,7 +386,11 @@ describe('order selection → process preview → release', () => {
 
   it('does not expose editing to users without order handling permission', async () => {
     api.canEdit = false;
-    await mount(); button('预览工序任务').click(); await flush();
+    const order = orders[0]!;
+    await mount([{ ...order, items: order.items.map((item) => ({ ...item, processes: ['MIX'] })) }]);
+    expect(document.querySelector('section[aria-label="配方与发泡模具"]')).toBeNull();
+    expect(api.materialPlan).not.toHaveBeenCalled();
+    button('预览工序任务').click(); await flush();
     expect([...document.querySelectorAll('button')].some((element) => element.textContent === '修改参数与工艺')).toBe(false);
   });
 

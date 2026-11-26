@@ -15,6 +15,7 @@ import { getOrderSplitAdviceResult, previewOrderSplit, releaseOrderSplit, reques
 
 import { colorModeText, parameterText, thicknessText } from '../../production-order/manufacturing';
 import ItemProductionConfigModal from '../../production-order/modules/item-production-config-modal.vue';
+import MaterialPlan from '../../production-order/modules/material-plan.vue';
 import OrderItemsTable from '../../production-order/modules/order-items-table.vue';
 import { dateText, num, specText } from '../../production-order/shared';
 import { businessError } from '../../shared/business-error';
@@ -67,6 +68,9 @@ const submittedRequest = ref<SplitApi.ReleaseRequest>();
 const configOpen = ref(false);
 const configOrderId = ref<number>();
 const configItemId = ref<number>();
+const materialPlan = ref<InstanceType<typeof MaterialPlan>>();
+const materialOrderId = ref<number>();
+const materialSaving = ref(false);
 const refreshError = ref(false);
 let version = 0;
 let stockPicksVersion = 0;
@@ -99,13 +103,14 @@ function validStockPick({ candidate, quantity }: (typeof stockPicks.value)[numbe
 }
 const invalidStockPicks = computed(() => stockPicks.value.some((pick) => !validStockPick(pick)));
 const hasFinishedGoodsPick = computed(() => stockPicks.value.some(({ candidate }) => candidate.deliverable));
+const configBusy = computed(() => configOpen.value || materialSaving.value);
 const canPreview = computed(() => selectedIds.value.length > 0 && selectedIds.value.length <= MAX && !loading.value
-  && !configOpen.value);
-const canRelease = computed(() => !configOpen.value && !previewing.value && !needsRepreview.value && !invalidStockPicks.value
+  && !configBusy.value);
+const canRelease = computed(() => !configBusy.value && !previewing.value && !needsRepreview.value && !invalidStockPicks.value
   && !hasFinishedGoodsPick.value && !!preview.value?.canRelease && preview.value.taskCount > 0
   && preview.value.errors.length === 0 && !preview.value.rows.some((row) => row.status === 'BLOCKED'));
 const canRequestAdvice = computed(() => !!preview.value && !needsRepreview.value && !invalidStockPicks.value
-  && !previewing.value && !submitting.value && !configOpen.value && !adviceLoading.value);
+  && !previewing.value && !submitting.value && !configBusy.value && !adviceLoading.value);
 const productSpecs = computed(() => [...new Map((preview.value?.rows ?? [])
   .map((row) => [row.itemId, row])).values()]);
 const productOptions = computed(() => productSpecs.value.map((row) => ({
@@ -113,6 +118,17 @@ const productOptions = computed(() => productSpecs.value.map((row) => ({
   value: row.itemId,
 })));
 const previewOrders = computed(() => loadedOrders.value.filter((order) => previewIds.value.includes(order.id)));
+const materialOrders = computed(() => {
+  const ids = new Set(selectedIds.value);
+  return loadedOrders.value.filter((order) => ids.has(order.id)).map((order) => ({
+    label: order.orderNo,
+    value: order.id,
+    itemIds: order.items.filter((item) => item.processes?.includes('MIX')
+      && num(item.quantity) > num(item.completedQuantity)).map((item) => item.id),
+  })).filter((order) => order.itemIds.length > 0);
+});
+const materialOrder = computed(() => materialOrders.value.find((order) => order.value === materialOrderId.value)
+  ?? materialOrders.value[0]);
 
 function stopAdviceRequest() {
   adviceRequest?.abort();
@@ -204,8 +220,19 @@ watch(stockPicks, () => {
 watch(selectedIds, invalidateAdvice, { flush: 'sync' });
 
 function openManualDelivery(stock: { itemId: number; orderId: number; quantity: number; stockId: number }) {
-  if (submitting.value || previewing.value || !canEdit.value) return;
+  if (submitting.value || previewing.value || configBusy.value || !canEdit.value) return;
   emit('manualDelivery', stock);
+}
+
+async function refreshOrder(orderId: number, current: number) {
+  const fresh = await getProductionOrder(orderId);
+  if (current !== version || !open.value) return;
+  loadedOrders.value = loadedOrders.value.map((order) => order.id === fresh.id ? fresh : order);
+  emit('changed', fresh);
+}
+
+function reloadMaterialPlan(orderId: number) {
+  if (materialOrder.value?.value === orderId) void materialPlan.value?.reload();
 }
 
 watch(() => props.deliveredStock?.revision, async () => {
@@ -219,12 +246,9 @@ watch(() => props.deliveredStock?.revision, async () => {
   const current = ++version;
   previewing.value = true;
   try {
-    const fresh = await getProductionOrder(order.id).catch(() => undefined);
+    await refreshOrder(order.id, current).catch(() => undefined);
     if (current !== version || !open.value) return;
-    if (fresh) {
-      loadedOrders.value = loadedOrders.value.map((row) => row.id === fresh.id ? fresh : row);
-      emit('changed', fresh);
-    }
+    reloadMaterialPlan(order.id);
   } finally {
     if (current === version) {
       previewing.value = false;
@@ -234,7 +258,7 @@ watch(() => props.deliveredStock?.revision, async () => {
 });
 
 function editItem(orderId: number, itemId: number) {
-  if (!canEdit.value || submitting.value || previewing.value) return;
+  if (!canEdit.value || submitting.value || previewing.value || configBusy.value) return;
   invalidateAdvice();
   configOrderId.value = orderId;
   configItemId.value = itemId;
@@ -253,13 +277,31 @@ async function onConfigSaved() {
   refreshError.value = false;
   previewing.value = true;
   try {
-    const fresh = await getProductionOrder(orderId);
+    await refreshOrder(orderId, current);
     if (current !== version || !open.value) return;
-    loadedOrders.value = loadedOrders.value.map((order) => order.id === fresh.id ? fresh : order);
-    emit('changed', fresh);
+    reloadMaterialPlan(orderId);
   } catch {
     if (current === version) refreshError.value = true;
     return;
+  } finally {
+    if (current === version) previewing.value = false;
+  }
+  if (shouldPreview && current === version && open.value) await prepare();
+}
+
+async function onMaterialSaved(itemIds: number[]) {
+  const orderId = materialOrder.value?.value;
+  if (!open.value || !orderId || itemIds.length === 0) return;
+
+  const shouldPreview = !!preview.value;
+  const current = ++version;
+  invalidatePreview();
+  refreshError.value = false;
+  previewing.value = true;
+  try {
+    await refreshOrder(orderId, current);
+  } catch {
+    if (current === version) refreshError.value = true;
   } finally {
     if (current === version) previewing.value = false;
   }
@@ -302,7 +344,7 @@ const shownTasks = computed(() => {
 const rowSelection = computed(() => ({
   selectedRowKeys: selectedIds.value,
   preserveSelectedRowKeys: true,
-  getCheckboxProps: (order: OrderApi.Order) => ({ 'aria-label': `选择订单 ${order.orderNo}`, disabled: previewing.value }),
+  getCheckboxProps: (order: OrderApi.Order) => ({ 'aria-label': `选择订单 ${order.orderNo}`, disabled: previewing.value || configBusy.value }),
   onChange: (keys: (number | string)[]) => { selectedIds.value = keys.map(Number); },
 }));
 
@@ -342,6 +384,8 @@ watch(open, (value) => {
   page.value = 1;
   previewPage.value = 1;
   selectedItemId.value = undefined;
+  materialOrderId.value = undefined;
+  materialSaving.value = false;
   previewing.value = false;
   void loadOrders();
 });
@@ -432,10 +476,15 @@ async function release() {
 </script>
 
 <template>
-  <Modal v-model:open="open" :width="1320" :closable="!submitting && !configOpen" :keyboard="!submitting && !configOpen" :mask-closable="false" title="订单拆分 → 工序任务">
+  <Modal
+    v-model:open="open" :width="1320" :style="{ top: '16px' }"
+    :body-style="{ maxHeight: 'calc(100vh - 136px)', overflowY: 'auto' }"
+    :closable="!submitting && !configBusy" :keyboard="!submitting && !configBusy"
+    :mask-closable="false" title="订单拆分 → 工序任务"
+  >
     <div class="flex flex-col gap-3 text-sm">
       <div class="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border pb-2 text-sm">
-        <span :class="preview ? 'text-muted-foreground' : 'font-semibold text-primary'">1. 选择订单</span>
+        <span :class="preview ? 'text-muted-foreground' : 'font-semibold text-primary'">1. 选择订单与用料</span>
         <span :class="preview ? 'font-semibold text-primary' : 'text-muted-foreground'">2. 核对各工序任务</span>
         <span class="text-muted-foreground">3. 确认下发到车间</span>
       </div>
@@ -445,7 +494,7 @@ async function release() {
       <p class="m-0 text-xs text-primary">
         预览仅计算用量。确认下发后生成车间任务，并占用本次纳入的库存。车间实际领料时扣减库存。
       </p>
-      <Alert v-if="refreshError" type="warning" show-icon message="参数已保存，订单刷新失败。旧预览已作废，请重新打开预览核对。" />
+      <Alert v-if="refreshError" type="warning" show-icon message="配置已保存，订单详情刷新失败。旧预览已作废，请在下发前核对最新预览。" />
       <Alert v-if="previewError" type="warning" show-icon message="本次预览未完成，已保留勾选库存。请检查库存并重新计算。" />
       <Alert v-else-if="refreshedAfterDelivery && !needsRepreview && !previewing" type="success" show-icon message="现货已登记。请核对重新预览的欠量和工序，再确认下发。" />
       <template v-if="!preview">
@@ -463,7 +512,7 @@ async function release() {
           :scroll="{ x: 1050, y: 410 }" row-key="id" size="small" @change="(p) => page = p.current ?? 1"
         >
           <template #emptyText>没有可拆分的已接单订单</template>
-          <template #expandedRowRender="{ record }"><OrderItemsTable :items="record.items" :editable="canEdit && !previewing" @edit="editItem(record.id, $event.id)" /></template>
+          <template #expandedRowRender="{ record }"><OrderItemsTable :items="record.items" :editable="canEdit && !previewing && !configBusy" @edit="editItem(record.id, $event.id)" /></template>
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'order'">
               <div class="font-mono text-xs">{{ record.orderNo }}</div>
@@ -486,7 +535,21 @@ async function release() {
           </template>
         </Table>
       </template>
-      <template v-else>
+      <section v-if="open && canEdit && materialOrder && selectedIds.length <= MAX" aria-label="配方与发泡模具" class="space-y-2 rounded-md border border-border px-3 py-2">
+        <div v-if="materialOrders.length > 1" class="flex flex-wrap items-center gap-2">
+          <label for="split-material-order" class="text-xs text-muted-foreground">配置订单</label>
+          <Select
+            id="split-material-order" :value="materialOrder.value" :options="materialOrders"
+            :disabled="previewing || submitting || configBusy" class="min-w-48" option-filter-prop="label"
+            show-search size="small" @change="(value) => materialOrderId = Number(value)"
+          />
+        </div>
+        <MaterialPlan
+          ref="materialPlan" compact editable :order-id="materialOrder.value" :item-ids="materialOrder.itemIds"
+          :disabled="previewing || submitting || configOpen" @saving="materialSaving = $event" @saved="onMaterialSaved"
+        />
+      </section>
+      <template v-if="preview">
         <OrderSplitStockPanel
           v-if="preview.stockCandidates || preview.stockCoverage"
           v-model:picks="stockPicks"
@@ -495,7 +558,7 @@ async function release() {
           :advice-loading="adviceLoading"
           :can-deliver="canEdit"
           :can-request-advice="canRequestAdvice"
-          :disabled="submitting || previewing || configOpen"
+          :disabled="submitting || previewing || configBusy"
           :needs-repreview="needsRepreview || invalidStockPicks"
           :orders="previewOrders"
           :preview="preview"
@@ -515,7 +578,7 @@ async function release() {
         </div>
         <details class="rounded border border-border px-3 py-2 text-xs">
           <summary class="cursor-pointer font-medium">订单产品明细（{{ productSpecs.length }} 条，展开查看数量、成品规格、正反颜色、层厚和纹路）</summary>
-          <div class="mt-2"><OrderSplitSpecsTable :rows="productSpecs" :editable="canEdit && !submitting" @edit="editItem($event.orderId, $event.itemId)" /></div>
+          <div class="mt-2"><OrderSplitSpecsTable :rows="productSpecs" :editable="canEdit && !submitting && !previewing && !configBusy" @edit="editItem($event.orderId, $event.itemId)" /></div>
           <p class="m-0 mt-1 text-muted-foreground">点击「修改参数与工艺」调整订单明细。保存后自动重新预览，核对无误后再下发。</p>
         </details>
         <details class="rounded border border-border px-3 py-2 text-xs">
@@ -554,7 +617,7 @@ async function release() {
                 <span>订单 {{ orderQuantityText(record.orderQuantity, record.orderUnit) }}</span>
                 <span class="font-semibold">待产 {{ orderQuantityText(record.remainingQuantity, record.orderUnit) }}</span>
               </div>
-              <Button v-if="canEdit" class="!px-0" size="small" type="link" :disabled="submitting || previewing" @click="editItem(record.orderId, record.itemId)">修改参数与工艺</Button>
+              <Button v-if="canEdit" class="!px-0" size="small" type="link" :disabled="submitting || previewing || configBusy" @click="editItem(record.orderId, record.itemId)">修改参数与工艺</Button>
             </template>
             <template v-else-if="column.key === 'process'">
               <div><template v-if="record.sequence !== null && record.sequence !== undefined">{{ record.sequence }}. </template>{{ record.processLabel || (record.process && PROCESS_LABELS[record.process]) || (record.status === 'DONE' ? '无需再拆分' : '工艺待配置') }}</div>
@@ -597,9 +660,9 @@ async function release() {
     </div>
     <template #footer>
       <div class="flex flex-wrap justify-end gap-2">
-        <Button :disabled="submitting || configOpen" @click="open = false">取消</Button>
-        <Button v-if="preview" :disabled="submitting" @click="back">返回选择订单</Button>
-        <Button v-if="preview" :disabled="submitting || configOpen" :loading="previewing" @click="prepare">{{ needsRepreview ? '重新计算' : '重新预览' }}</Button>
+        <Button :disabled="submitting || configBusy" @click="open = false">取消</Button>
+        <Button v-if="preview" :disabled="submitting || previewing || configBusy" @click="back">返回选择订单</Button>
+        <Button v-if="preview" :disabled="submitting || configBusy" :loading="previewing" @click="prepare">{{ needsRepreview ? '重新计算' : '重新预览' }}</Button>
         <Button v-if="!preview" type="primary" :disabled="!canPreview" :loading="previewing" @click="prepare">预览工序任务</Button>
         <Button v-else type="primary" :disabled="!canRelease" :loading="submitting" @click="release">确认下发 {{ preview.taskCount }} 个任务</Button>
       </div>
