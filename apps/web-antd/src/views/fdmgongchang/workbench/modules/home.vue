@@ -43,7 +43,7 @@ const myTasks = computed(() => my.value.tasks.filter((t) => processOf(t.process)
 /** 组长代报：组员的任务（自己的不重复列）。 */
 const teamTasks = computed(() => {
   const mine = new Set(myTasks.value.map((t) => t.id));
-  return (my.value.teamTasks ?? []).filter((t) => !mine.has(t.id) && teamProcessOf(t.process));
+  return (my.value.teamTasks ?? []).filter((t) => !t.completedBySupplement && !mine.has(t.id) && teamProcessOf(t.process));
 });
 const teamProcessOf = (code: string) => (my.value.teamProcesses ?? []).find((p) => p.code === code);
 const behalf = ref<{ options: { label: string; value: number }[]; task: FdmgongchangScheduleApi.Task; userId?: number }>();
@@ -75,7 +75,8 @@ const foldingRequirement = (task?: FdmgongchangScheduleApi.Task) => {
 };
 const inProgress = computed(() => my.value.inProgress.filter((o) => processOf(o.process)));
 const runningTaskIds = computed(() => new Set(inProgress.value.map((o) => o.scheduleTaskId)));
-const pendingTasks = computed(() => myTasks.value.filter((task) => !runningTaskIds.value.has(task.id) && task.status !== 'DONE' && task.status !== 'CLOSED'));
+const pendingTasks = computed(() => myTasks.value.filter((task) => !task.completedBySupplement
+  && !runningTaskIds.value.has(task.id) && task.status !== 'DONE' && task.status !== 'CLOSED'));
 const recentDone = computed(() => (my.value.recentDone ?? []).filter((order) => processOf(order.process)));
 const section = ref<'pending' | 'recent' | 'running'>(job.homeView.section ?? (inProgress.value.length > 0 ? 'running' : 'pending'));
 const keyword = ref(job.homeView.keyword);

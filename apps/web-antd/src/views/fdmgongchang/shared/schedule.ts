@@ -8,10 +8,9 @@ export interface ShortageDispatchSeed {
   itemId: number;
   orderId: number;
   orderNo: string;
-  processes?: string[];
+  productCode?: null | string;
+  productName?: null | string;
   remaining: number;
-  suggestedProcess?: string;
-  suggestedQuantity?: number;
   unit?: null | string;
 }
 

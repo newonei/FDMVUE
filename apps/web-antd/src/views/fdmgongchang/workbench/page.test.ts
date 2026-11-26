@@ -555,6 +555,40 @@ describe('workbench page', () => {
     expect(taskRow(930).textContent).toContain('良品缺口 10 片');
   });
 
+  it('shows the original task as completed when its supplemental work fills the good quantity gap', async () => {
+    const process = { code: 'PUNCH', label: '冲切', outputLabel: '成品', outputStage: 'FINISHED', outputUnit: '件', sources: ['CUT'] };
+    const original = { ...my.tasks[0]!, id: 1128, process: 'PUNCH', contractCode: 'GD20261124-004',
+      status: 'CLAIMED', orderCount: 1, quantity: 6891, actualQuantity: 6800, defectQuantity: 91, unit: '件' };
+    const supplement = { ...original, id: 1144, status: 'DONE', quantity: 91, actualQuantity: 91,
+      defectQuantity: 0, parentTaskId: 1128 };
+    const unrelated = { ...original, id: 1139, quantity: 4491, actualQuantity: 4400 };
+    const data = { ...workshop(), processes: [process], workshopProcess: process };
+    mocks.my.mockResolvedValue({ ...data, workshopTasks: [
+      { ...original, supplementGoodQuantity: '90', shortage: 1 }, { ...supplement, actualQuantity: 90 }, unrelated,
+    ] });
+
+    await mount('PUNCH'); await expandOrder('GD20261124-004');
+    const row = (id: number) => document.querySelector<HTMLElement>(`[data-task-id="${id}"]`)!;
+    expect(row(1128).querySelector('.ant-tag')?.textContent).toBe('部分报工');
+    expect(row(1128).textContent).toContain('良品缺口 1 件');
+
+    mocks.my.mockResolvedValue({ ...data, workshopTasks: [
+      { ...original, completedBySupplement: true, supplementGoodQuantity: '91' }, supplement, unrelated,
+    ] });
+    clickButton('刷新'); await flush();
+
+    expect(row(1128).querySelector('.ant-tag')?.textContent).toBe('已完成');
+    expect(row(1128).dataset.progressColor).toBe('green');
+    expect(row(1128).textContent).toContain('已报良品 6,800 件');
+    expect(row(1128).textContent).toContain('已报残次 91 件');
+    expect(row(1128).textContent).toContain('补派良品 91 件');
+    expect(row(1128).textContent).toContain('累计良品 6,891 件');
+    expect(row(1128).textContent).toContain('良品已补齐');
+    expect(row(1128).querySelector<HTMLInputElement>('input[type="checkbox"]')?.disabled).toBe(true);
+    expect(row(1144).textContent).toContain('补派子任务 · 原任务 #1128');
+    expect(row(1139).querySelector('.ant-tag')?.textContent).toBe('部分报工');
+  });
+
   it('recalculates the estimate after another report changes the refreshed task progress', async () => {
     const task = { ...my.tasks[0]!, quantity: 100, sliceBoardYield: 108 };
     mocks.my.mockResolvedValue({ ...workshop(), workshopTasks: [task] });

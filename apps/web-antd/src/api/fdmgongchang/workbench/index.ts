@@ -47,6 +47,8 @@ export namespace FdmgongchangWorkbenchApi {
   export interface TaskPrepare {
     /** 服务端冻结规则允许本次压花仅加热缩厚。 */
     allowPlainEmboss?: boolean;
+    /** 补产任务按已选批次或上道实际报出的合格批次领料。 */
+    followActualBatches?: boolean;
     /** 关联订单已确认并冻结的制造规则；旧单为空。 */
     layerRule?: null | string;
     aux: FdmgongchangStageStockApi.AuxPlan[];

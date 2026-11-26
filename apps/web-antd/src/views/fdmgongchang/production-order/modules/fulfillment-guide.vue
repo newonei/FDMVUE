@@ -91,10 +91,9 @@ function nextStep(item: Api.Item) {
   if (match?.pending) return `${match.pending}。先补齐生产参数，再核对库存。`;
 
   const lines = stockLines(item);
-  const starts = [...new Set(lines.flatMap((line) => line.nextProcesses.slice(0, 1)))];
   const actions: string[] = [];
   if (lines.some((line) => lineHasFinishedGoods(item, line))) actions.push(`有匹配的末道库存。核对实物批次后${deliveryLabel.value}。`);
-  if (starts.length > 0) actions.push(`有匹配的上游库存。核对批次后按订单工艺从${starts.map((step) => `「${step}」`).join('、')}接做。`);
+  if (lines.some((line) => line.nextProcesses.length > 0)) actions.push('有匹配的上游库存。补派工时选定批次，再预览需要接续的工序。');
   const inProgress = item.steps?.filter((step) => step.inProgressCount > 0).map((step) => `「${step.label}」`) ?? [];
   if (inProgress.length > 0) actions.push(`${inProgress.join('、')}有在制工序单，请核对当前报工进度。`);
   if (actions.length === 0) return '暂未匹配到可用现货。先核对在制任务和实物，再补排缺少的工序。';
@@ -102,26 +101,14 @@ function nextStep(item: Api.Item) {
   return actions.join('');
 }
 
-const oneToOneProcesses = new Set(['ENGRAVE', 'FOLD', 'PACK', 'PUNCH']);
-
 function dispatchShortage(item: Api.Item, remaining: number) {
-  const match = matchByItem.value.get(item.id);
-  const lines = stockLines(item);
-  const label = lines.find((line) => line.nextProcesses.length > 0)?.nextProcesses[0];
-  const process = label ? match?.processes.find((step) => step.label === label)?.process
-    ?? item.steps?.find((step) => step.label === label)?.process : undefined;
-  const suggestedQuantity = process && oneToOneProcesses.has(process)
-    ? Math.min(remaining, lines.filter((line) => line.nextProcesses[0] === label && !line.side && num(line.perUnit) === 1)
-      .reduce((total, line) => total + num(line.covers), 0))
-    : 0;
   emit('dispatchShortage', {
     itemId: item.id,
     orderId: props.orderId,
     orderNo: props.orderNo,
-    processes: item.processes ?? undefined,
+    productCode: item.productCode ?? undefined,
+    productName: item.productName,
     remaining,
-    suggestedProcess: process,
-    suggestedQuantity: suggestedQuantity > 0 ? Number(suggestedQuantity.toFixed(3)) : undefined,
     unit: item.unit,
   });
 }
@@ -143,93 +130,102 @@ defineExpose({ focus });
     id="factory-order-fulfillment-panel"
     ref="root"
     aria-labelledby="factory-order-fulfillment-title"
-    class="scroll-mt-2 rounded-lg border border-border bg-card focus-visible:outline focus-visible:outline-primary"
+    class="scroll-mt-2 overflow-hidden rounded-xl border border-border bg-card focus-visible:outline focus-visible:outline-primary"
     tabindex="-1"
   >
-    <div class="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
+    <header class="flex flex-wrap items-center justify-between gap-4 bg-muted/35 px-4 py-4 sm:px-5">
       <div class="min-w-0">
-        <h3 id="factory-order-fulfillment-title" class="m-0 text-base font-semibold">补产指引</h3>
-        <p v-if="outstanding.length" class="mb-0 mt-1 text-sm text-warning">
-          <b>{{ outstanding.length }} 款待补</b><span v-if="unitTotals.length === 1"> · 还差 {{ unitTotals[0] }}</span>
+        <h3 id="factory-order-fulfillment-title" class="m-0 text-lg font-semibold">补产指引</h3>
+        <p v-if="outstanding.length" class="mb-0 mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
+          <strong class="rounded-md border border-warning/40 bg-warning/10 px-2 py-0.5">{{ outstanding.length }} 款待补</strong>
+          <span class="text-muted-foreground">
+            合计还差 <strong class="break-words text-base tabular-nums text-foreground">{{ unitTotals.join('、') }}</strong>
+          </span>
         </p>
         <p v-else class="mb-0 mt-1 text-sm text-success">
           {{ items.length > 0 ? '全部明细已达量，可以结束这张单。' : '当前没有待交明细。' }}
         </p>
       </div>
       <div v-if="outstanding.length" class="flex flex-wrap gap-2">
-        <Button v-if="canViewTasks" size="small" @click="emit('viewTasks')">查看本单任务</Button>
-        <Button v-if="canPlanShortage" size="small" @click="emit('planShortage')">去手动派工</Button>
+        <Button v-if="canViewTasks" size="large" @click="emit('viewTasks')">查看本单任务</Button>
+        <Button v-if="canPlanShortage" size="large" @click="emit('planShortage')">去手动派工</Button>
       </div>
       <slot v-else name="completed-action"></slot>
-    </div>
+    </header>
 
     <template v-if="outstanding.length">
-      <Alert v-if="stockState === 'error'" class="mx-4 mb-3" type="warning" show-icon message="现货匹配加载失败，待补数量仍可查看。">
-        <template #action><Button size="small" @click="reload++">重试</Button></template>
+      <Alert v-if="stockState === 'error'" class="mx-4 mt-4 sm:mx-5" type="warning" show-icon message="现货匹配加载失败，待补数量仍可查看。">
+        <template #action><Button @click="reload++">重试</Button></template>
       </Alert>
-      <table class="w-full table-fixed border-collapse text-sm">
-        <thead class="border-y border-border bg-muted/40 text-xs text-muted-foreground">
-          <tr>
-            <th scope="col" class="px-4 py-2 text-left font-medium">产品及下一步</th>
-            <th scope="col" class="w-28 px-4 py-2 text-right font-medium sm:w-36">数量</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="{ item, remaining } in outstanding" :key="item.id" class="align-top [&:not(:last-child)]:border-b [&:not(:last-child)]:border-border">
-            <td class="break-words px-4 py-3">
-              <p class="m-0 font-semibold">{{ item.productName }}</p>
-              <p v-if="item.productCode || specText(item)" class="mb-0 mt-0.5 text-xs text-muted-foreground">
+      <ul aria-label="待补产品" class="m-0 grid list-none gap-3 border-t border-border px-4 py-4 sm:px-5">
+        <li v-for="{ item, remaining } in outstanding" :key="item.id" class="min-w-0 rounded-lg border border-border p-3 sm:p-4">
+          <div class="grid items-start gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(19rem,36%)]">
+            <div class="min-w-0 break-words">
+              <h4 class="m-0 text-base font-semibold leading-6">{{ item.productName }}</h4>
+              <p v-if="item.productCode || specText(item)" class="mb-0 mt-1 text-sm text-muted-foreground">
                 {{ [item.productCode, specText(item)].filter(Boolean).join(' · ') }}
               </p>
-              <p class="mb-0 mt-1 text-xs">{{ nextStep(item) }}</p>
-              <div v-if="canDeliver || canPlanShortage" class="mt-2 flex flex-wrap gap-2">
-                <template v-if="canDeliver">
-                  <Button size="small" :aria-expanded="openInventoryItem === item.id" @click="toggleInventory(item.id)">
-                    {{ openInventoryItem === item.id ? '收起库存' : '核对库存' }}
-                  </Button>
-                  <Button v-if="matchByItem.get(item.id)?.pending" size="small" @click="emit('configure', item)">修改参数与工艺</Button>
-                  <Button
-                    size="small"
-                    :type="stockLines(item).some((line) => lineHasFinishedGoods(item, line)) ? 'primary' : 'default'"
-                    @click="emit('deliver', item)"
-                  >
-{{ deliveryLabel }}
-</Button>
-                </template>
+            </div>
+            <dl class="m-0 grid grid-cols-3 gap-2 text-sm tabular-nums">
+              <div class="min-w-0 rounded-md bg-muted/50 px-2 py-2 sm:px-3">
+                <dt class="text-muted-foreground">应做</dt>
+                <dd class="m-0 break-words text-base font-semibold">{{ fmt(item.quantity) }} <span class="text-sm font-normal">{{ item.unit }}</span></dd>
+              </div>
+              <div class="min-w-0 rounded-md bg-muted/50 px-2 py-2 sm:px-3">
+                <dt class="text-muted-foreground">{{ completedLabel }}</dt>
+                <dd class="m-0 break-words text-base font-semibold">{{ fmt(item.completedQuantity) }} <span class="text-sm font-normal">{{ item.unit }}</span></dd>
+              </div>
+              <div class="min-w-0 rounded-md bg-warning/15 px-2 py-2 sm:px-3">
+                <dt class="font-semibold">还差</dt>
+                <dd class="m-0 break-words text-base font-semibold">{{ fmt(remaining) }} <span class="text-sm font-normal">{{ item.unit }}</span></dd>
+              </div>
+            </dl>
+          </div>
+          <div class="mt-3 rounded-md border-l-2 border-primary/60 bg-primary/5 p-3 text-sm leading-6">
+            <p class="m-0"><strong class="mr-2">下一步</strong>{{ nextStep(item) }}</p>
+            <div v-if="canDeliver || canPlanShortage" class="mt-2 flex flex-wrap gap-2">
+              <template v-if="canDeliver">
+                <Button size="large" :aria-expanded="openInventoryItem === item.id" @click="toggleInventory(item.id)">
+                  {{ openInventoryItem === item.id ? '收起库存' : '核对库存' }}
+                </Button>
+                <Button v-if="matchByItem.get(item.id)?.pending" size="large" type="primary" @click="emit('configure', item)">
+                  修改参数与工艺
+                </Button>
                 <Button
-                  v-if="canPlanShortage"
-                  :loading="stockState === 'loading'"
-                  size="small"
-                  type="primary"
-                  ghost
-                  @click="dispatchShortage(item, remaining)"
+                  size="large"
+                  :type="stockLines(item).some((line) => lineHasFinishedGoods(item, line)) ? 'primary' : 'default'"
+                  @click="emit('deliver', item)"
                 >
-补派工
-</Button>
-              </div>
-              <div v-if="openInventoryItem === item.id" class="mt-2 rounded-md bg-muted/40 p-2 text-xs">
-                <ul v-if="stockLines(item).length" class="m-0 list-disc space-y-1 pl-4">
-                  <li v-for="(line, index) in stockLines(item)" :key="`${line.stage}-${line.code}-${index}`">
-                    {{ line.stageLabel }} {{ line.code }} · 参考用量 {{ fmt(line.used) }} {{ line.unit }}
-                    <span v-if="line.nextProcesses.length" class="block text-muted-foreground">后续 {{ line.nextProcesses.join(' → ') }}</span>
-                  </li>
-                </ul>
-                <p class="m-0 text-muted-foreground" :class="{ 'mt-2': stockLines(item).length > 0 }">
-                  领料前核对实物批次和库存流水。出现负库存时，先核对前后工序的领料和报工记录。
-                </p>
-              </div>
-            </td>
-            <td class="px-4 py-3">
-              <dl class="m-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-1 gap-y-1 text-right text-xs tabular-nums">
-                <dt class="text-muted-foreground">应做</dt><dd class="m-0 break-words">{{ fmt(item.quantity) }} {{ item.unit }}</dd>
-                <dt class="text-muted-foreground">{{ completedLabel }}</dt><dd class="m-0 break-words">{{ fmt(item.completedQuantity) }} {{ item.unit }}</dd>
-                <dt class="font-semibold text-warning">还差</dt><dd class="m-0 break-words font-semibold text-warning">{{ fmt(remaining) }} {{ item.unit }}</dd>
-              </dl>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      <p class="m-0 border-t border-border px-4 py-2 text-xs text-muted-foreground">
+                  {{ deliveryLabel }}
+                </Button>
+              </template>
+              <Button
+                v-if="canPlanShortage"
+                size="large"
+                type="primary"
+                ghost
+                @click="dispatchShortage(item, remaining)"
+              >
+                补派工
+              </Button>
+            </div>
+          </div>
+          <div v-if="openInventoryItem === item.id" class="mt-3 rounded-md border border-border bg-muted/30 p-3 text-sm leading-6">
+            <h5 class="m-0 font-semibold">匹配的库存批次</h5>
+            <ul v-if="stockLines(item).length" class="m-0 mb-2 grid list-disc gap-1 pl-5">
+              <li v-for="(line, index) in stockLines(item)" :key="`${line.stage}-${line.code}-${index}`" class="break-words">
+                {{ line.stageLabel }} {{ line.code }} · 参考用量 {{ fmt(line.used) }} {{ line.unit }}
+                <span v-if="line.nextProcesses.length" class="block text-muted-foreground">后续 {{ line.nextProcesses.join(' → ') }}</span>
+              </li>
+            </ul>
+            <p v-else-if="stockState === 'ready'" class="m-0 mb-2">暂无可用的匹配批次。</p>
+            <p class="m-0 text-muted-foreground">
+              领料前核对实物批次和库存流水。出现负库存时，先核对前后工序的领料和报工记录。
+            </p>
+          </div>
+        </li>
+      </ul>
+      <p class="m-0 border-t border-border px-4 py-3 text-sm text-muted-foreground sm:px-5">
         末道报工请关联对应订单明细。已{{ purchase ? '入库' : '交货' }}的数量会自动更新，全部达量后可结束订单。
       </p>
     </template>

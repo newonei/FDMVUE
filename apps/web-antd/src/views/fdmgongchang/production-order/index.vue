@@ -34,7 +34,7 @@ import CreateModal from './modules/create-modal.vue';
 import DeliveryModal from './modules/delivery-modal.vue';
 import ExceptionLedger from './modules/exception-ledger.vue';
 import ItemProductionConfigModal from './modules/item-production-config-modal.vue';
-import OrderDrawer from './modules/order-drawer.vue';
+import OrderDetailModal from './modules/order-detail-modal.vue';
 import OrderItemsTable from './modules/order-items-table.vue';
 import RestockLedger from './modules/restock-ledger.vue';
 import ScheduleModal from './modules/schedule-modal.vue';
@@ -248,12 +248,12 @@ function openCreate(from?: Api.Order) {
 }
 
 function copyOrder(order: Api.Order) {
-  drawerOpen.value = false;
+  orderDetailOpen.value = false;
   openCreate(order);
 }
-const drawerOpen = ref(false);
-const drawerId = ref<number>();
-const drawerFocusFulfillment = ref(false);
+const orderDetailOpen = ref(false);
+const detailOrderId = ref<number>();
+const detailFocusFulfillment = ref(false);
 
 async function loadRows() {
   const current = ++rowsVersion;
@@ -394,21 +394,21 @@ watch(
 onBeforeUnmount(() => clearTimeout(searchTimer));
 
 function openOrder(id: number, focusFulfillment = false) {
-  drawerId.value = id;
-  drawerFocusFulfillment.value = focusFulfillment;
-  drawerOpen.value = true;
+  detailOrderId.value = id;
+  detailFocusFulfillment.value = focusFulfillment;
+  orderDetailOpen.value = true;
 }
 
 function openOrderTasks(orderNo: string) {
   if (!canViewSchedule.value) return;
   taskOrderNo.value = orderNo;
-  drawerOpen.value = false;
+  orderDetailOpen.value = false;
   tab.value = 'tasks';
 }
 
 function openShortagePlanning() {
   if (!canViewSchedule.value || !canRelease.value) return;
-  drawerOpen.value = false;
+  orderDetailOpen.value = false;
   scheduleFocus.value = undefined;
   focusManualPlanning.value = true;
   tab.value = 'schedule';
@@ -422,7 +422,7 @@ function openShortageDispatch(seed: ShortageDispatchSeed) {
 
 function onShortageDispatched(scheduleId: number) {
   shortageDispatchOpen.value = false;
-  drawerOpen.value = false;
+  orderDetailOpen.value = false;
   focusManualPlanning.value = false;
   openSchedule(scheduleId);
 }
@@ -442,8 +442,8 @@ async function onCreated(id: number) {
 
 async function onChanged() {
   await Promise.all([loadRows(), loadPending()]);
-  if (drawerId.value && selected.value.has(drawerId.value) && !rows.value.some((row) => row.id === drawerId.value)) {
-    applyFreshOrder(await getProductionOrder(drawerId.value));
+  if (detailOrderId.value && selected.value.has(detailOrderId.value) && !rows.value.some((row) => row.id === detailOrderId.value)) {
+    applyFreshOrder(await getProductionOrder(detailOrderId.value));
   }
 }
 
@@ -763,12 +763,11 @@ function progressPercent(o: Api.Order) {
         @saved="onBatchRouteSaved"
       />
       <MixBatchModal :key="factory.factoryId.value ?? 'none'" v-model:open="batchMixOpen" :orders="[...selected.values()]" @released="onScheduled" />
-      <OrderDrawer
-        v-model:open="drawerOpen"
-        :focus-fulfillment="drawerFocusFulfillment"
+      <OrderDetailModal
+        v-model:open="orderDetailOpen"
+        :focus-fulfillment="detailFocusFulfillment"
         :mode="tab === 'mine' ? 'mine' : 'factory'"
-        :order-id="drawerId"
-        :status-hint="rows.find((row) => row.id === drawerId)?.status"
+        :order-id="detailOrderId"
         @changed="onChanged"
         @copy="copyOrder"
         @dispatch-shortage="openShortageDispatch"

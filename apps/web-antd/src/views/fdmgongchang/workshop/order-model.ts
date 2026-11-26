@@ -24,6 +24,9 @@ interface WorkshopTaskProgress {
 
 export function workshopTaskProgress(task: Api.Task): WorkshopTaskProgress {
   if (task.status === 'CLOSED') return { group: 'closed', label: '已关闭' };
+  if (task.completedBySupplement) {
+    return { group: 'completed', label: '已完成', color: 'green', targetLabel: '良品已补齐' };
+  }
   const good = toNumber(task.actualQuantity);
   if (task.status === 'DONE') {
     const label = '报工已结束';
@@ -38,14 +41,14 @@ export function workshopTaskProgress(task: Api.Task): WorkshopTaskProgress {
       group: task.shortageHandledAt ? 'handled' : 'pending',
       label,
       color: 'gold',
-      shortage: roundQty(planned - good),
+      shortage: roundQty(planned - good - (toNumber(task.supplementGoodQuantity) ?? 0)),
       targetLabel: '良品未达计划',
     };
   }
   if (task.activeOrderId) return { group: 'pending', label: '已领料 · 在做', color: 'gold' };
   const reported = (good ?? 0) + (toNumber(task.defectQuantity) ?? 0) > 0;
   return reported
-    ? { group: 'pending', label: '部分报工', color: 'gold' }
+    ? { group: 'pending', label: '部分报工', color: 'gold', shortage: toNumber(task.shortage) }
     : { group: 'pending', label: '待报工' };
 }
 

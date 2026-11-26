@@ -66,7 +66,7 @@ const selectedTasks = computed(() => tasks.value.filter((t) => selected.value.in
 const nameOf = (id: number) => workers.value.find((w) => w.userId === id)?.nickname ?? String(id);
 const idsOf = (t: Api.Task) => (t.workerIds ?? '').split(',').filter(Boolean).map(Number);
 /** 报工、关闭了的任务不能再改派或退回。 */
-const manageable = (t: Api.Task) => t.status === 'OPEN' || t.status === 'CLAIMED';
+const manageable = (t: Api.Task) => !t.completedBySupplement && (t.status === 'OPEN' || t.status === 'CLAIMED');
 /** 选中里能退回大厅的：派了人、还没有工序单。 */
 const returnable = computed(() => selectedTasks.value.filter((t) => idsOf(t).length > 0 && !t.orderCount));
 
@@ -111,9 +111,10 @@ watch(
   },
 );
 
-function percent(task: Pick<Api.Task, 'actualQuantity' | 'quantity'>) {
+function percent(task: Pick<Api.Task, 'actualQuantity' | 'quantity' | 'supplementGoodQuantity'>) {
   const plan = Number(task.quantity);
-  return plan > 0 ? Math.min(100, Math.round((Number(task.actualQuantity) / plan) * 100)) : 0;
+  const good = Number(task.actualQuantity) + Number(task.supplementGoodQuantity ?? 0);
+  return plan > 0 ? Math.min(100, Math.round((good / plan) * 100)) : 0;
 }
 
 function toggle(id: number, checked: boolean) {
@@ -327,6 +328,7 @@ function returnToHall() {
                   <td class="whitespace-nowrap px-2 py-1.5">{{ task.sequence }}. {{ PROCESS_LABELS[task.process] ?? task.process }}</td>
                   <td class="px-2 py-1.5">
                     <div class="text-xs text-muted-foreground">关联产品：{{ task.product || '备货' }}</div>
+                    <div v-if="task.parentTaskId" class="text-xs text-muted-foreground">补派子任务 · 原任务 #{{ task.parentTaskId }}</div>
                     <TaskMaterials v-if="task.output || task.inputs?.length" :task="task" class="mt-0.5" />
                     <div v-else class="text-xs">产出：{{ taskMaterialText(task.output, task.spec) }}</div>
                   </td>
@@ -334,13 +336,16 @@ function returnToHall() {
                     <div class="flex items-center gap-2">
                       <Progress :percent="percent(task)" :show-info="false" class="m-0 flex-1" size="small" />
                       <span class="whitespace-nowrap text-xs tabular-nums">
-                        {{ formatQty(task.actualQuantity ?? 0) }} / {{ formatQty(task.quantity) }} {{ task.unit }}
+                        {{ formatQty(task.actualQuantity ?? 0) }}
+                        <template v-if="Number(task.supplementGoodQuantity) > 0">＋ 补派良品 {{ formatQty(task.supplementGoodQuantity) }}</template>
+                        / {{ formatQty(task.quantity) }} {{ task.unit }}
                       </span>
                     </div>
                     <div v-if="task.shortage" class="text-xs text-warning">差 {{ Number(task.shortage) }} 待处理</div>
                   </td>
                   <td class="px-2 py-1.5">
-                    <Tag v-if="task.status" :color="TASK_STATUS[task.status].color" class="m-0">{{ TASK_STATUS[task.status].label }}</Tag>
+                    <Tag v-if="task.completedBySupplement" color="success" class="m-0">已完成</Tag>
+                    <Tag v-else-if="task.status" :color="TASK_STATUS[task.status].color" class="m-0">{{ TASK_STATUS[task.status].label }}</Tag>
                     <div v-if="task.closedReason" class="text-xs text-muted-foreground">{{ task.closedReason }}</div>
                   </td>
                   <td class="px-2 py-1.5 text-xs">

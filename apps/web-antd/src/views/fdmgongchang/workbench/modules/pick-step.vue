@@ -10,7 +10,7 @@ import { getWorkbenchStock, prepareWorkbenchTaskStock } from '#/api/fdmgongchang
 import { dimensionTextInMm } from '../../shared/dimensions';
 import { quantityPrecision } from '../../shared/quantity';
 import { attrSummary, formatQty, makeLabels, toNumber } from '../../stage-stock/model';
-import { slicePlanThicknessError, stageOf, useJob } from '../use-job';
+import { issueShortages, slicePlanThicknessError, stageOf, useJob } from '../use-job';
 import IssueShortages from './issue-shortages.vue';
 import PlannedInputs from './planned-inputs.vue';
 import StepHeader from './step-header.vue';
@@ -39,7 +39,10 @@ const sourceStages = computed(() => job.prepare?.sourceStages?.length ? job.prep
 const plannedOutput = computed(() => job.prepare?.outputAttrs ?? job.task?.output?.attrs);
 const outputSpec = computed(() => plannedOutput.value ? attrSummary(job.process?.outputStage ?? '', plannedOutput.value, labels.value, [], 'mm') : dimensionTextInMm(job.task?.spec));
 const planThicknessError = computed(() => slicePlanThicknessError(job, job.picks.map((pick) => ({ quantity: pick.qty, stock: pick.stock }))));
+const followActualBatches = computed(() => job.prepare?.followActualBatches === true);
+const exceedsAvailableStock = computed(() => followActualBatches.value && issueShortages(job).some((line) => line.stock.stage !== 'AUX'));
 const canPrepareStock = computed(() => !!job.task && !!job.process
+  && !followActualBatches.value
   && job.process.code !== 'MIX'
   && ['BOARD', 'CUT', 'EMBOSSED', 'ENGRAVED', 'FOLDED', 'LAMINATED', 'PUNCHED', 'SHEET'].includes(job.sourceStage)
   && !job.supplement && !job.order && !job.prepare?.inProgressOrderId);
@@ -114,7 +117,7 @@ function toggle(stock: StockApi.Stock) {
   }
   // 默认不填数量，免得忘了改。
   if (laminate.value) {
-    if (job.picks.length >= 2) job.picks = job.picks.slice(1);
+    if (!followActualBatches.value && job.picks.length >= 2) job.picks = job.picks.slice(1);
     const side = job.picks.some((p) => p.side === 'FRONT') ? 'BACK' : 'FRONT';
     job.picks = [...job.picks, { qty: 0, side, stock }];
   } else {
@@ -130,7 +133,7 @@ function toggleSide(stock: StockApi.Stock, side: StockApi.LaminationSide) {
   const existing = pickOf(stock, side);
   job.picks = existing
     ? job.picks.filter((pick) => pick !== existing)
-    : [...job.picks.filter((pick) => pick.side !== side), { qty: 0, side, stock }];
+    : [...job.picks.filter((pick) => followActualBatches.value || pick.side !== side), { qty: 0, side, stock }];
 }
 
 const pickTotal = computed(() => job.picks.reduce((t, p) => t + (p.qty || 0), 0));
@@ -145,7 +148,7 @@ function next() {
     return;
   }
   // 补领贴合片材可以只补一面
-  if (laminate.value && !job.supplement && job.picks.length < 2) {
+  if (laminate.value && !job.supplement && (['FRONT', 'BACK'] as const).some((side) => !job.picks.some((pick) => pick.side === side))) {
     message.warning('贴合要分别领用正面和反面片材，同一批次可各领一面');
     return;
   }
@@ -154,6 +157,7 @@ function next() {
     message.warning(`请填写「${nameOf(empty.stock)}」领多少`);
     return;
   }
+  if (exceedsAvailableStock.value) return;
   emit('next');
 }
 </script>
@@ -171,14 +175,17 @@ function next() {
     <main class="grid flex-1 grid-cols-1 content-start gap-4 p-4 md:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
       <div class="flex min-w-0 flex-col gap-3">
         <Alert v-if="planThicknessError" :message="planThicknessError" show-icon type="warning" />
-        <PlannedInputs v-if="job.task && !job.supplement" :inputs="job.task.inputs" :labels="labels" />
+        <PlannedInputs v-if="job.task && !job.supplement" :inputs="job.task.inputs" :labels="labels" :follow-actual-batches="followActualBatches" />
         <section v-if="job.prepare" class="flex flex-col gap-1 rounded-lg border border-primary/40 bg-primary/5 p-3 text-sm">
           <span class="font-bold">
             计划产出：{{ job.prepare.outputLabel || job.process?.outputLabel }} {{ formatQty(job.task?.quantity) }} {{ job.prepare.outputUnit || job.task?.unit }}
           </span>
           <span v-if="outputSpec">产出规格：{{ outputSpec }}</span>
           <span>本次领取：{{ source?.label }} → 报工产出：{{ job.prepare.outputLabel || job.process?.outputLabel }}</span>
-          <span v-if="job.prepare.picks.length > 0" class="text-muted-foreground">
+          <span v-if="followActualBatches" class="text-muted-foreground">
+            从补派工选定的库存或上道已报的合格批次中填写实际领料。上道新报工后，可刷新可领批次。
+          </span>
+          <span v-else-if="job.prepare.picks.length > 0" class="text-muted-foreground">
             系统推荐 {{ formatQty(job.prepare.required) }} {{ unit }}，仅作预填。可取消推荐、另选符合任务的材料，再填写实际领到的数量；下一步确认后才扣库存。
           </span>
           <span v-else class="text-muted-foreground">没有算出建议领料，请在下面点实际领的料，填领了多少。</span>
@@ -216,19 +223,22 @@ function next() {
           <span class="text-xs text-muted-foreground">
             {{ laminate ? '先点正面用的片材，再点反面用的片材；选上后在这一行填领多少' : `点要用的${source?.label ?? ''}选上（可以选好几种），在这一行填领多少` }}
           </span>
-          <Input
-            id="stock-keyword"
-            v-model:value="stockKeyword"
-            allow-clear
-            aria-label="搜索领料批次"
-            placeholder="搜索名称、颜色、规格（mm）、编码、批次或库位"
-          />
+          <div class="flex items-center gap-2">
+            <Input
+              id="stock-keyword"
+              v-model:value="stockKeyword"
+              allow-clear
+              aria-label="搜索领料批次"
+              placeholder="搜索名称、颜色、规格（mm）、编码、批次或库位"
+            />
+            <button v-if="followActualBatches" :disabled="loading" type="button" class="shrink-0 text-sm text-primary hover:underline" @click="load">刷新可领批次</button>
+          </div>
           <Spin :spinning="loading">
             <div v-if="loadError" class="flex flex-col items-start gap-2 rounded-lg border border-warning/40 bg-warning/5 p-3 text-sm" role="alert">
               <span>库存批次加载失败，已选批次和填写数量已保留，请重试。</span>
               <button class="text-primary hover:underline" type="button" @click="load">重新加载领料批次</button>
             </div>
-            <Empty v-else-if="!loading && visibleStocks.length === 0" :description="stocks.length > 0 ? '没有匹配的领料批次，请调整搜索关键词' : job.task ? '暂无符合当前任务条件的领料批次' : `${source?.label ?? ''}现在没有库存`" />
+            <Empty v-else-if="!loading && visibleStocks.length === 0" :description="stocks.length > 0 ? '没有匹配的领料批次，请调整搜索关键词' : followActualBatches ? '暂无可领批次，请核对选定库存或等待上道报工' : job.task ? '暂无符合当前任务条件的领料批次' : `${source?.label ?? ''}现在没有库存`" />
             <div v-else class="flex flex-col divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
               <div
                 v-for="(s, i) in visibleStocks"
@@ -346,7 +356,7 @@ function next() {
           </div>
         </section>
         <IssueShortages />
-        <button :disabled="loading || loadError || prepareStockLoading" class="h-10 rounded-md bg-primary text-sm font-semibold text-primary-foreground disabled:opacity-50" type="button" @click="next">
+        <button :disabled="loading || loadError || prepareStockLoading || exceedsAvailableStock" class="h-10 rounded-md bg-primary text-sm font-semibold text-primary-foreground disabled:opacity-50" type="button" @click="next">
           {{ props.embedded ? '确认本项用料' : '下一步：确认领料' }}
         </button>
       </aside>

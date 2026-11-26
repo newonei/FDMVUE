@@ -1,6 +1,7 @@
 import type { PageResult } from '@vben/request';
 
 import type { FdmgongchangProductionOrderApi as OrderApi } from '../production-order';
+import type { FdmgongchangScheduleApi as ScheduleApi } from '../schedule';
 
 import { requestClient } from '#/api/request';
 
@@ -23,6 +24,19 @@ export namespace FactoryOrderBoardApi {
     sharedTaskCount?: number;
     state?: StepState;
     taskCount?: number;
+    tasks?: StepTask[];
+  }
+
+  export interface StepTask {
+    actualQuantity: ScheduleApi.Decimal;
+    attained: boolean;
+    children?: StepTask[];
+    creditedQuantity: ScheduleApi.Decimal;
+    id: number;
+    quantity: ScheduleApi.Decimal;
+    status: ScheduleApi.TaskStatus;
+    unit?: null | string;
+    workDate?: ScheduleApi.DateValue;
   }
 
   export interface Item extends OrderApi.Item {

@@ -6,8 +6,8 @@ import { computed, ref, watch } from 'vue';
 import { Alert, Button, Input, InputNumber, Select } from 'ant-design-vue';
 
 import { receivePurchase } from '#/api/fdmgongchang/stage-stock';
-import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
+import FactoryDialog from '../../shared/factory-dialog.vue';
 import { quantityPrecision } from '../../shared/quantity';
 import {
   formatDate,
@@ -132,96 +132,104 @@ async function submit() {
 </script>
 
 <template>
-  <FdmResizableDrawer
-    resize-key="factory-receipt"
+  <FactoryDialog
     v-model:open="open"
+    :busy="saving"
     :title="`${line ? MATERIAL_KIND_LABELS[line.kind] : ''}到货入库`"
-    :width="640"
-    class="max-w-full"
+    :width="1040"
     destroy-on-close
   >
     <div v-if="line" class="flex flex-col gap-5">
-      <section
-        class="grid grid-cols-2 gap-3 rounded-md border border-border bg-muted/30 p-3 text-xs sm:grid-cols-4"
-      >
-        <div class="col-span-2 flex flex-col">
-          <span class="text-muted-foreground">{{ MATERIAL_KIND_LABELS[line.kind] }}</span>
-          <span class="text-sm">{{ line.productName }}</span>
-          <span class="text-muted-foreground">
+      <div class="flex flex-wrap items-start justify-between gap-4 rounded-lg border border-border bg-muted/30 p-4">
+        <section class="min-w-0 flex-1 basis-72">
+          <h3 class="m-0 break-words text-lg font-semibold">{{ line.productName }}</h3>
+          <p class="m-0 break-words text-sm text-muted-foreground">
             {{ [line.productCode, line.specification].filter(Boolean).join(' · ') }}
-          </span>
-          <span v-if="line.contractCode" class="text-muted-foreground">
-            合同 {{ line.contractCode }}<template v-if="!isRaw">（定制辅料，只给这个合同的生产领用）</template>
-          </span>
-        </div>
-        <div class="flex flex-col">
-          <span class="text-muted-foreground">采购单 / 供应商</span>
-          <span class="font-mono">{{ line.orderCode }}</span>
-          <span>{{ line.supplierName || '—' }}</span>
-          <span v-if="line.orderDate" class="text-muted-foreground">下单 {{ formatDate(line.orderDate) }}</span>
-        </div>
-        <div class="flex flex-col">
-          <span class="text-muted-foreground">采购 / 已收 / 待收</span>
-          <span class="tabular-nums">
-            {{ formatQty(line.quantity) }} / {{ formatQty(line.receivedQuantity) }} /
-            <b>{{ formatQty(line.remainingQuantity) }}</b> {{ unit }}
-          </span>
-        </div>
-      </section>
+          </p>
+          <p class="mb-0 mt-2 break-words text-sm">
+            采购单 <b class="font-mono">{{ line.orderCode }}</b>
+            <span v-if="line.supplierName"> · {{ line.supplierName }}</span>
+            <span v-if="line.orderDate" class="text-muted-foreground"> · 下单 {{ formatDate(line.orderDate) }}</span>
+          </p>
+          <p v-if="line.contractCode" class="m-0 break-words text-sm text-muted-foreground">
+            合同 {{ line.contractCode }}<template v-if="!isRaw">（该合同专用辅料）</template>
+          </p>
+        </section>
+        <dl class="m-0 grid min-w-0 flex-1 basis-64 grid-cols-3 gap-3 rounded-md border border-border bg-card p-3">
+          <div>
+            <dt class="text-sm text-muted-foreground">采购</dt>
+            <dd class="m-0 break-words font-semibold tabular-nums">{{ formatQty(line.quantity) }} {{ unit }}</dd>
+          </div>
+          <div>
+            <dt class="text-sm text-muted-foreground">已收</dt>
+            <dd class="m-0 break-words font-semibold tabular-nums">{{ formatQty(line.receivedQuantity) }} {{ unit }}</dd>
+          </div>
+          <div>
+            <dt class="text-sm text-muted-foreground">待收</dt>
+            <dd class="m-0 break-words font-semibold tabular-nums text-primary">{{ formatQty(remaining) }} {{ unit }}</dd>
+          </div>
+        </dl>
+      </div>
 
-      <label v-if="isRaw" for="receipt-raw" class="flex flex-col gap-1 text-xs text-muted-foreground">
-        对应的原材料（配方、成本按它算）
-        <Select
-          id="receipt-raw"
-          v-model:value="rawMaterialCode"
-          :options="rawOptions"
-          option-filter-prop="label"
-          placeholder="选这种原料对应的原材料，下次自动带出"
-          show-search
-        />
-      </label>
+      <div class="grid items-start gap-4 lg:grid-cols-2">
+        <section class="grid gap-3 rounded-lg border border-border p-4 sm:grid-cols-2">
+          <h3 class="m-0 text-base font-semibold sm:col-span-2">收货数量</h3>
+          <label for="receipt-qty" class="flex min-w-0 flex-col gap-1.5 text-sm font-medium">
+            实收数量（{{ unit }}）
+            <InputNumber id="receipt-qty" v-model:value="quantity" :min="0" :precision="quantityPrecision(unit)" class="w-full" size="large" />
+          </label>
+          <label for="receipt-accepted" class="flex min-w-0 flex-col gap-1.5 text-sm font-medium">
+            合格数量（{{ unit }}）
+            <InputNumber
+              id="receipt-accepted"
+              :value="accepted"
+              :min="0"
+              :precision="quantityPrecision(unit)"
+              class="w-full"
+              size="large"
+              @change="onAccepted"
+            />
+          </label>
+          <label v-if="shortfall" for="receipt-reason" class="flex flex-col gap-1.5 text-sm font-medium sm:col-span-2">
+            不合格原因
+            <Input id="receipt-reason" v-model:value="reason" :maxlength="500" placeholder="例如 2 包受潮、印刷错误" size="large" />
+          </label>
+        </section>
 
-      <section class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <label for="receipt-qty" class="flex flex-col gap-1 text-xs text-muted-foreground">
-          实收数量（{{ unit }}）
-          <InputNumber id="receipt-qty" v-model:value="quantity" :min="0" :precision="quantityPrecision(unit)" class="w-full" />
-        </label>
-        <label for="receipt-accepted" class="flex flex-col gap-1 text-xs text-muted-foreground">
-          合格数量（进库存，{{ unit }}）
-          <InputNumber
-            id="receipt-accepted"
-            :value="accepted"
-            :min="0"
-            :precision="quantityPrecision(unit)"
-            class="w-full"
-            @change="onAccepted"
-          />
-        </label>
-        <label v-if="shortfall" for="receipt-reason" class="flex flex-col gap-1 text-xs text-muted-foreground sm:col-span-2">
-          不合格原因
-          <Input id="receipt-reason" v-model:value="reason" :maxlength="500" placeholder="例如 2 包受潮、印刷错误" />
-        </label>
-      </section>
-
-      <section class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <label for="receipt-batch" class="flex flex-col gap-1 text-xs text-muted-foreground">
-          批次
-          <Input id="receipt-batch" v-model:value="batchNo" :maxlength="128" placeholder="不填用到货单号" />
-        </label>
-        <label for="receipt-location" class="flex flex-col gap-1 text-xs text-muted-foreground">
-          库位
-          <Input
-            id="receipt-location"
-            v-model:value="location"
-            :maxlength="64"
-            :placeholder="`默认 ${stageOption?.defaultLocation ?? ''}`"
-          />
-        </label>
-        <label for="receipt-remark" class="flex flex-col gap-1 text-xs text-muted-foreground">
-          备注
-          <Input id="receipt-remark" v-model:value="remark" :maxlength="500" placeholder="例如 送货单号" />
-        </label>
-      </section>
+        <section class="grid gap-3 rounded-lg border border-border p-4 sm:grid-cols-2">
+          <h3 class="m-0 text-base font-semibold sm:col-span-2">入库信息</h3>
+          <label v-if="isRaw" for="receipt-raw" class="flex min-w-0 flex-col gap-1.5 text-sm font-medium sm:col-span-2">
+            对应的原材料
+            <Select
+              id="receipt-raw"
+              v-model:value="rawMaterialCode"
+              :options="rawOptions"
+              option-filter-prop="label"
+              placeholder="选择原材料，下次收货自动带出"
+              show-search
+              size="large"
+            />
+          </label>
+          <label for="receipt-batch" class="flex min-w-0 flex-col gap-1.5 text-sm font-medium">
+            批次
+            <Input id="receipt-batch" v-model:value="batchNo" :maxlength="128" placeholder="不填用到货单号" size="large" />
+          </label>
+          <label for="receipt-location" class="flex min-w-0 flex-col gap-1.5 text-sm font-medium">
+            库位
+            <Input
+              id="receipt-location"
+              v-model:value="location"
+              :maxlength="64"
+              :placeholder="`默认 ${stageOption?.defaultLocation ?? ''}`"
+              size="large"
+            />
+          </label>
+          <label for="receipt-remark" class="flex flex-col gap-1.5 text-sm font-medium sm:col-span-2">
+            备注（选填）
+            <Input id="receipt-remark" v-model:value="remark" :maxlength="500" placeholder="例如送货单号" size="large" />
+          </label>
+        </section>
+      </div>
     </div>
     <template #footer>
       <div class="flex flex-col gap-2">
@@ -236,12 +244,12 @@ async function submit() {
           <span class="text-sm text-muted-foreground">
             合格数进「{{ stageOption?.label }}」，实收与合格数回写采购单
           </span>
-          <div class="flex gap-2">
-            <Button @click="open = false">取消</Button>
-            <Button :loading="saving" type="primary" @click="submit">确认收货</Button>
+          <div class="ml-auto flex flex-wrap justify-end gap-2">
+            <Button :disabled="saving" size="large" @click="open = false">取消</Button>
+            <Button :loading="saving" size="large" type="primary" @click="submit">确认收货</Button>
           </div>
         </div>
       </div>
     </template>
-  </FdmResizableDrawer>
+  </FactoryDialog>
 </template>

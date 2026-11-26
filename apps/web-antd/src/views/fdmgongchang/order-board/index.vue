@@ -8,11 +8,12 @@ import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, react
 import { useAccess } from '@vben/access';
 import { Page } from '@vben/common-ui';
 
-import { Alert, Button, Descriptions, Drawer, Input, message, Modal, Result, Select, Spin, Switch, Table, Tag, Tooltip } from 'ant-design-vue';
+import { Alert, Button, Empty, Input, message, Modal, Result, Select, Spin, Switch, Table, Tag, Tooltip } from 'ant-design-vue';
 
 import { getOrderBoardOrder, getOrderBoardOwners, getOrderBoardPage, setOrderBoardOwner } from '#/api/fdmgongchang/order-board';
 
 import { dateText, num, ORDER_STATUS, specText, timeText } from '../production-order/shared';
+import FactoryDialog from '../shared/factory-dialog.vue';
 import FactorySwitch from '../shared/factory-switch.vue';
 import { useFactory } from '../shared/use-factory';
 import { currentStage, dueHint, orderStages } from './model';
@@ -273,7 +274,7 @@ async function saveOwner() {
             <template v-if="column.key === 'order'">
               <div class="flex flex-col gap-2">
                 <div class="flex flex-wrap items-center gap-2"><Tag :color="ORDER_STATUS[record.status as Api.Order['status']]?.color" class="m-0">{{ record.statusLabel }}</Tag><span class="text-xs font-medium">{{ currentStage(record as Api.Order) }}</span></div>
-                <button type="button" class="text-left font-semibold text-primary hover:underline" @click="openDetail(record as Api.Order)">{{ record.orderNo }}</button>
+                <button type="button" class="text-left font-semibold text-primary hover:underline" aria-haspopup="dialog" @click="openDetail(record as Api.Order)">{{ record.orderNo }}</button>
                 <div v-if="record.sourceOrderCode" class="text-xs text-muted-foreground">采购单号：{{ record.sourceOrderCode }}</div>
                 <div v-if="record.sourceContractId || record.sourceContractName || record.sourceContractCode" class="break-words text-xs">
                   <span class="text-muted-foreground">合同内部单号：</span><b>{{ record.sourceContractName || '—' }}</b>
@@ -286,7 +287,7 @@ async function saveOwner() {
                   <Button v-if="canAssign" type="link" size="small" @click="assignOwner(record as Api.Order)">{{ record.ownerUserId ? '更换' : '分配' }}</Button>
                 </div>
                 <div class="text-xs text-muted-foreground">{{ record.promisedDate ? '工厂交期' : '需求交期' }}：{{ dateText(record.promisedDate) || dateText(record.requiredDate) || '待确认' }} <b v-if="dueHint(record as Api.Order)" class="text-destructive">{{ dueHint(record as Api.Order) }}</b></div>
-                <div><Button size="small" @click="openDetail(record as Api.Order)">订单详情</Button></div>
+                <div><Button aria-haspopup="dialog" size="small" @click="openDetail(record as Api.Order)">订单详情</Button></div>
               </div>
             </template>
             <template v-else-if="column.key === 'flow'">
@@ -309,42 +310,115 @@ async function saveOwner() {
       </section>
     </div>
 
-    <Drawer v-model:open="detailOpen" :title="`订单详情 ${detail?.orderNo || ''}`" width="min(960px, 100vw)">
+    <FactoryDialog v-model:open="detailOpen" :title="`订单详情 ${detail?.orderNo || ''}`">
       <Spin :spinning="detailLoading">
         <div v-if="detail" class="flex flex-col gap-4">
-          <Alert v-if="detailError" type="warning" message="详情刷新失败，当前显示列表快照。" />
-          <Descriptions bordered size="small" :column="2">
-            <Descriptions.Item label="订单状态"><Tag :color="ORDER_STATUS[detail.status]?.color">{{ detail.statusLabel }}</Tag>{{ currentStage(detail) }}</Descriptions.Item>
-            <Descriptions.Item label="订单负责人">{{ detail.ownerName || '未分配' }} <Button v-if="canAssign" type="link" size="small" @click="assignOwner(detail)">分配 / 更换</Button></Descriptions.Item>
-            <Descriptions.Item label="来源采购单">{{ detail.sourceOrderCode || '—' }}</Descriptions.Item>
-            <Descriptions.Item label="合同内部单号">{{ detail.sourceContractName || '—' }}</Descriptions.Item>
-            <Descriptions.Item label="合同编号">{{ detail.sourceContractCode || '—' }}</Descriptions.Item>
-            <Descriptions.Item label="客户 / 用途">{{ detail.customerName || detail.purpose || '—' }}</Descriptions.Item>
-            <Descriptions.Item label="下单人">{{ detail.requesterName || '—' }} · {{ detail.requesterDeptName || '—' }}</Descriptions.Item>
-            <Descriptions.Item label="需求交期">{{ dateText(detail.requiredDate) || '待确认' }}</Descriptions.Item>
-            <Descriptions.Item label="工厂交期">{{ dateText(detail.promisedDate) || '待确认' }}</Descriptions.Item>
-            <Descriptions.Item label="创建时间">{{ timeText(detail.createTime) }}</Descriptions.Item>
-            <Descriptions.Item label="接单经办人">{{ detail.handlerName || '—' }}</Descriptions.Item>
-            <Descriptions.Item v-if="detail.remark || detail.reply" label="备注 / 工厂回复" :span="2">{{ [detail.remark, detail.reply].filter(Boolean).join('；') }}</Descriptions.Item>
-          </Descriptions>
-          <section v-for="item in detail.items" :key="item.id" class="rounded-lg border border-border p-4">
-            <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
-              <div><b>{{ item.productName }}</b><div class="mt-1 text-xs text-muted-foreground">{{ item.productCode }} · {{ specText(item) }}</div></div>
-              <div class="text-right text-sm"><b>{{ num(item.quantity) }} {{ item.unit }}</b><div class="mt-1 text-xs text-muted-foreground">已交货 / 入库 {{ num(item.completedQuantity) }} · 已出库 {{ num(item.shippedQuantity) }}</div></div>
+          <Alert v-if="detailError" type="warning" show-icon message="详情刷新失败，当前显示列表快照。">
+            <template #action><Button size="small" @click="openDetail(detail)">重新加载</Button></template>
+          </Alert>
+
+          <dl class="mb-0 grid gap-3 sm:grid-cols-3">
+            <div class="rounded-lg border border-border bg-muted/40 px-4 py-3">
+              <dt class="text-sm text-muted-foreground">当前进度</dt>
+              <dd class="mb-0 mt-2 flex flex-wrap items-center gap-2 font-medium">
+                <Tag :color="ORDER_STATUS[detail.status]?.color" class="m-0">{{ detail.statusLabel }}</Tag>
+                <span>{{ currentStage(detail) }}</span>
+              </dd>
             </div>
-            <div class="stage-grid">
-              <Tooltip v-for="stage in orderStages({ ...detail, items: [item] })" :key="stage.code" :title="stage.detail">
-                <button type="button" class="stage-tile" :class="`stage-tile--${stage.state}`" aria-haspopup="dialog" :aria-label="`${stage.label}：${stage.text}，查看详情`" @click="openStage(detail, stage, item.id)">
-                  <span class="stage-tile__name">{{ stage.label }}</span>
-                  <b>{{ stage.text }}</b>
-                </button>
-              </Tooltip>
+            <div class="rounded-lg border border-border bg-muted/40 px-4 py-3">
+              <dt class="text-sm text-muted-foreground">交货日期</dt>
+              <dd class="mb-0 mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span class="font-semibold">{{ dateText(detail.promisedDate) || dateText(detail.requiredDate) || '待确认' }}</span>
+                <span v-if="detail.promisedDate || detail.requiredDate" class="text-xs text-muted-foreground">{{ detail.promisedDate ? '工厂交期' : '需求交期' }}</span>
+                <span v-if="dueHint(detail)" class="text-xs font-medium text-destructive">{{ dueHint(detail) }}</span>
+              </dd>
             </div>
-            <div class="mt-3 flex flex-col gap-1 text-xs text-muted-foreground"><span v-for="step in item.steps" :key="step.process">{{ step.label }}：良品 {{ num(step.goodQuantity) }}{{ step.unit }} · {{ step.orderCount }} 张工序单 · {{ step.inProgressCount }} 张在制<template v-if="step.sharedTaskCount"> · {{ step.sharedTaskCount }} 个合并生产任务</template></span></div>
-          </section>
+            <div class="rounded-lg border border-border bg-muted/40 px-4 py-3">
+              <dt class="text-sm text-muted-foreground">订单负责人</dt>
+              <dd class="mb-0 mt-1 flex flex-wrap items-center justify-between gap-2">
+                <span class="break-words font-semibold">{{ detail.ownerName || '未分配' }}</span>
+                <Button v-if="canAssign" aria-haspopup="dialog" @click="assignOwner(detail)">{{ detail.ownerUserId ? '更换负责人' : '分配负责人' }}</Button>
+              </dd>
+            </div>
+          </dl>
+
+          <div class="board-detail-layout">
+            <section class="min-w-0" aria-labelledby="order-board-detail-progress">
+              <div class="mb-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                <h3 id="order-board-detail-progress" class="m-0 text-base font-semibold">产品与工序进度</h3>
+                <span v-if="detail.items.length" class="text-sm text-muted-foreground">{{ detail.items.length }} 款产品 · 点击工序查看明细</span>
+              </div>
+              <Empty v-if="!detail.items.length" description="暂无产品明细" />
+              <div v-else class="space-y-3">
+                <article v-for="item in detail.items" :key="item.id" class="rounded-lg border border-border p-4">
+                  <h4 class="m-0 break-words text-base font-semibold">{{ item.productName }}</h4>
+                  <p v-if="item.productCode || specText(item)" class="mb-0 mt-1 break-words text-sm text-muted-foreground">{{ [item.productCode, specText(item)].filter(Boolean).join(' · ') }}</p>
+
+                  <dl class="my-3 grid grid-cols-3 gap-2 rounded-md bg-muted/40 px-3 py-2">
+                    <div>
+                      <dt class="text-xs text-muted-foreground">订单需求</dt>
+                      <dd class="mb-0 break-words font-semibold tabular-nums">{{ num(item.quantity) }} {{ item.unit }}</dd>
+                    </div>
+                    <div>
+                      <dt class="text-xs text-muted-foreground">已交货 / 入库</dt>
+                      <dd class="mb-0 break-words font-semibold tabular-nums">{{ num(item.completedQuantity) }} {{ item.unit }}</dd>
+                    </div>
+                    <div>
+                      <dt class="text-xs text-muted-foreground">已出库</dt>
+                      <dd class="mb-0 break-words font-semibold tabular-nums">{{ num(item.shippedQuantity) }} {{ item.unit }}</dd>
+                    </div>
+                  </dl>
+
+                  <div class="stage-grid board-detail-stages">
+                    <Tooltip v-for="stage in orderStages({ ...detail, items: [item] })" :key="stage.code" :title="stage.detail">
+                      <button type="button" class="stage-tile" :class="`stage-tile--${stage.state}`" aria-haspopup="dialog" :aria-label="`${stage.label}：${stage.text}，查看详情`" @click="openStage(detail, stage, item.id)">
+                        <span class="stage-tile__name">{{ stage.label }}</span>
+                        <b>{{ stage.text }}</b>
+                      </button>
+                    </Tooltip>
+                  </div>
+                  <div v-if="item.steps?.length" class="mt-3 flex flex-col gap-1 text-xs leading-5 text-muted-foreground">
+                    <span v-for="step in item.steps" :key="step.process">{{ step.label }}：良品 {{ num(step.goodQuantity) }}{{ step.unit }} · {{ step.orderCount }} 张工序单 · {{ step.inProgressCount }} 张在制<template v-if="step.sharedTaskCount"> · {{ step.sharedTaskCount }} 个合并生产任务</template></span>
+                  </div>
+                </article>
+              </div>
+            </section>
+
+            <aside class="min-w-0 self-start rounded-lg border border-border px-4 py-3" aria-labelledby="order-board-detail-source">
+              <h3 id="order-board-detail-source" class="m-0 text-base font-semibold">订单资料</h3>
+              <dl class="order-board-detail-fields mb-0 mt-3 text-sm">
+                <dt>来源采购单</dt>
+                <dd>{{ detail.sourceOrderCode || '—' }}</dd>
+                <dt>合同内部单号</dt>
+                <dd>{{ detail.sourceContractName || '—' }}</dd>
+                <dt>合同编号</dt>
+                <dd>{{ detail.sourceContractCode || '—' }}</dd>
+                <dt>客户 / 用途</dt>
+                <dd>{{ detail.customerName || detail.purpose || '—' }}</dd>
+                <dt>下单人</dt>
+                <dd>{{ detail.requesterName || '—' }} · {{ detail.requesterDeptName || '—' }}</dd>
+                <dt>需求交期</dt>
+                <dd>{{ dateText(detail.requiredDate) || '待确认' }}</dd>
+                <dt>工厂交期</dt>
+                <dd>{{ dateText(detail.promisedDate) || '待确认' }}</dd>
+                <dt>创建时间</dt>
+                <dd>{{ timeText(detail.createTime) || '—' }}</dd>
+                <dt>接单经办人</dt>
+                <dd>{{ detail.handlerName || '—' }}</dd>
+                <template v-if="detail.remark">
+                  <dt>订单备注</dt>
+                  <dd class="whitespace-pre-wrap">{{ detail.remark }}</dd>
+                </template>
+                <template v-if="detail.reply">
+                  <dt>工厂回复</dt>
+                  <dd class="whitespace-pre-wrap">{{ detail.reply }}</dd>
+                </template>
+              </dl>
+            </aside>
+          </div>
         </div>
       </Spin>
-    </Drawer>
+    </FactoryDialog>
 
     <StageDetailModal
       :order="stageSelection?.order"
@@ -356,7 +430,7 @@ async function saveOwner() {
       @retry="refreshStage"
     />
 
-    <Modal :open="!!ownerOrder" title="分配订单负责人" :confirm-loading="ownerSaving" ok-text="保存负责人" @ok="saveOwner" @cancel="ownerOrder = undefined">
+    <Modal :open="!!ownerOrder" title="分配订单负责人" :z-index="2100" :confirm-loading="ownerSaving" centered ok-text="保存负责人" @ok="saveOwner" @cancel="ownerOrder = undefined">
       <p class="text-sm text-muted-foreground">{{ ownerOrder?.orderNo }} · 指定本厂人员跟进订单，清空选择可取消分配。</p>
       <Select v-model:value="ownerId" :options="ownerOptions" show-search allow-clear option-filter-prop="label" class="w-full" placeholder="请选择订单负责人" aria-label="订单负责人" />
     </Modal>
@@ -521,6 +595,45 @@ async function saveOwner() {
   font-weight: 500;
   color: hsl(var(--muted-foreground));
 
+}
+
+.board-detail-layout {
+  display: grid;
+  gap: 16px;
+}
+
+.stage-grid.board-detail-stages {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 100px), 1fr));
+}
+
+.board-detail-stages .stage-tile {
+  min-height: 60px;
+  font-size: 12px;
+}
+
+.board-detail-stages .stage-tile__name {
+  font-size: 14px;
+}
+
+.order-board-detail-fields {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px 12px;
+}
+
+.order-board-detail-fields dt {
+  color: hsl(var(--muted-foreground));
+}
+
+.order-board-detail-fields dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (min-width: 1024px) {
+  .board-detail-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(260px, 27%);
+  }
 }
 
 @media (max-width: 640px) {

@@ -8,7 +8,7 @@ import { computed } from 'vue';
 import { Alert, Button, Empty, Modal, Spin, Tag } from 'ant-design-vue';
 
 import { dateText, num, specText } from '../production-order/shared';
-import { TASK_STAGE_LABELS } from '../shared/schedule';
+import { TASK_STAGE_LABELS, TASK_STATUS } from '../shared/schedule';
 import { deliveryProgress, stageDetails } from './model';
 
 const props = defineProps<{
@@ -44,6 +44,12 @@ const stateColors: Record<Stage['state'], string> = {
 
 function quantityText(value: null | number | string | undefined, unit?: null | string) {
   return [quantities.format(num(value)), unit].filter(Boolean).join(' ');
+}
+
+function taskStatus(task: Api.StepTask) {
+  if (task.attained) return { color: 'success', label: '已达标' };
+  if (task.status === 'DONE') return { color: 'warning', label: '良品未达标' };
+  return TASK_STATUS[task.status];
 }
 
 function logisticsMetrics(item: Api.Item) {
@@ -152,6 +158,39 @@ function logisticsMetrics(item: Api.Item) {
                     </dd>
                   </div>
                 </dl>
+                <div v-if="step.tasks?.length" class="space-y-2">
+                  <h4 class="mb-0 text-xs font-medium">排单任务明细</h4>
+                  <ul class="m-0 list-none space-y-2 p-0" aria-label="排单任务明细">
+                    <li v-for="task in step.tasks" :key="task.id" class="space-y-2 rounded-md border border-border px-3 py-2 text-xs">
+                      <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <b>{{ task.children?.length ? '原任务' : '排单任务' }} #{{ task.id }}</b>
+                        <Tag :color="taskStatus(task).color" class="m-0">{{ taskStatus(task).label }}</Tag>
+                        <span v-if="task.workDate" class="text-muted-foreground">{{ dateText(task.workDate) }}</span>
+                      </div>
+                      <div class="flex flex-wrap gap-x-4 gap-y-1 tabular-nums">
+                        <span>计划 {{ quantityText(task.quantity, task.unit) }}</span>
+                        <span>{{ task.children?.length ? '原报良品' : '已报良品' }} {{ quantityText(task.actualQuantity, task.unit) }}</span>
+                        <span v-if="task.children?.length">补产后良品 {{ quantityText(task.creditedQuantity, task.unit) }}</span>
+                        <span v-if="num(task.creditedQuantity) < num(task.quantity)" class="font-medium text-warning">
+                          剩余缺口 {{ quantityText(num(task.quantity) - num(task.creditedQuantity), task.unit) }}
+                        </span>
+                      </div>
+                      <ul v-if="task.children?.length" class="m-0 list-none space-y-2 border-l-2 border-border pl-3" aria-label="补产子任务">
+                        <li v-for="child in task.children" :key="child.id" class="space-y-1 rounded-md bg-muted/40 px-3 py-2">
+                          <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                            <b>补产任务 #{{ child.id }}</b>
+                            <Tag :color="taskStatus(child).color" class="m-0">{{ taskStatus(child).label }}</Tag>
+                            <span v-if="child.workDate" class="text-muted-foreground">{{ dateText(child.workDate) }}</span>
+                          </div>
+                          <div class="flex flex-wrap gap-x-4 gap-y-1 tabular-nums">
+                            <span>计划 {{ quantityText(child.quantity, child.unit) }}</span>
+                            <span>已报良品 {{ quantityText(child.actualQuantity, child.unit) }}</span>
+                          </div>
+                        </li>
+                      </ul>
+                    </li>
+                  </ul>
+                </div>
               </template>
             </template>
           </section>

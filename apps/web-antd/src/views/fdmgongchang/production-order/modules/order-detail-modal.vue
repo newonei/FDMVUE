@@ -27,9 +27,9 @@ import {
   saveItemRoute,
   voidDelivery,
 } from '#/api/fdmgongchang/production-order';
-import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { factoryToday } from '../../shared/factory-date';
+import FactoryDialog from '../../shared/factory-dialog.vue';
 import { colorModeText, parameterText, textureText, thicknessText } from '../manufacturing';
 import { dateText, num, ORDER_STATUS, routeProblem, specText, timeText } from '../shared';
 import AuxPanel from './aux-panel.vue';
@@ -59,7 +59,6 @@ const props = defineProps<{
   focusFulfillment?: boolean;
   mode: 'factory' | 'mine';
   orderId?: number;
-  statusHint?: Api.Order['status'];
 }>();
 const emit = defineEmits<{
   changed: [];
@@ -78,9 +77,9 @@ const fulfillmentGuide = ref<InstanceType<typeof FulfillmentGuide>>();
 const loading = ref(false);
 const loadError = ref(false);
 let loadVersion = 0;
-const acceptInModal = ref(false);
 const acceptView = ref<'items' | 'material' | 'purchase' | 'stock'>('items');
 const acceptNavigation = ref<HTMLElement>();
+const detailContent = ref<HTMLElement>();
 const busy = ref(false);
 const targetRefreshing = ref(false);
 const targetRefreshError = ref(false);
@@ -134,18 +133,7 @@ const canBatchRoute = computed(() => factoryRoute.value && canHandle.value && ac
 const canPlan = computed(() => props.mode === 'factory' && (canHandle.value || canProgress.value));
 const purchaseReference = shallowRef<RoutePurchaseReference>();
 const materialSaving = computed(() => !!materialPlan.value?.saving);
-const overlayProps = computed(() => acceptInModal.value ? {
-  centered: true,
-  closable: !busy.value && !configOpen.value && !materialSaving.value,
-  footer: canHandle.value ? undefined : null,
-  keyboard: !busy.value && !configOpen.value && !materialSaving.value,
-  maskClosable: false,
-  width: 'min(1440px, calc(100vw - 32px))',
-  wrapClassName: 'production-accept-dialog',
-} : {
-  resizeKey: 'factory-production-order',
-  width: 'min(760px, 100vw)',
-});
+const detailBusy = computed(() => busy.value || configOpen.value || materialSaving.value);
 const acceptViews = computed(() => [
   { key: 'items', label: `产品明细（${order.value?.items.length ?? 0}）` },
   { key: 'material', label: '用料逆推' },
@@ -156,6 +144,9 @@ const allDone = computed(() =>
   (order.value?.items ?? []).every((i) => num(i.completedQuantity) >= num(i.quantity)),
 );
 const deliveries = computed(() => order.value?.deliveries ?? []);
+const showFulfillment = computed(() => props.mode === 'factory' && order.value?.status === 'ACCEPTED');
+const showStockTrace = computed(() => props.mode === 'factory' && canHandleOrder.value
+  && (order.value?.status === 'ACCEPTED' || order.value?.status === 'COMPLETED'));
 
 watch([open, () => props.focusFulfillment, fulfillmentGuide], ([isOpen, focus, guide]) => {
   if (isOpen && focus) guide?.focus();
@@ -168,6 +159,12 @@ function selectAcceptView(view: typeof acceptView.value) {
   if (body) body.scrollTop = 0;
 }
 
+function jumpToDetail(section: string) {
+  const target = detailContent.value?.querySelector<HTMLElement>(`#${section}`);
+  target?.focus({ preventScroll: true });
+  target?.scrollIntoView?.({ block: 'start' });
+}
+
 async function load() {
   const id = props.orderId;
   if (!id || !open.value) return;
@@ -178,7 +175,6 @@ async function load() {
   try {
     const fresh = await getProductionOrder(id);
     if (version !== loadVersion) return;
-    if (!order.value) acceptInModal.value = props.mode === 'factory' && canHandleOrder.value && fresh.status === 'SUBMITTED';
     order.value = fresh;
     const required = dateText(fresh.requiredDate);
     promisedDate.value = required ? dayjs(required) : undefined;
@@ -312,7 +308,6 @@ watch(() => [open.value, props.orderId] as const, ([value]) => {
   supplementItem.value = undefined;
   if (value) {
     acceptView.value = 'items';
-    acceptInModal.value = props.mode === 'factory' && canHandleOrder.value && (!props.statusHint || props.statusHint === 'SUBMITTED');
     load();
   }
 }, { immediate: true });
@@ -448,23 +443,24 @@ function producedQty(item: Api.Item) {
 </script>
 
 <template>
-  <component
-    :is="acceptInModal ? Modal : FdmResizableDrawer"
+  <FactoryDialog
     v-model:open="open"
-    v-bind="overlayProps"
-    :title="order ? `生产订单 ${order.orderNo}` : '生产订单'"
+    :busy="detailBusy"
+    :width="1440"
   >
+    <template #title>
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span>{{ order ? `生产订单 ${order.orderNo}` : '生产订单' }}</span>
+        <Tag v-if="status" :color="status.color" class="m-0">{{ status.label }}</Tag>
+        <Tag v-if="fromRestock" class="m-0" color="purple">补库</Tag>
+        <span v-if="order?.factoryName" class="text-sm font-normal text-muted-foreground">{{ order.factoryName }}</span>
+      </div>
+    </template>
     <Spin :spinning="loading">
       <Alert v-if="loadError" type="error" show-icon message="订单加载失败">
         <template #action><Button size="small" @click="load">重新加载</Button></template>
       </Alert>
-      <div v-else-if="order" class="flex flex-col gap-4 text-sm">
-        <div class="flex flex-wrap items-center gap-2">
-          <Tag v-if="status" :color="status.color" class="m-0">{{ status.label }}</Tag>
-          <span class="text-muted-foreground">{{ order.factoryName }}</span>
-          <span v-if="order.purpose && !fromPurchase" class="text-muted-foreground">· {{ order.purpose }}</span>
-          <Tag v-if="fromRestock" class="m-0" color="purple">补库</Tag>
-        </div>
+      <div v-else-if="order" ref="detailContent" class="flex flex-col gap-5 text-sm">
         <Alert
           v-if="fromPurchase && order.sourceChanged && mode === 'factory'"
           show-icon
@@ -479,9 +475,18 @@ function producedQty(item: Api.Item) {
         <p v-else-if="fromPurchase && order.sourceChangeNote && order.status === 'SUBMITTED'" class="m-0 text-xs text-warning">
           {{ order.sourceChangeNote }}
         </p>
+        <nav v-if="!canHandle" aria-label="订单详情目录" class="order-navigation">
+          <Button v-if="showFulfillment" type="text" @click="fulfillmentGuide?.focus()">补产指引</Button>
+          <Button type="text" @click="jumpToDetail('po-detail-items')">产品明细</Button>
+          <Button type="text" @click="jumpToDetail('po-detail-overview')">订单信息</Button>
+          <Button v-if="showStockTrace || canPlan" type="text" @click="jumpToDetail('po-detail-supply')">库存与用料</Button>
+          <Button v-if="fromPurchase" type="text" @click="jumpToDetail('po-detail-purchase')">采购资料</Button>
+          <Button v-if="deliveries.length > 0" type="text" @click="jumpToDetail('po-detail-deliveries')">{{ fromPurchase ? '入库记录' : '交货记录' }}</Button>
+        </nav>
         <FulfillmentGuide
-          v-if="mode === 'factory' && order.status === 'ACCEPTED'"
+          v-if="showFulfillment"
           ref="fulfillmentGuide"
+          class="detail-section"
           :can-deliver="canProgress"
           :can-plan-shortage="canViewTasks && canSupplementRoute"
           :can-view-tasks="canViewTasks"
@@ -501,68 +506,66 @@ function producedQty(item: Api.Item) {
             </Popconfirm>
           </template>
         </FulfillmentGuide>
-        <OrderStockTrace
-          v-if="mode === 'factory' && canHandleOrder && ['ACCEPTED', 'COMPLETED'].includes(order.status)"
-          :items="order.items"
-          :order-id="order.id"
-        />
-        <section v-if="fromPurchase" aria-labelledby="po-purchase-source" class="rounded-lg border border-border bg-muted/30 px-4 py-3">
-          <h3 id="po-purchase-source" class="m-0 text-xs font-medium text-muted-foreground">采购来源</h3>
-          <dl class="mb-0 mt-2 grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
-            <div class="min-w-0 sm:col-span-2 lg:col-span-4">
-              <dt class="text-xs text-muted-foreground">采购主题</dt>
-              <dd class="m-0 break-words text-base font-semibold">{{ order.sourceOrderSubject || '未填写采购主题' }}</dd>
-            </div>
-            <div class="min-w-0">
-              <dt class="text-xs text-muted-foreground">合同内部单号</dt>
-              <dd class="m-0 break-words font-medium">{{ order.sourceContractName || '—' }}</dd>
-            </div>
-            <div class="min-w-0">
-              <dt class="text-xs text-muted-foreground">合同编号</dt>
-              <dd class="m-0 break-words">{{ order.sourceContractCode || '—' }}</dd>
-            </div>
-            <div class="min-w-0">
-              <dt class="text-xs text-muted-foreground">采购单号</dt>
-              <dd class="m-0 break-words"><SourcePurchaseLink v-if="order.sourceOrderCode" :order="order" code-only /><span v-else>—</span></dd>
-            </div>
-            <div class="min-w-0">
-              <dt class="text-xs text-muted-foreground">客户</dt>
-              <dd class="m-0 break-words">{{ order.customerName || '—' }}</dd>
-            </div>
-          </dl>
-        </section>
-        <div class="flex flex-col gap-3" :class="{ 'accept-overview': canHandle }">
-          <Descriptions :column="{ xs: 1, sm: 2 }" size="small" bordered>
-            <Descriptions.Item :label="fromPurchase ? '采购员' : '下单人'">{{ order.requesterName }}<span v-if="order.requesterDeptName" class="text-muted-foreground">（{{ order.requesterDeptName }}）</span></Descriptions.Item>
-            <Descriptions.Item label="下单时间">{{ timeText(order.createTime) }}</Descriptions.Item>
-            <Descriptions.Item :label="fromPurchase ? '采购单交期' : '希望交货'">{{ dateText(order.requiredDate) || '没填' }}</Descriptions.Item>
-            <Descriptions.Item label="工厂交期">{{ dateText(order.promisedDate) || '—' }}</Descriptions.Item>
-            <Descriptions.Item v-if="order.remark" :span="2" label="备注">{{ order.remark }}</Descriptions.Item>
-            <Descriptions.Item v-if="order.reply" :span="2" :label="order.status === 'REJECTED' ? '退回原因' : '工厂回复'">
-              {{ order.reply }}<span class="text-muted-foreground"> — {{ order.handlerName }} {{ timeText(order.handledAt) }}</span>
-            </Descriptions.Item>
-          </Descriptions>
-
-          <section v-if="canHandle" class="flex min-w-0 flex-col justify-center gap-2 rounded-lg border border-primary/25 bg-primary/5 px-4 py-3">
-            <h3 class="m-0 text-base font-semibold">接单处理</h3>
-            <div class="accept-form-fields">
-              <label for="po-promised" class="flex flex-col gap-1 text-xs text-muted-foreground">
-                回复交期（接单必填）
-                <DatePicker id="po-promised" v-model:value="promisedDate" :disabled-date="disabledDate" class="w-full" />
-              </label>
-              <label for="po-reply" class="flex min-w-0 flex-col gap-1 text-xs text-muted-foreground">
-                工厂回复（退回时必填）
-                <Input id="po-reply" v-model:value="reply" :maxlength="255" placeholder="填写交期说明或退回原因" />
-              </label>
-            </div>
+        <div id="po-detail-overview" class="detail-section grid gap-3" :class="{ 'detail-overview': fromPurchase && !canHandle }" tabindex="-1">
+          <section v-if="fromPurchase" aria-labelledby="po-purchase-source" class="min-w-0 rounded-lg border border-border bg-muted/30 px-4 py-3">
+            <h3 id="po-purchase-source" class="m-0 text-xs font-medium text-muted-foreground">采购来源</h3>
+            <dl class="mb-0 mt-2 grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div class="min-w-0 sm:col-span-2 lg:col-span-4">
+                <dt class="text-xs text-muted-foreground">采购主题</dt>
+                <dd class="m-0 break-words text-base font-semibold">{{ order.sourceOrderSubject || '未填写采购主题' }}</dd>
+              </div>
+              <div class="min-w-0">
+                <dt class="text-xs text-muted-foreground">合同内部单号</dt>
+                <dd class="m-0 break-words font-medium">{{ order.sourceContractName || '—' }}</dd>
+              </div>
+              <div class="min-w-0">
+                <dt class="text-xs text-muted-foreground">合同编号</dt>
+                <dd class="m-0 break-words">{{ order.sourceContractCode || '—' }}</dd>
+              </div>
+              <div class="min-w-0">
+                <dt class="text-xs text-muted-foreground">采购单号</dt>
+                <dd class="m-0 break-words"><SourcePurchaseLink v-if="order.sourceOrderCode" :order="order" code-only /><span v-else>—</span></dd>
+              </div>
+              <div class="min-w-0">
+                <dt class="text-xs text-muted-foreground">客户</dt>
+                <dd class="m-0 break-words">{{ order.customerName || '—' }}</dd>
+              </div>
+            </dl>
           </section>
+          <div class="flex min-w-0 flex-col gap-3" :class="{ 'accept-overview': canHandle }">
+            <Descriptions :column="{ xs: 1, sm: 2 }" size="small" bordered>
+              <Descriptions.Item :label="fromPurchase ? '采购员' : '下单人'">{{ order.requesterName }}<span v-if="order.requesterDeptName" class="text-muted-foreground">（{{ order.requesterDeptName }}）</span></Descriptions.Item>
+              <Descriptions.Item label="下单时间">{{ timeText(order.createTime) }}</Descriptions.Item>
+              <Descriptions.Item :label="fromPurchase ? '采购单交期' : '希望交货'">{{ dateText(order.requiredDate) || '没填' }}</Descriptions.Item>
+              <Descriptions.Item label="工厂交期">{{ dateText(order.promisedDate) || '—' }}</Descriptions.Item>
+              <Descriptions.Item v-if="order.purpose && !fromPurchase" :span="2" label="用途">{{ order.purpose }}</Descriptions.Item>
+              <Descriptions.Item v-if="order.remark" :span="2" label="备注">{{ order.remark }}</Descriptions.Item>
+              <Descriptions.Item v-if="order.reply" :span="2" :label="order.status === 'REJECTED' ? '退回原因' : '工厂回复'">
+                {{ order.reply }}<span class="text-muted-foreground"> — {{ order.handlerName }} {{ timeText(order.handledAt) }}</span>
+              </Descriptions.Item>
+            </Descriptions>
+
+            <section v-if="canHandle" class="flex min-w-0 flex-col justify-center gap-2 rounded-lg border border-primary/25 bg-primary/5 px-4 py-3">
+              <h3 class="m-0 text-base font-semibold">接单处理</h3>
+              <div class="accept-form-fields">
+                <label for="po-promised" class="flex flex-col gap-1 text-xs text-muted-foreground">
+                  回复交期（接单必填）
+                  <DatePicker id="po-promised" v-model:value="promisedDate" :disabled-date="disabledDate" class="w-full" />
+                </label>
+                <label for="po-reply" class="flex min-w-0 flex-col gap-1 text-xs text-muted-foreground">
+                  工厂回复（退回时必填）
+                  <Input id="po-reply" v-model:value="reply" :maxlength="255" placeholder="填写交期说明或退回原因" />
+                </label>
+              </div>
+            </section>
+          </div>
         </div>
 
         <Alert v-if="targetRefreshError" type="warning" show-icon message="参数已保存，订单刷新失败。请重新加载后再接单或保存工艺，以免覆盖新参数。">
           <template #action><Button size="small" :loading="targetRefreshing" @click="onTargetChanged">重新加载已保存参数</Button></template>
         </Alert>
 
-        <nav v-if="canHandle" ref="acceptNavigation" aria-label="接单信息" class="accept-navigation">
+        <nav v-if="canHandle" ref="acceptNavigation" aria-label="接单信息" class="order-navigation">
           <Button
             v-for="view in acceptViews"
             :key="view.key"
@@ -570,12 +573,12 @@ function producedQty(item: Api.Item) {
             :type="acceptView === view.key ? 'primary' : 'text'"
             @click="selectAcceptView(view.key)"
           >
-{{ view.label }}
-</Button>
+            {{ view.label }}
+          </Button>
         </nav>
 
-        <section v-show="!canHandle || acceptView === 'items'" aria-label="产品明细" class="grid gap-2" :class="{ 'accept-items-grid': canHandle }">
-          <h3 v-if="!canHandle" class="m-0 text-sm font-semibold">明细</h3>
+        <section id="po-detail-items" v-show="!canHandle || acceptView === 'items'" aria-label="产品明细" class="detail-section grid gap-3" :class="{ 'accept-items-grid': canHandle }" tabindex="-1">
+          <h3 v-if="!canHandle" class="m-0 text-base font-semibold">产品明细（{{ order.items.length }}）</h3>
           <Alert
             v-if="canHandle && incompleteItems.length > 0"
             class="col-span-full"
@@ -604,9 +607,9 @@ function producedQty(item: Api.Item) {
               <Button size="small" type="primary" @click="applyBatchRoute">套用到勾选的 {{ batchIds.length }} 个产品</Button>
             </span>
           </div>
-          <div v-for="i in order.items" :key="i.id" class="flex flex-wrap items-start justify-between gap-3 rounded-md border border-border px-3 py-2.5">
-            <div class="flex min-w-0 flex-1 flex-col">
-              <span :class="{ 'font-medium': canHandle }">{{ i.productName }}</span>
+          <article v-for="i in order.items" :key="i.id" class="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-border p-4">
+            <div class="flex w-full min-w-0 flex-col sm:w-auto sm:flex-1">
+              <h4 class="m-0 break-words text-base font-semibold">{{ i.productName }}</h4>
               <span class="text-xs text-muted-foreground">{{ i.productCode }} · {{ specText(i) }}</span>
               <span class="flex flex-wrap gap-x-3">
                 <Button v-if="canPlan" class="!px-0" type="link" size="small" :disabled="targetRefreshing || targetRefreshError" @click="editProductionConfig(i)">修改参数与工艺</Button>
@@ -684,8 +687,8 @@ function producedQty(item: Api.Item) {
                 </template>
               </span>
             </div>
-            <span class="flex shrink-0 flex-col items-end gap-1 text-right">
-              <span><b>{{ num(i.quantity) }}</b> {{ i.unit }}</span>
+            <span class="flex w-full flex-col items-start gap-1 sm:w-auto sm:shrink-0 sm:items-end sm:text-right">
+              <span class="text-muted-foreground">应做 <b class="text-base tabular-nums text-foreground">{{ num(i.quantity) }}</b> {{ i.unit }}</span>
               <span v-if="order.status !== 'SUBMITTED' && fromPurchase" class="text-xs text-muted-foreground">
                 已入库 <b class="text-foreground">{{ num(i.completedQuantity) }}</b>
                 <template v-if="num(i.shippedQuantity) > 0"> · 早期工厂出货 {{ num(i.shippedQuantity) }}</template>
@@ -697,17 +700,16 @@ function producedQty(item: Api.Item) {
               </span>
               <Button
                 v-if="canProgress && num(i.completedQuantity) < num(i.quantity)"
-                size="small"
                 type="primary"
                 @click="openDelivery(i)"
               >
                 {{ fromPurchase ? '生产入库' : '交货' }}
               </Button>
             </span>
-          </div>
+          </article>
         </section>
 
-        <div v-if="fromPurchase" v-show="!canHandle || acceptView === 'purchase'" class="flex flex-col gap-4">
+        <div id="po-detail-purchase" v-if="fromPurchase" v-show="!canHandle || acceptView === 'purchase'" class="detail-section flex flex-col gap-4" tabindex="-1">
           <PurchaseSheet :order-id="order.id" :items="order.items" @reference="purchaseReference = $event" />
           <AuxPanel
             v-if="mode === 'factory'"
@@ -718,12 +720,15 @@ function producedQty(item: Api.Item) {
             :route-options="routeOptions"
           />
         </div>
-        <section v-if="canPlan" v-show="!canHandle || acceptView === 'stock'" aria-label="库存匹配">
-          <SupplyMatch :items="order.items" :order-id="order.id" />
-        </section>
-        <section v-if="canPlan" v-show="!canHandle || acceptView === 'material'" aria-label="用料逆推">
-          <MaterialPlan ref="materialPlan" :editable="canPlan" :order-id="order.id" />
-        </section>
+        <div v-if="showStockTrace || canPlan" v-show="!canHandle || acceptView === 'stock' || acceptView === 'material'" id="po-detail-supply" class="detail-section flex flex-col gap-4" tabindex="-1">
+          <OrderStockTrace v-if="showStockTrace" :items="order.items" :order-id="order.id" />
+          <section v-if="canPlan" v-show="!canHandle || acceptView === 'stock'" aria-label="库存匹配">
+            <SupplyMatch :items="order.items" :order-id="order.id" />
+          </section>
+          <section v-if="canPlan" v-show="!canHandle || acceptView === 'material'" aria-label="用料逆推">
+            <MaterialPlan ref="materialPlan" :editable="canPlan" :order-id="order.id" />
+          </section>
+        </div>
 
         <p v-if="order.status === 'ACCEPTED' && fromPurchase" class="m-0 text-xs text-muted-foreground">
           这张单来自采购单：做好的货点「生产入库」开入库单进本厂仓库，采购单到货同一步更新；
@@ -733,8 +738,8 @@ function producedQty(item: Api.Item) {
           做好的货点「交货」交到仓库，完成数量按交货数累加。工序单关联这张单只用来看各道工序的进度。
         </p>
 
-        <section v-if="deliveries.length > 0" class="flex flex-col gap-2">
-          <h3 class="m-0 text-sm font-semibold">
+        <section v-if="deliveries.length > 0" id="po-detail-deliveries" class="detail-section flex flex-col gap-2" tabindex="-1">
+          <h3 class="m-0 text-base font-semibold">
             {{ fromPurchase ? '入库记录' : '交货记录' }}（{{ deliveries.filter((d) => d.status === 'DELIVERED').length }}）
           </h3>
           <div
@@ -836,11 +841,12 @@ function producedQty(item: Api.Item) {
           </button>
           <span v-else>基础参数已确认，请核对产品工艺</span>
         </div>
-        <Button :loading="busy" :disabled="loading || loadError || materialSaving || targetRefreshing || targetRefreshError" danger @click="reject">退回</Button>
+        <Button :disabled="detailBusy" size="large" @click="open = false">关闭</Button>
+        <Button :loading="busy" :disabled="loading || loadError || materialSaving || targetRefreshing || targetRefreshError" danger size="large" @click="reject">退回</Button>
         <Button :loading="busy || targetRefreshing" :disabled="loading || loadError || materialSaving || targetRefreshError" type="primary" size="large" @click="accept">接单</Button>
       </div>
     </template>
-  </component>
+  </FactoryDialog>
   <ItemProductionConfigModal
     v-if="order && configItemId"
     v-model:open="configOpen"
@@ -864,16 +870,20 @@ function producedQty(item: Api.Item) {
   gap: 12px;
 }
 
-.accept-navigation {
+.order-navigation {
   position: sticky;
   top: 0;
   z-index: 2;
   display: flex;
-  flex-wrap: wrap;
   gap: 4px;
   padding: 6px 0;
+  overflow: auto;
   background: hsl(var(--background));
   border-bottom: 1px solid hsl(var(--border));
+}
+
+.detail-section {
+  scroll-margin-top: 55px;
 }
 
 .accept-footer {
@@ -890,6 +900,11 @@ function producedQty(item: Api.Item) {
 }
 
 @media (min-width: 1050px) {
+  .detail-overview {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+
   .accept-overview {
     display: grid;
     grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
@@ -904,26 +919,17 @@ function producedQty(item: Api.Item) {
   .accept-form-fields {
     grid-template-columns: minmax(0, 1fr);
   }
-}
-</style>
 
-<style>
-.production-accept-dialog .ant-modal-content {
-  display: flex;
-  flex-direction: column;
-  min-height: min(700px, calc(100dvh - 32px));
-  max-height: calc(100dvh - 32px);
-}
+  .order-navigation {
+    flex-wrap: wrap;
+  }
 
-.production-accept-dialog .ant-modal-body {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: auto;
-  overscroll-behavior: contain;
-}
+  .order-navigation > .ant-btn {
+    padding-inline: 8px;
+  }
 
-.production-accept-dialog .ant-modal-header,
-.production-accept-dialog .ant-modal-footer {
-  flex: none;
+  .detail-section {
+    scroll-margin-top: 92px;
+  }
 }
 </style>

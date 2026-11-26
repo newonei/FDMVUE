@@ -89,7 +89,7 @@ vi.mock('../schedule/modules/task-manage.vue', () => ({
 vi.mock('./modules/create-modal.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
-vi.mock('./modules/order-drawer.vue', () => ({
+vi.mock('./modules/order-detail-modal.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
 vi.mock('./modules/schedule-modal.vue', () => ({

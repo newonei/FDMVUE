@@ -627,7 +627,7 @@ describe('production order page', () => {
 
     button('去接单').click();
     await flush();
-    const modal = document.querySelector<HTMLElement>('.production-accept-dialog.ant-modal-centered[role="dialog"]')!;
+    const modal = document.querySelector<HTMLElement>('.factory-dialog.ant-modal-centered[role="dialog"]')!;
     expect(modal).toBeTruthy();
     expect(modal.textContent).toContain('接单处理');
     expect(modal.textContent).toContain('工艺 · 单层散装');
@@ -922,12 +922,15 @@ describe('production order page', () => {
     await flush();
 
     const panel = document.querySelector<HTMLElement>('#factory-order-fulfillment-panel')!;
+    const dialog = panel.closest('.factory-dialog.ant-modal-centered[role="dialog"]')!;
+    expect(dialog).toBeTruthy();
+    expect(button('关闭', dialog.querySelector('.ant-modal-footer')!)).toBeDefined();
     expect(panel?.textContent).toContain('补产指引');
     expect(panel.textContent).toContain('应做');
     expect(panel.textContent).toContain('已入库');
     expect(panel.textContent).toContain('还差');
     expect(panel.textContent).not.toContain('DZ2400008');
-    const rows = [...panel.querySelectorAll('tbody tr')];
+    const rows = [...panel.querySelectorAll('ul[aria-label="待补产品"] > li')];
     expect(rows).toHaveLength(3);
     for (const [code, expected] of [
       ['DZ2400010', [200, 199, 1]],
@@ -947,7 +950,7 @@ describe('production order page', () => {
     expect(taskOnlyRow.textContent).not.toContain('TASK-1');
 
     const stockRow = rows.find((row) => row.textContent?.includes('DZ2400009'))!;
-    expect(stockRow.textContent).toContain('从「冲裁」接做');
+    expect(stockRow.textContent).toContain('选定批次，再预览需要接续的工序');
     button('核对库存', stockRow).click();
     await flush();
     expect(stockRow.textContent).toContain('YH-1');
@@ -986,7 +989,7 @@ describe('production order page', () => {
     expect(button('结束这张单')).toBeDefined();
   });
 
-  it('opens supplementation for the selected shortfall using the next available stock process', async () => {
+  it('opens the batch and route preview for the selected order item', async () => {
     mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:handle', 'fdmgongchang:schedule:query', 'fdmgongchang:schedule:confirm');
     const accepted: Api.Order = {
       ...order,
@@ -1015,18 +1018,19 @@ describe('production order page', () => {
     button('查看').click();
     await flush();
     const panel = document.querySelector<HTMLElement>('#factory-order-fulfillment-panel')!;
-    const row = [...panel.querySelectorAll('tbody tr')].find((element) => element.textContent?.includes('SHORT-B'))!;
+    const row = [...panel.querySelectorAll('ul[aria-label="待补产品"] > li')].find((element) => element.textContent?.includes('SHORT-B'))!;
     button('补派工', row).click();
     await flush();
     expect(document.querySelector('[aria-label="补派工表单"]')).not.toBeNull();
-    expect(mocks.showShortageDispatch).toHaveBeenLastCalledWith(expect.objectContaining({
+    expect(mocks.showShortageDispatch).toHaveBeenLastCalledWith({
       orderId: 9,
       orderNo: 'GD-SHORTFALL',
       itemId: 93,
+      productCode: 'SHORT-B',
+      productName: '按本行补派工的产品',
       remaining: 4,
-      suggestedProcess: 'PUNCH',
-      suggestedQuantity: 3,
-    }), 1);
+      unit: accepted.items[1]?.unit,
+    }, 1);
     expect(document.querySelector('.ant-tabs-tab-active')?.textContent).toContain('本厂订单');
     expect(mocks.createManualSchedule).not.toHaveBeenCalled();
     expect(mocks.confirmSchedule).not.toHaveBeenCalled();
@@ -1131,10 +1135,10 @@ describe('production order page', () => {
 
     const laserRoute = document.querySelector('[aria-label="po-item-91 要走的工序"]')!;
     const plainRoute = document.querySelector('[aria-label="po-item-92 要走的工序"]')!;
-    expect(laserRoute.closest('.rounded-md')?.textContent).toContain('激光雕刻');
-    expect(laserRoute.closest('.rounded-md')?.textContent).toContain('RED');
-    expect(plainRoute.closest('.rounded-md')?.textContent).toContain('无雕刻');
-    expect(plainRoute.closest('.rounded-md')?.textContent).toContain('BLUE');
+    expect(laserRoute.closest('article')?.textContent).toContain('激光雕刻');
+    expect(laserRoute.closest('article')?.textContent).toContain('RED');
+    expect(plainRoute.closest('article')?.textContent).toContain('无雕刻');
+    expect(plainRoute.closest('article')?.textContent).toContain('BLUE');
     expect([...laserRoute.querySelectorAll('button')].find((chip) => chip.textContent?.trim() === '雕刻')?.getAttribute('aria-pressed')).toBe('false');
     expect(mocks.getPurchaseSheet).toHaveBeenCalledOnce();
   });
@@ -1241,6 +1245,6 @@ describe('production order page', () => {
       foldingType: '八折', itemId: 91, previewKey: 'current', process: 'ENGRAVE', quantity: 500, reason: '车间核对后道尚未加工',
     });
     expect(mocks.get).toHaveBeenCalledTimes(2);
-    expect(document.querySelector('.ant-drawer-body')?.textContent).toContain('雕刻');
+    expect(document.querySelector('.factory-dialog-panel .ant-modal-body')?.textContent).toContain('雕刻');
   });
 });

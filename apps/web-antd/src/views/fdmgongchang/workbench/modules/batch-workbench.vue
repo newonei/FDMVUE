@@ -105,11 +105,14 @@ onMounted(load);
 function issueProblem(job: Job) {
   if (job.process?.code === 'MIX') return;
   if (!job.sourceStage || job.picks.length === 0 || job.picks.some((pick) => !(pick.qty > 0))) {
-    return '请选择实际领料批次并填写领取数量';
+    return job.prepare?.followActualBatches ? '请核对已选库存或等上道报出合格批次后刷新' : '请选择实际领料批次并填写领取数量';
   }
   if (job.process?.code === 'LAMINATE' &&
     !['BACK', 'FRONT'].every((side) => job.picks.some((pick) => pick.side === side))) {
     return '请分别选择正面和反面的领料';
+  }
+  if (job.prepare?.followActualBatches && issueShortages(job).some((line) => line.stock.stage !== 'AUX')) {
+    return '领料数量超过当前可领批次，请调整数量';
   }
   return slicePlanThicknessError(job, job.picks.map((pick) => ({ quantity: pick.qty, stock: pick.stock })));
 }

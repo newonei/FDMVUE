@@ -37,9 +37,9 @@ import {
   reportOrder,
 } from '#/api/fdmgongchang/stage-stock';
 import { matchWageItems } from '#/api/fdmgongchang/wage';
-import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { routeIncludes } from '../../production-order/shared';
+import FactoryDialog from '../../shared/factory-dialog.vue';
 import LaminationCounters from '../../shared/lamination-counters.vue';
 import { laminationDefects } from '../../shared/lamination-report';
 import { quantityPrecision } from '../../shared/quantity';
@@ -72,7 +72,7 @@ import {
 import AttrFields from './attr-fields.vue';
 
 /**
- * 工序单抽屉：
+ * 工序单弹窗：
  * - create：选工序 → 从上游库存领料 → 选操作人 → 领料并报完工，或只领料（车间在制）；
  * - report：对在制工序单报产出，可以只登记这一批（继续在制），也可以报完关单。
  */
@@ -539,6 +539,7 @@ watch(open, async (value) => {
   pieceMatches.value = [];
   pieceMatchesLoaded.value = false;
   if (props.mode === 'report' && props.orderId) {
+    order.value = undefined;
     orderLoading.value = true;
     try {
       order.value = await getOrder(props.orderId);
@@ -859,6 +860,7 @@ function localErrors() {
 // ===== 分步填写（只用于新建）：工序与领料 → 产出与计件（领料同时报产出时）→ 其他信息 =====
 type StepKey = 'input' | 'other' | 'output';
 const step = ref<StepKey>('input');
+const stepHeader = ref<HTMLElement>();
 const steps = computed<Array<{ key: StepKey; title: string }>>(() => [
   { key: 'input', title: '工序与领料' },
   ...(finish.value ? [{ key: 'output' as const, title: '产出与计件' }] : []),
@@ -901,6 +903,15 @@ function gotoStep(index: number) {
 watch(finish, () => {
   if (!steps.value.some((s) => s.key === step.value)) step.value = 'input';
 });
+
+watch(
+  step,
+  () => {
+    const body = stepHeader.value?.closest<HTMLElement>('.ant-modal-body');
+    if (body) body.scrollTop = 0;
+  },
+  { flush: 'post' },
+);
 
 function outputPayload(): Api.OrderOutput[] {
   return outputs.value
@@ -977,7 +988,7 @@ async function submit() {
     }
     open.value = false;
   } catch {
-    // 后端错误已由全局提示展示，保留抽屉内容方便修改
+    // 后端错误已由全局提示展示，保留表单内容方便修改
   } finally {
     submitting.value = false;
   }
@@ -997,33 +1008,37 @@ const summaryText = computed(() => {
 </script>
 
 <template>
-  <FdmResizableDrawer
-    resize-key="factory-stage-order"
+  <FactoryDialog
     v-model:open="open"
+    :busy="submitting"
     :title="
-      mode === 'create' ? '新建工序单' : `报产出 · ${order?.orderNo ?? ''}`
+      mode === 'create' ? '新建工序单' : order ? `报产出 · ${order.orderNo}` : '报产出'
     "
-    :width="860"
-    class="max-w-full"
     destroy-on-close
   >
     <Spin :spinning="orderLoading">
-      <div class="flex flex-col gap-6">
-        <Steps
+      <div
+        class="grid gap-5"
+        :class="{ 'xl:grid-cols-[minmax(16rem,20rem)_minmax(0,1fr)] xl:items-start': mode === 'report' }"
+      >
+        <div
           v-if="mode === 'create'"
-          :current="stepIndex"
-          :items="steps.map((s) => ({ title: s.title }))"
-          size="small"
-          @change="gotoStep"
-        />
-        <!-- 1 选择工序 -->
-        <section v-if="mode === 'create'" v-show="shown('input')" class="flex flex-col gap-2">
-          <h3 class="m-0 flex items-center gap-2 text-sm font-semibold">
-            <span
-              class="inline-flex size-5 items-center justify-center rounded-full bg-primary/10 text-xs text-primary"
-              >1</span>
-            选择工序
-          </h3>
+          ref="stepHeader"
+          class="rounded-lg border border-border bg-card px-4 py-3"
+        >
+          <Steps
+            :current="stepIndex"
+            :items="steps.map((s) => ({ title: s.title }))"
+            size="small"
+            @change="gotoStep"
+          />
+        </div>
+        <section
+          v-if="mode === 'create'"
+          v-show="shown('input')"
+          class="flex min-w-0 flex-col gap-3"
+        >
+          <h3 class="m-0 text-base font-semibold">选择工序</h3>
           <Radio.Group
             :value="processCode"
             button-style="solid"
@@ -1044,57 +1059,69 @@ const summaryText = computed(() => {
           </div>
         </section>
 
-        <section v-if="mode === 'create'" v-show="shown('input')" class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <label
-              v-if="productionItemOptions.length > 0 || linkedProductionItemId"
-              for="order-production-item"
-              class="flex flex-col gap-1 text-xs text-muted-foreground sm:col-span-2"
-            >
-              关联工厂订单（选填）
-              <Select
-                id="order-production-item"
-                v-model:value="linkedProductionItemId"
-                :options="productionItemOptions"
-                allow-clear
-                option-filter-prop="label"
-                placeholder="选内部部门下给本厂、已接单的生产订单"
-                show-search
-              />
-              <span v-if="linkedProductionItemId">
-                关联后在工厂订单 {{ linkedProductionOrderNo }} 的工序进度里能看到这批产出；订单完成数量按交货算，做好后在「工厂排单」里交货。
-              </span>
-            </label>
-            <label
-              v-if="scheduleTasks.length > 0"
-              for="order-schedule-task"
-              class="flex flex-col gap-1 text-xs text-muted-foreground sm:col-span-2"
-            >
-              关联排单任务（选填）
-              <Select
-                id="order-schedule-task"
-                v-model:value="scheduleTaskId"
-                :options="scheduleTaskOptions"
-                allow-clear
-                option-filter-prop="label"
-                placeholder="选这张单在做哪个排单任务，用来对比计划与实际"
-                show-search
-              />
-            </label>
-            <label v-if="processCode === 'SLICE' && !scheduleTaskId && (linkedProductionItem?.targetConstructionType ?? linkedProductionItem?.targetSuggested?.constructionType) === 'DOUBLE_LAYER'" class="flex flex-col gap-1 text-xs text-muted-foreground">
-              本次开片层面
-              <Select id="order-slice-side" v-model:value="sliceLayerSide" :options="[{ value: 'FRONT', label: '正面层' }, { value: 'BACK', label: '反面层' }]" placeholder="选正面层或反面层厚度" />
-            </label>
-        </section>
-
-        <!-- 2 领料 -->
-        <section v-show="shown('input')" class="flex flex-col gap-2">
-          <h3
-            class="m-0 flex flex-wrap items-center gap-2 text-sm font-semibold"
+        <div
+          v-if="mode === 'create' && (productionItemOptions.length || linkedProductionItemId || scheduleTasks.length)"
+          v-show="shown('input')"
+          class="grid grid-cols-1 gap-3 rounded-lg border border-border bg-muted/30 p-4 sm:grid-cols-2"
+        >
+          <label
+            v-if="productionItemOptions.length > 0 || linkedProductionItemId"
+            for="order-production-item"
+            class="flex min-w-0 flex-col gap-1 text-sm text-muted-foreground"
           >
-            <span
-              v-if="mode === 'create'"
-              class="inline-flex size-5 items-center justify-center rounded-full bg-primary/10 text-xs text-primary"
-              >2</span>
+            关联工厂订单（选填）
+            <Select
+              id="order-production-item"
+              v-model:value="linkedProductionItemId"
+              :options="productionItemOptions"
+              allow-clear
+              option-filter-prop="label"
+              placeholder="选内部部门下给本厂、已接单的生产订单"
+              show-search
+            />
+            <span v-if="linkedProductionItemId" class="text-xs">
+              关联后在工厂订单 {{ linkedProductionOrderNo }} 的工序进度里能看到这批产出；订单完成数量按交货算，做好后在「工厂排单」里交货。
+            </span>
+          </label>
+          <label
+            v-if="scheduleTasks.length > 0"
+            for="order-schedule-task"
+            class="flex min-w-0 flex-col gap-1 text-sm text-muted-foreground"
+          >
+            关联排单任务（选填）
+            <Select
+              id="order-schedule-task"
+              v-model:value="scheduleTaskId"
+              :options="scheduleTaskOptions"
+              allow-clear
+              option-filter-prop="label"
+              placeholder="选这张单在做哪个排单任务，用来对比计划与实际"
+              show-search
+            />
+          </label>
+          <label
+            v-if="processCode === 'SLICE' && !scheduleTaskId && (linkedProductionItem?.targetConstructionType ?? linkedProductionItem?.targetSuggested?.constructionType) === 'DOUBLE_LAYER'"
+            for="order-slice-side"
+            class="flex flex-col gap-1 text-sm text-muted-foreground"
+          >
+            本次开片层面
+            <Select
+              id="order-slice-side"
+              v-model:value="sliceLayerSide"
+              :options="[{ value: 'FRONT', label: '正面层' }, { value: 'BACK', label: '反面层' }]"
+              placeholder="选正面层或反面层厚度"
+            />
+          </label>
+        </div>
+
+        <section
+          v-show="shown('input')"
+          class="flex min-w-0 flex-col gap-3"
+          :class="{ 'rounded-lg border border-border bg-muted/30 p-4 xl:row-span-2': mode === 'report' }"
+        >
+          <h3
+            class="m-0 flex flex-wrap items-center gap-2 text-base font-semibold"
+          >
             {{ mode === 'create' ? '领料' : '已领料' }}
             <span class="text-xs font-normal text-muted-foreground">
               {{
@@ -1287,19 +1314,22 @@ const summaryText = computed(() => {
                 />
               </template>
             </Table>
-            <Radio.Group v-model:value="finish" class="text-sm">
-              <Radio :value="true">领料并报完工</Radio>
-              <Radio :value="false">只领料，稍后报完工（进入车间在制）</Radio>
-            </Radio.Group>
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-border bg-muted/30 p-3">
+              <span class="font-medium">本次操作</span>
+              <Radio.Group v-model:value="finish" aria-label="本次操作" class="flex flex-wrap gap-y-2">
+                <Radio :value="true">领料并报完工</Radio>
+                <Radio :value="false">只领料，稍后报完工（进入车间在制）</Radio>
+              </Radio.Group>
+            </div>
           </template>
           <div
             v-else
-            class="flex flex-col gap-1 rounded-md border border-border p-3 text-xs"
+            class="flex flex-col gap-2 text-sm"
           >
             <div
               v-for="(line, index) in inputs"
               :key="index"
-              class="flex flex-wrap gap-x-3"
+              class="flex flex-wrap gap-x-3 gap-y-1 rounded-md border border-border bg-card p-3 break-all"
             >
               <span class="font-mono">{{ line.stock.itemCode }}</span>
               <span>{{
@@ -1332,25 +1362,24 @@ const summaryText = computed(() => {
               {{ outputStageOption?.unit }}
             </div>
           </div>
-          <Radio.Group
-            v-if="mode === 'report'"
-            v-model:value="reportFinish"
-            class="text-sm"
-          >
-            <Radio :value="true">报完并关单</Radio>
-            <Radio :value="false">只登记这一批，单子继续在制</Radio>
-          </Radio.Group>
+          <div v-if="mode === 'report'" class="flex flex-col gap-2 border-t border-border pt-3">
+            <span class="font-medium">本次操作</span>
+            <Radio.Group v-model:value="reportFinish" aria-label="本次操作" class="flex flex-col gap-2">
+              <Radio :value="true">报完并关单</Radio>
+              <Radio :value="false">只登记这一批，单子继续在制</Radio>
+            </Radio.Group>
+          </div>
         </section>
 
-        <!-- 3 产出 -->
-        <section v-if="showOutputs" v-show="shown('output')" class="flex flex-col gap-2">
+        <section
+          v-if="showOutputs"
+          v-show="shown('output')"
+          class="flex min-w-0 flex-col gap-3"
+          :class="{ 'xl:col-start-2': mode === 'report' }"
+        >
           <h3
-            class="m-0 flex flex-wrap items-center gap-2 text-sm font-semibold"
+            class="m-0 flex flex-wrap items-center gap-2 text-base font-semibold"
           >
-            <span
-              v-if="mode === 'create'"
-              class="inline-flex size-5 items-center justify-center rounded-full bg-primary/10 text-xs text-primary"
-              >3</span>
             {{ mode === 'report' && reportedBefore > 0 ? '这一批产出' : '产出入库' }}
             <span class="text-xs font-normal text-muted-foreground">良品入{{ outputStageOption?.label }}库存；残次品只登记数量{{
                 mode === 'report' && reportFinish && reportedBefore > 0
@@ -1483,7 +1512,12 @@ const summaryText = computed(() => {
         </section>
 
         <!-- 计件 -->
-        <section v-if="showOutputs && pieceMatchesLoaded" v-show="shown('output')" class="flex flex-col gap-2">
+        <section
+          v-if="showOutputs && pieceMatchesLoaded"
+          v-show="shown('output')"
+          class="flex min-w-0 flex-col gap-2"
+          :class="{ 'xl:col-start-2': mode === 'report' }"
+        >
           <h3 class="m-0 flex flex-wrap items-center gap-2 text-sm font-semibold">
             计件
             <span class="text-xs font-normal text-muted-foreground">{{ isSlice ? '开片按本次良品体积计价，参与人员平分同一笔工资，残次不计薪' : '按产出规格推荐计价项目；两人各算全量的（如压花送片、接片）各填一行' }}</span>
@@ -1549,14 +1583,7 @@ const summaryText = computed(() => {
           </template>
         </section>
 
-        <!-- 4 其他信息 -->
-        <section v-if="mode === 'create'" v-show="shown('other')" class="flex flex-col gap-2">
-          <h3 class="m-0 flex items-center gap-2 text-sm font-semibold">
-            <span
-              class="inline-flex size-5 items-center justify-center rounded-full bg-primary/10 text-xs text-primary"
-              >{{ finish ? 4 : 3 }}</span>
-            其他信息
-          </h3>
+        <section v-if="mode === 'create'" v-show="shown('other')" class="flex flex-col gap-3">
           <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <label
               for="order-operator"
@@ -1667,14 +1694,28 @@ const summaryText = computed(() => {
           </template>
         </Alert>
         <div class="flex flex-wrap items-center justify-between gap-3">
-          <span class="text-sm tabular-nums">{{ summaryText }}</span>
-          <div class="flex gap-2">
-            <Button @click="open = false">取消</Button>
-            <Button v-if="mode === 'create' && stepIndex > 0" @click="prevStep">上一步</Button>
-            <Button v-if="mode === 'create' && !isLastStep" type="primary" @click="nextStep">
+          <span class="text-sm tabular-nums" aria-live="polite">{{ summaryText }}</span>
+          <div class="ml-auto flex flex-wrap justify-end gap-2">
+            <Button :disabled="submitting" size="large" @click="open = false">取消</Button>
+            <Button
+              v-if="mode === 'create' && stepIndex > 0"
+              :disabled="submitting"
+              size="large"
+              @click="prevStep"
+            >
+              上一步
+            </Button>
+            <Button v-if="mode === 'create' && !isLastStep" size="large" type="primary" @click="nextStep">
               下一步：{{ steps[stepIndex + 1]?.title }}
             </Button>
-            <Button v-else :loading="submitting" type="primary" @click="submit">
+            <Button
+              v-else
+              :disabled="mode === 'report' && (orderLoading || !order)"
+              :loading="submitting"
+              size="large"
+              type="primary"
+              @click="submit"
+            >
               {{
                 mode === 'report'
                   ? reportFinish
@@ -1689,5 +1730,5 @@ const summaryText = computed(() => {
         </div>
       </div>
     </template>
-  </FdmResizableDrawer>
+  </FactoryDialog>
 </template>

@@ -135,8 +135,8 @@ function editConfirmed(task: Api.Task) {
 }
 
 // ========== 接单制：关闭任务、报工差额 ==========
-const finished = (task: Api.Task) => task.status === 'DONE' || task.status === 'CLOSED';
-/** 「再派一个」补差额的原任务：追加成功后记成已补派。 */
+const finished = (task: Api.Task) => task.completedBySupplement || task.status === 'DONE' || task.status === 'CLOSED';
+/** 「再派一个」补差额的原任务。 */
 const resendFor = ref<Api.Task>();
 
 /** 补派默认今天；排单范围已经过了就放在最后一天（超出范围的要另开一份手动派工）。 */
@@ -215,10 +215,7 @@ async function submitForm(task: Api.PlanTask) {
       : [...tasks.value, next];
     return;
   }
-  await saveScheduleTask({ id: editingTaskId.value, scheduleId: props.schedule.id, task });
-  if (resendFor.value && !editingTaskId.value) {
-    await handleScheduleTaskShortage({ id: resendFor.value.id, note: `已补派 ${Number(task.quantity)}` });
-  }
+  await saveScheduleTask({ id: editingTaskId.value, parentTaskId: resendFor.value?.id, scheduleId: props.schedule.id, task });
   resendFor.value = undefined;
   message.success(editingTaskId.value ? '任务已修改，对应工序车间已同步' : '任务已追加，对应工序车间已同步');
   emit('changed', props.schedule.id);
@@ -240,7 +237,8 @@ function removeConfirmed(task: Api.Task) {
 
 function percent(task: Api.Task) {
   const plan = Number(task.quantity);
-  return plan > 0 ? Math.min(100, Math.round((Number(task.actualQuantity) / plan) * 100)) : 0;
+  const good = Number(task.actualQuantity) + Number(task.supplementGoodQuantity ?? 0);
+  return plan > 0 ? Math.min(100, Math.round((good / plan) * 100)) : 0;
 }
 
 /** 下发前先看生成方案之后数据变了什么：有变化时列出来让排单员再确认（按现在的数据重新校验，通过就能下发）。 */
@@ -431,13 +429,15 @@ function discard() {
             <div class="flex flex-wrap items-center justify-between gap-2">
               <b class="text-base">{{ task.sequence }}. {{ PROCESS_LABELS[task.process] ?? task.process }}</b>
               <span class="flex flex-wrap items-center gap-1.5">
-                <Tag v-if="task.status" :color="TASK_STATUS[task.status].color" class="m-0">{{ TASK_STATUS[task.status].label }}</Tag>
+                <Tag v-if="task.completedBySupplement" color="success" class="m-0">已完成</Tag>
+                <Tag v-else-if="task.status" :color="TASK_STATUS[task.status].color" class="m-0">{{ TASK_STATUS[task.status].label }}</Tag>
                 <span class="font-mono text-xs">{{ task.contractCode || '备货' }}</span>
               </span>
             </div>
             <div class="break-words text-base font-medium leading-6">
               <span class="text-xs font-normal text-muted-foreground">关联产品：</span>{{ task.product || '备货' }}
             </div>
+            <div v-if="task.parentTaskId" class="text-xs text-muted-foreground">补派子任务 · 原任务 #{{ task.parentTaskId }}</div>
             <TaskMaterials v-if="task.output || task.inputs?.length" :task="task" card-view />
             <div v-else class="break-words text-base font-semibold leading-6">
               <span class="text-xs font-normal text-muted-foreground">产出：</span>{{ taskMaterialText(task.output, task.spec) }}
@@ -448,7 +448,7 @@ function discard() {
             </div>
             <div v-if="task.shortage" class="flex flex-wrap items-center justify-between gap-2 rounded bg-warning/10 px-2 py-1 text-xs text-warning">
               <span>报工差 <strong class="text-lg tabular-nums">{{ Number(task.shortage) }}</strong> {{ task.unit }}，待处理</span>
-              <span v-if="canConfirm && schedule.status === 'CONFIRMED'" class="flex gap-1">
+              <span v-if="!task.parentTaskId && canConfirm && schedule.status === 'CONFIRMED'" class="flex gap-1">
                 <Button size="small" type="link" @click="resend(task)">再派一个</Button>
                 <Button size="small" type="link" @click="dropShortage(task)">不补了</Button>
               </span>
@@ -459,6 +459,7 @@ function discard() {
               <Progress :percent="percent(task)" :show-info="false" class="m-0 min-w-20 flex-1" size="small" />
               <span class="flex flex-wrap items-baseline justify-end gap-x-1.5 text-sm tabular-nums">
                 实际 <strong class="text-xl text-primary">{{ Number(task.actualQuantity) }}</strong>
+                <template v-if="Number(task.supplementGoodQuantity) > 0">＋ 补派良品 <strong>{{ Number(task.supplementGoodQuantity) }}</strong></template>
                 / 计划 <strong class="text-lg">{{ Number(task.quantity) }}</strong> {{ task.unit }}
               </span>
             </div>
@@ -469,7 +470,7 @@ function discard() {
                   <Button size="small" type="link" @click="editConfirmed(task)">{{ task.status === 'OPEN' ? '派单 / 改量' : '改派 / 改量' }}</Button>
                   <Button size="small" type="link" @click="openClose(task)">关闭</Button>
                 </template>
-                <Button v-if="task.orderCount === 0 && task.status !== 'DONE'" danger size="small" type="link" @click="removeConfirmed(task)">删</Button>
+                <Button v-if="task.orderCount === 0 && task.status !== 'DONE' && !task.completedBySupplement" danger size="small" type="link" @click="removeConfirmed(task)">删</Button>
               </span>
             </div>
           </div>

@@ -65,9 +65,10 @@ const boardOptions = reactive<Record<number, Api.BatchOptions>>({});
 const boardLoading = reactive<Record<number, boolean>>({});
 const boardErrors = reactive<Record<number, string>>({});
 const foldingOptions = ['二折', '三折', '四折', '六折', '八折', '十折', '十二折'].map((value) => ({ value }));
-const reportingEnded = (task: ScheduleApi.Task) => task.status === 'DONE' || task.status === 'CLOSED';
+const reportingEnded = (task: ScheduleApi.Task) => task.status === 'DONE' || task.status === 'CLOSED' || task.completedBySupplement === true;
 const canReport = (task: ScheduleApi.Task) => !!process.value && !reportingEnded(task) && !task.activeOrderId && !submittedIds.value.includes(task.id);
-const canAssign = (task: ScheduleApi.Task) => !task.orderCount && !task.activeOrderId && ['CLAIMED', 'OPEN'].includes(task.status ?? 'OPEN');
+const canAssign = (task: ScheduleApi.Task) => !task.completedBySupplement && !task.orderCount && !task.activeOrderId
+  && ['CLAIMED', 'OPEN'].includes(task.status ?? 'OPEN');
 const dispatchDisabled = computed(() => selectedTasks.value.length === 0 || selectedTasks.value.some((task) => !canAssign(task)));
 const operators = ref<FdmgongchangFactoryApi.Operator[]>([]);
 const operatorsLoading = ref(false);
@@ -104,15 +105,17 @@ async function dispatch() {
   finally { if (version === contextVersion) busy.value = false; }
 }
 const selected = (task: ScheduleApi.Task) => selectedIds.value.includes(task.id);
+const batchAvailability = (task: ScheduleApi.Task) => task.followActualBatches ? toNumber(task.actualBatchAvailable) : undefined;
 function remainingReportQuantity(task: ScheduleApi.Task, planned: unknown) {
   const expected = toNumber(planned);
   if (expected === undefined) return undefined;
-  const remaining = roundQty(Math.max(0, expected - (toNumber(task.actualQuantity) ?? 0) - (toNumber(task.defectQuantity) ?? 0)));
+  const unreported = Math.max(0, expected - (toNumber(task.actualQuantity) ?? 0) - (toNumber(task.defectQuantity) ?? 0));
+  const remaining = roundQty(Math.min(unreported, batchAvailability(task) ?? unreported));
   return quantityPrecision(task.unit ?? process.value?.outputUnit) === 0 ? Math.floor(remaining) : remaining;
 }
 function taskDraft(task: ScheduleApi.Task): Draft {
   const taskVersion = JSON.stringify([task.quantity, task.actualQuantity, task.defectQuantity ?? 0,
-    task.sliceBoardYield, task.output, task.inputs, task.workerIds, task.activeOrderId, task.status]);
+    task.sliceBoardYield, task.output, task.inputs, task.workerIds, task.activeOrderId, task.status, task.completedBySupplement, task.actualBatchAvailable]);
   const existing = drafts[task.id];
   if (existing?.taskVersion === taskVersion) return existing;
   const quantity = toNumber(task.quantity) ?? 0;
@@ -198,6 +201,10 @@ async function batchReport() {
     const good = Number(draft.goodQuantity ?? 0); const defect = Number(draft.defectQuantity ?? 0);
     if (!Number.isFinite(good) || !Number.isFinite(defect) || good < 0 || defect < 0 || good + defect <= 0) {
       warning.value = `任务 #${task.id} 请填写本次完成数量或残次品数量，合计必须大于 0。`; return;
+    }
+    const available = batchAvailability(task);
+    if (available !== undefined && (props.process === 'LAMINATE' ? good : good + defect) > available) {
+      warning.value = `任务 #${task.id} 当前可领批次可做 ${formatQty(available)} ${task.unit ?? ''}，请调整报工数量或等上道报工后刷新。`; return;
     }
     if (props.process === 'MIX' && !draft.boardItemCode) { warning.value = `任务 #${task.id} 请先选择本次报工的板材。`; return; }
     if (props.process === 'FOLD' && !draft.foldingType.trim()) { warning.value = `任务 #${task.id} 请填写本次折叠类型。`; return; }
@@ -373,8 +380,13 @@ v-model:expanded-row-keys="expandedOrderKeys" class="workshop-order-table" :colu
 >
               <template #bodyCell="{ column, record: task }">
                 <template v-if="column.key === 'task'">
-                  <div class="flex flex-wrap items-center gap-1 font-semibold">#{{ task.id }} <Tag class="!m-0" :color="task.status === 'DONE' ? undefined : task.progress.color">{{ task.progress.label }}</Tag><Tag v-if="task.output?.side" class="!m-0" :color="task.output.side === 'BACK' ? 'purple' : 'blue'">{{ task.output.side === 'FRONT' ? '正面' : task.output.side === 'BACK' ? '反面' : '整体' }}</Tag></div>
+                  <div class="flex flex-wrap items-center gap-1 font-semibold">
+                    #{{ task.id }}
+                    <Tag class="!m-0" :color="task.status === 'DONE' && !task.completedBySupplement ? undefined : task.progress.color">{{ task.progress.label }}</Tag>
+                    <Tag v-if="task.output?.side" class="!m-0" :color="task.output.side === 'BACK' ? 'purple' : 'blue'">{{ task.output.side === 'FRONT' ? '正面' : task.output.side === 'BACK' ? '反面' : '整体' }}</Tag>
+                  </div>
                   <div class="mt-0.5 line-clamp-2 text-xs leading-[18px]" :title="task.product">{{ task.relatedOrderItems?.map((item: ScheduleApi.RelatedOrderItem) => item.productName || item.productCode).filter(Boolean).join('、') || task.product || '按任务要求生产' }}</div>
+                  <div v-if="task.parentTaskId" class="mt-1 text-xs text-muted-foreground">补派子任务 · 原任务 #{{ task.parentTaskId }}</div>
                   <div v-if="taskOrderNos(task as ScheduleApi.Task).length > 1" class="mt-1 text-xs text-orange-600">合并任务 · 勾选同步，只报一次<br />关联 {{ taskOrderNos(task as ScheduleApi.Task).join('、') }}</div>
                   <ul v-if="coverLines(task as ScheduleApi.Task).length > 1" class="mb-0 mt-1 list-none p-0 text-xs text-muted-foreground"><li v-for="line in coverLines(task as ScheduleApi.Task)" :key="line">{{ line }}</li></ul>
                   <div v-if="task.activeOrderId" class="mt-1 text-xs text-orange-700">{{ task.activeOperatorName || '原领料人' }} 已领料 · 工序单 #{{ task.activeOrderId }}<br />请由负责人在「我的工作台 → 正在做」继续报工。</div><div v-else class="mt-1 text-xs text-muted-foreground">{{ task.workerNames ? `已派给 ${task.workerNames}` : '待派给员工' }}</div>
@@ -423,7 +435,14 @@ v-model:expanded-row-keys="expandedOrderKeys" class="workshop-order-table" :colu
                 <template v-else-if="column.key === 'progress'">
                   <div v-if="adjustedBoards(task as ScheduleApi.Task) !== undefined" class="text-base text-primary">选板后计划 <b>{{ formatQty(adjustedBoards(task as ScheduleApi.Task)) }}</b> {{ task.unit }}</div>
                   <div v-else class="text-base">计划 <b>{{ formatQty(task.quantity) }}</b> {{ task.unit }}</div>
+                  <div v-if="task.actualBatchAvailable != null" class="mt-1 text-sm" :class="Number(task.actualBatchAvailable) > 0 ? 'text-primary' : 'text-warning'">
+                    {{ Number(task.actualBatchAvailable) > 0 ? `按可领批次可做 ${formatQty(task.actualBatchAvailable)} ${task.unit ?? ''}` : '当前无足够的可领批次' }}
+                  </div>
                   <div class="mt-1 text-sm">{{ props.process === 'LAMINATE' ? '已贴合良品' : '已报良品' }} {{ formatQty(task.actualQuantity) }} {{ task.unit }}</div>
+                  <template v-if="(toNumber(task.supplementGoodQuantity) ?? 0) > 0">
+                    <div class="text-sm">补派良品 {{ formatQty(task.supplementGoodQuantity) }} {{ task.unit }}</div>
+                    <div class="text-sm font-semibold">累计良品 {{ formatQty(roundQty((toNumber(task.actualQuantity) ?? 0) + (toNumber(task.supplementGoodQuantity) ?? 0))) }} {{ task.unit }}</div>
+                  </template>
                   <Tag v-if="task.progress.targetLabel" class="!m-0 !mt-1" :color="task.progress.color">{{ task.progress.targetLabel }}</Tag>
                   <div v-if="task.progress.shortage != null" class="mt-1 text-sm font-semibold text-orange-700">
                     良品缺口 {{ formatQty(task.progress.shortage) }} {{ task.unit }}<span v-if="task.shortageHandledAt"> · 差额已处理</span>

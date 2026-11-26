@@ -8,6 +8,7 @@ import { materialNote, TASK_STAGE_LABELS } from '../../shared/schedule';
 import { attrSummary, formatQty, toNumber } from '../../stage-stock/model';
 
 defineProps<{
+  followActualBatches?: boolean;
   inputs?: FdmgongchangScheduleApi.Material[] | null;
   labels: Labels;
 }>();
@@ -32,7 +33,10 @@ const noteOf = (material: FdmgongchangScheduleApi.Material) => dimensionTextInMm
           <span>{{ TASK_STAGE_LABELS[material.stage] || material.stage }} · {{ nameOf(material, labels) }}</span>
           <b class="shrink-0 tabular-nums">{{ toNumber(material.quantity) === undefined ? '数量待确认' : `${formatQty(material.quantity)} ${material.unit || ''}` }}</b>
         </div>
-        <span v-if="material.note" class="text-xs text-muted-foreground">{{ noteOf(material) }}</span>
+        <span v-if="followActualBatches && !['AUX', 'RAW'].includes(material.stage)" class="text-xs text-muted-foreground">
+          {{ material.plannedBatchNo ? `选定批次 ${material.plannedBatchNo}` : '等待上道报出合格批次' }}
+        </span>
+        <span v-else-if="material.note" class="text-xs text-muted-foreground">{{ noteOf(material) }}</span>
       </li>
     </ul>
     <span v-else class="text-xs text-muted-foreground">任务未单独填写预计领料，请参考下面的推荐批次，并按实际领取登记。</span>

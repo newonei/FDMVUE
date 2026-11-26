@@ -18,9 +18,9 @@ import FactorySwitch from '../shared/factory-switch.vue';
 import { FACTORY_ROUTES } from '../shared/routes';
 import { useFactory } from '../shared/use-factory';
 import HoldPanel from './modules/hold-panel.vue';
-import OrderDrawer from './modules/order-drawer.vue';
+import OrderModal from './modules/order-modal.vue';
 import OrderPanel from './modules/order-panel.vue';
-import ReceiptDrawer from './modules/receipt-drawer.vue';
+import ReceiptModal from './modules/receipt-modal.vue';
 import ReceivingPanel from './modules/receiving-panel.vue';
 import SettingPanel from './modules/setting-panel.vue';
 import StageRail from './modules/stage-rail.vue';
@@ -56,11 +56,10 @@ const receivingPending = ref(0);
 const activeStage = ref('BOARD');
 const refreshKey = ref(0);
 
-const drawerOpen = ref(false);
-const drawerMode = ref<'create' | 'report'>('create');
-const drawerStage = ref<string>();
-const drawerOrderId = ref<number>();
-
+const orderOpen = ref(false);
+const orderMode = ref<'create' | 'report'>('create');
+const orderStage = ref<string>();
+const activeOrderId = ref<number>();
 
 const receiptOpen = ref(false);
 const receiptLine = ref<Api.PurchaseLine>();
@@ -121,10 +120,10 @@ function selectStage(stage: string) {
 }
 
 function openCreate(stage?: string) {
-  drawerMode.value = 'create';
-  drawerStage.value = stage ?? activeStage.value;
-  drawerOrderId.value = undefined;
-  drawerOpen.value = true;
+  orderMode.value = 'create';
+  orderStage.value = stage ?? activeStage.value;
+  activeOrderId.value = undefined;
+  orderOpen.value = true;
 }
 
 function openReceipt(line: Api.PurchaseLine) {
@@ -132,11 +131,10 @@ function openReceipt(line: Api.PurchaseLine) {
   receiptOpen.value = true;
 }
 
-
 function openReport(orderId: number) {
-  drawerMode.value = 'report';
-  drawerOrderId.value = orderId;
-  drawerOpen.value = true;
+  orderMode.value = 'report';
+  activeOrderId.value = orderId;
+  orderOpen.value = true;
 }
 
 async function onChanged() {
@@ -306,15 +304,15 @@ async function onSettingSaved() {
           </Tabs.TabPane>
         </Tabs>
 
-        <OrderDrawer
-          v-model:open="drawerOpen"
-          :initial-stage="drawerStage"
-          :mode="drawerMode"
+        <OrderModal
+          v-model:open="orderOpen"
+          :initial-stage="orderStage"
+          :mode="orderMode"
           :options="options"
-          :order-id="drawerOrderId"
+          :order-id="activeOrderId"
           @saved="onSaved"
         />
-        <ReceiptDrawer
+        <ReceiptModal
           v-model:open="receiptOpen"
           :options="options"
           :line="receiptLine"

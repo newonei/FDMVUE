@@ -46,12 +46,16 @@ export namespace FdmgongchangScheduleApi {
     name?: null | string;
     newItem?: boolean | null;
     note?: null | string;
+    plannedBatchNo?: null | string;
+    plannedStockId?: null | number;
     productCode?: null | string;
     /** 明确选定的产品中心领料档案，工序物料由后端解析。 */
     productId?: null | string;
     quantity?: Decimal | null;
     /** 发泡任务预估锅数，仅供工作台实际领料预填，不参与物料规格编码。 */
     recipeBatches?: Decimal | null;
+    requiresUpstreamBatch?: boolean | null;
+    upstreamTaskId?: null | number;
     /** 发泡按整锅密炼的依据：模具、入模量、整锅可出张数；旧任务没有。 */
     mixPlan?: MixPlan | null;
     stage: string;
@@ -197,6 +201,12 @@ export namespace FdmgongchangScheduleApi {
     activeOperatorUserId?: null | number;
     activeOperatorName?: null | string;
     actualQuantity: Decimal;
+    /** 原任务的良品缺口已由补派子任务补齐。 */
+    completedBySupplement?: boolean;
+    /** 本任务是补派子任务时，指向被补产的任务。 */
+    parentTaskId?: null | number;
+    /** 补派子任务计入本任务的良品数量。 */
+    supplementGoodQuantity?: Decimal | null;
     assignmentId?: null | string;
     contractCode?: null | string;
     /** 车间任务返回关联订单号；合并发泡时包含 covers 涉及的各张工厂订单。 */
@@ -249,6 +259,10 @@ export namespace FdmgongchangScheduleApi {
     upstreamNote?: null | string;
     /** 工作台用：按上道已报工的良品，现在最多能做多少。 */
     available?: Decimal | null;
+    /** 补产任务按选定库存和已报的合格批次领料。 */
+    followActualBatches?: boolean;
+    /** 按当前实际可领批次可加工的数量（本工序产出单位）。 */
+    actualBatchAvailable?: Decimal | null;
     /** 任务包：不定日期（workDate 是下发日期）；发泡按 sequence 排先后。 */
     undated?: boolean | null;
     /** 工作台用：上道状态，只做标记不拦：NONE 没有上道 / WAITING 还没人接 / WORKING 在做 / PARTIAL 报了一部分 / DONE 报完了。 */
@@ -442,19 +456,6 @@ export function getScheduleFormOptions(
   );
 }
 
-export function dispatchScheduleShortage(data: {
-  itemId: number;
-  orderId: number;
-  requestKey: string;
-  task: FdmgongchangScheduleApi.PlanTask;
-}) {
-  return requestClient.post<{ id: number; notices: string[] }>(
-    '/fdmgongchang/schedule/manual/shortage-dispatch',
-    data,
-    headers(),
-  );
-}
-
 export function previewScheduleTaskMaterials(
   data: FdmgongchangScheduleApi.MaterialPreviewRequest,
 ) {
@@ -481,6 +482,7 @@ export function getScheduleTaskInputProduct(params: {
 /** 已下发的排单追加（不传 id）或修改一个任务。 */
 export function saveScheduleTask(data: {
   id?: number;
+  parentTaskId?: number;
   scheduleId: number;
   task: FdmgongchangScheduleApi.PlanTask;
 }) {
@@ -658,6 +660,14 @@ export namespace FdmgongchangOrderSplitApi {
     remainingFromStart: number | string;
   }
 
+  export interface Shortage {
+    orderQuantity: number | string;
+    fulfilledGoodQuantity: number | string;
+    remainingGoodQuantity: number | string;
+    pendingGoodQuantity: number | string;
+    netGoodShortage: number | string;
+  }
+
   export interface StockAdviceLine extends Pick<
     StockReference,
     | 'aggregated'
@@ -758,6 +768,8 @@ export namespace FdmgongchangOrderSplitApi {
     stockCandidates?: StockCandidate[];
     stockCoverage?: StockCoverage[];
     stockPlan?: StockPlan[];
+    shortage?: Shortage;
+    suggestedStockSelections?: StockSelection[];
     warnings: string[];
     errors: string[];
   }
@@ -768,6 +780,7 @@ export namespace FdmgongchangOrderSplitApi {
     /** 同一预览确认失败后重试保持此值，避免重复创建任务。 */
     requestId: string;
     note?: string;
+    shortageItemId?: number;
     stockSelections?: StockSelection[];
   }
 }
@@ -776,10 +789,11 @@ export namespace FdmgongchangOrderSplitApi {
 export function previewOrderSplit(
   productionOrderIds: number[],
   stockSelections?: FdmgongchangOrderSplitApi.StockSelection[],
+  shortageItemId?: number,
 ) {
   return requestClient.post<FdmgongchangOrderSplitApi.Preview>(
     '/fdmgongchang/schedule/order-split/preview',
-    { productionOrderIds, stockSelections },
+    { productionOrderIds, shortageItemId, stockSelections },
     headers(),
   );
 }

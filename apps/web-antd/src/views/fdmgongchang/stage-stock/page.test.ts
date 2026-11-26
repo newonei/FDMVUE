@@ -349,7 +349,10 @@ describe('stage stock page', () => {
     expect(document.body.textContent).toContain('东莞原料厂');
     clickButton('收货', host);
     await flush();
-    expect(document.body.textContent).toContain('原料到货入库');
+    const receiptDialog = document.querySelector('[role="dialog"].factory-dialog.ant-modal-centered');
+    expect(receiptDialog?.textContent ?? '').toContain('原料到货入库');
+    expect(receiptDialog?.textContent ?? '').toContain('收货数量');
+    expect(receiptDialog?.textContent ?? '').toContain('入库信息');
     clickButton('确认收货');
     await flush();
     expect(mocks.receiveRaw).toHaveBeenCalledWith(

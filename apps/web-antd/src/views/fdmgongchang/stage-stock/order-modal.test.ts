@@ -4,7 +4,7 @@ import { createApp, defineComponent, h, nextTick, reactive } from 'vue';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import OrderDrawer from './modules/order-drawer.vue';
+import OrderModal from './modules/order-modal.vue';
 
 const mocks = vi.hoisted(() => ({
   create: vi.fn(),
@@ -179,7 +179,7 @@ async function submitCreate(text: string) {
   throw new Error(`never reached ${text}`);
 }
 
-describe('order drawer', () => {
+describe('order modal', () => {
   let host: HTMLDivElement;
   let unmount: () => void;
   const state = reactive<{
@@ -213,7 +213,7 @@ describe('order drawer', () => {
     const app = createApp(
       defineComponent({
         setup: () => () =>
-          h(OrderDrawer, {
+          h(OrderModal, {
             initialStage: 'BOARD',
             mode: state.mode,
             orderId: state.orderId,
@@ -502,7 +502,8 @@ describe('order drawer', () => {
     await nextTick();
     state.open = true;
     await flush();
-    expect(document.body.textContent).toContain('报产出 · GX20261010-001');
+    const reportDialog = document.querySelector('[role="dialog"].factory-dialog.ant-modal-centered');
+    expect(reportDialog?.textContent ?? '').toContain('报产出 · GX20261010-001');
     expect(document.body.textContent).toContain('40');
 
     const key = document
