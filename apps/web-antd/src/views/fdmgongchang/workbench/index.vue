@@ -60,6 +60,7 @@ const noFactory = ref(false);
 const submitting = ref(false);
 const reportError = ref('');
 const listReportMode = ref<'details' | 'quick'>();
+const reportAfterPicking = ref(false);
 
 async function reload() {
   job.my = await getWorkbench(props.process);
@@ -129,6 +130,7 @@ function linkedTaskQuery() {
 
 function reset(process: Api.Process, task?: FdmgongchangScheduleApi.Task) {
   listReportMode.value = undefined;
+  reportAfterPicking.value = false;
   job.process = process;
   job.task = task;
   job.productionItem = undefined;
@@ -153,8 +155,10 @@ function reset(process: Api.Process, task?: FdmgongchangScheduleApi.Task) {
   reportError.value = '';
 }
 
-function startActual(process: Api.Process) {
+function startActual(process: Api.Process, sourceStage?: string, reportImmediately = false) {
   reset(process);
+  if (sourceStage && process.sources.includes(sourceStage)) job.sourceStage = sourceStage;
+  reportAfterPicking.value = reportImmediately;
   job.step = process.code === 'MIX' ? 'confirm' : 'pick';
 }
 
@@ -476,7 +480,7 @@ function back() {
           @supplement-order="(order) => continueOrder(order, true)"
         />
         <PickStep v-else-if="job.step === 'pick'" @back="back" @next="afterPick" />
-        <ConfirmStep v-else-if="job.step === 'confirm'" :submitting="submitting" @back="back" @issue-only="issueOnly" @report-now="reportNow" />
+        <ConfirmStep v-else-if="job.step === 'confirm'" :report-after-picking="reportAfterPicking" :submitting="submitting" @back="back" @issue-only="issueOnly" @report-now="reportNow" />
         <ReportStep
           v-else-if="job.step === 'report'"
           :order-actions="listReportMode === 'details'"

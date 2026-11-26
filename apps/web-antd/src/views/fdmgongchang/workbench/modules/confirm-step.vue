@@ -15,7 +15,7 @@ import IssueShortages from './issue-shortages.vue';
 import StepHeader from './step-header.vue';
 
 /** 第 2 步 确认领料：只显示领多少、领什么、领完还剩多少。 */
-const props = defineProps<{ submitting: boolean }>();
+const props = defineProps<{ reportAfterPicking?: boolean; submitting: boolean }>();
 const emit = defineEmits<{ back: []; issueOnly: []; reportNow: [] }>();
 const job = useJob();
 const labels = computed(() => makeLabels(job.options));
@@ -211,6 +211,9 @@ function confirm(reportNow = false) {
       <p v-if="foaming" class="m-0 text-xs leading-relaxed text-muted-foreground">
         用量按配方估算，实际原料出入库由仓库另行登记。
       </p>
+      <p v-else-if="reportAfterPicking" class="m-0 text-xs leading-relaxed text-muted-foreground">
+        继续填写实际产出，最后一起提交领料和报工。
+      </p>
       <p v-else-if="late" class="m-0 text-xs leading-relaxed text-muted-foreground">
         这张单已经完工。补登的料从{{ source?.label }}库存扣掉，算进这张单的领料，会记下是你补登的和原因。
       </p>
@@ -223,6 +226,7 @@ function confirm(reportNow = false) {
     </main>
     <footer class="sticky bottom-0 grid grid-cols-1 gap-2 border-t border-border bg-card px-4 pb-4 pt-3 sm:grid-cols-2">
       <button
+        v-if="!reportAfterPicking"
         :disabled="cannotIssue"
         class="h-10 rounded-md bg-primary text-sm font-semibold text-primary-foreground disabled:opacity-50"
         type="button"
@@ -230,7 +234,11 @@ function confirm(reportNow = false) {
       >
         {{ foaming ? '确认开工' : late ? '确认补登' : job.supplement ? '确认补领，接着干活' : '确认领料，去干活' }}
       </button>
-      <button v-if="independent" :disabled="cannotIssue" class="h-10 rounded-md bg-primary/10 text-sm font-semibold text-primary disabled:opacity-50" type="button" @click="confirm(true)">
+      <button
+        v-if="independent" :disabled="cannotIssue"
+        :class="reportAfterPicking ? 'bg-primary text-primary-foreground sm:col-span-2' : 'bg-primary/10 text-primary'"
+        class="h-10 rounded-md text-sm font-semibold disabled:opacity-50" type="button" @click="confirm(true)"
+      >
         {{ foaming ? '已经做完了，直接报工' : '已经做完了，领料同时报数量' }}
       </button>
     </footer>

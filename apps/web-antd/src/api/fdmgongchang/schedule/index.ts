@@ -249,7 +249,8 @@ export namespace FdmgongchangScheduleApi {
     plannedQuantity?: Decimal | null;
     status?: null | TaskStatus;
     claimedAt?: DateValue | null;
-    doneAt?: DateValue | null;
+    /** 后端 LocalDateTime 通常序列化为毫秒时间戳。 */
+    doneAt?: DateValue | number;
     closedReason?: null | string;
     /** 报工良品少于任务数量、还没处理的差额。 */
     shortage?: Decimal | null;

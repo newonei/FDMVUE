@@ -8,7 +8,7 @@ import type { FdmgongchangFactoryApi } from '#/api/fdmgongchang/factory';
 import type { FdmgongchangScheduleApi as ScheduleApi } from '#/api/fdmgongchang/schedule';
 import type { FdmgongchangWorkbenchApi as Api } from '#/api/fdmgongchang/workbench';
 
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, nextTick, reactive, ref, watch } from 'vue';
 
 import { useAccess } from '@vben/access';
 import { buildUUID } from '@vben/utils';
@@ -26,23 +26,33 @@ import { changeLaminationDefect, changeLaminationGood, laminationDefects, lamina
 import { quantityPrecision } from '../shared/quantity';
 import { dateText, PROCESS_LABELS } from '../shared/schedule';
 import { formatQty, makeLabels, roundQty, sizeText, toNumber } from '../stage-stock/model';
+import OrderModal from '../stage-stock/modules/order-modal.vue';
 import { useJob } from '../workbench/use-job';
+import InProgress from './in-progress.vue';
 import { groupWorkshopOrders, mixPlanLines, orderFocus, orderMatches, taskFocus, taskOrderNos, uniqueTasks, WORKSHOP_FOCUS, WORKSHOP_OUTPUT, workshopTaskProgress } from './order-model';
 import OrdersTable from './orders-table.vue';
+import PlanTable from './plan-table.vue';
 import RelatedOrderTable from './related-order-table.vue';
+import StockCard from './stock-card.vue';
 
 const props = defineProps<{ factories: FdmgongchangFactoryApi.Factory[]; factoryId: null | number; process: string }>();
 const emit = defineEmits<{
   changeFactory: [id: number]; refresh: []; reportOrder: [order: Api.Order];
-  startActual: [process: Api.Process]; supplementOrder: [order: Api.Order];
+  startActual: [process: Api.Process, sourceStage: string, reportAfterPicking: boolean]; supplementOrder: [order: Api.Order];
 }>();
 const job = useJob();
 const { hasAccessByCodes } = useAccess();
 const canDispatch = computed(() => hasAccessByCodes(['fdmgongchang:schedule:confirm']));
+const canOperateStock = computed(() => hasAccessByCodes(['fdmgongchang:stage-stock:query'])
+  && hasAccessByCodes(['fdmgongchang:stage-stock:operate']));
 const my = computed(() => job.my!);
 const process = computed(() => my.value.workshopProcess ?? my.value.processes.find((item) => item.code === props.process)
   ?? my.value.teamProcesses?.find((item) => item.code === props.process));
 const title = computed(() => `${props.process === 'LAMINATE' ? '复合（贴合）' : PROCESS_LABELS[props.process] ?? process.value?.label ?? props.process}车间`);
+const view = ref<'orders' | 'plan' | 'stock'>('stock');
+const stockIssueOpen = ref(false);
+const stockIssueStage = ref<string>();
+const stockIssueFinish = ref(false);
 const tasks = computed(() => uniqueTasks((my.value.workshopTasks ?? []).filter((task) => task.process === props.process)));
 const orders = computed(() => groupWorkshopOrders(tasks.value));
 const keyword = ref('');
@@ -257,9 +267,12 @@ watch([() => props.factoryId, () => props.process], () => {
   contextVersion++; clearSelection(); expandedOrderKeys.value = []; request.value = undefined;
   submittedIds.value = []; reportWarnings.value = []; busy.value = false; pageNo.value = 1;
   dispatchOpen.value = false; dispatchWorkers.value = []; operators.value = [];
+  view.value = 'stock'; stockIssueOpen.value = false;
   for (const map of [drafts, boardOptions, boardLoading, boardErrors]) for (const key of Object.keys(map)) Reflect.deleteProperty(map, key);
 });
-watch([() => props.factoryId, () => props.process], () => { void loadOperators(); }, { immediate: true });
+watch(view, (current) => {
+  if (current === 'orders' && operators.value.length === 0) void loadOperators();
+});
 const pageNo = ref(1); const pageSize = ref(20);
 const pagination = computed<TablePaginationConfig>(() => ({ current: pageNo.value, pageSize: pageSize.value, total: visibleOrders.value.length,
   showSizeChanger: true, pageSizeOptions: ['10', '20', '50', '100'], showTotal: (total) => `共 ${total} 个订单` }));
@@ -272,6 +285,18 @@ const orderColumns: TableColumnsType<WorkshopOrder> = [
 ];
 function orderCompletionPercent(order: WorkshopOrder) {
   return Math.floor(order.counts.completed * 100 / order.tasks.length);
+}
+async function openPlanOrder(taskId: number) {
+  const index = orders.value.findIndex((order) => order.tasks.some((task) => task.id === taskId));
+  if (index === -1) return;
+  const order = orders.value[index]!;
+  keyword.value = '';
+  status.value = 'ALL';
+  // The order filters reset pagination before we navigate to the matching page.
+  await nextTick();
+  pageNo.value = Math.floor(index / pageSize.value) + 1;
+  expandedOrderKeys.value = [order.key];
+  view.value = 'orders';
 }
 const reportOutputTitle = computed(() => {
   if (props.process === 'MIX') return '报工选择板材';
@@ -293,9 +318,23 @@ const taskColumns = computed<TableColumnsType<ScheduleApi.Task>>(() => {
     ...(isLamination ? [] : [output]),
   ];
 });
-const inProgress = computed(() => my.value.inProgress.filter((order) => order.process === props.process));
 const recentDone = computed(() => (my.value.recentDone ?? []).filter((order) => order.process === props.process));
 const independentProcess = computed(() => my.value.processes.find((item) => item.code === props.process));
+const useStockIssue = computed(() => canOperateStock.value && (!independentProcess.value || props.process === 'MIX'));
+const estimatedMix = computed(() => props.process === 'MIX' && !useStockIssue.value);
+function startStockOperation(stage: string, reportAfterPicking: boolean) {
+  if (useStockIssue.value) {
+    stockIssueStage.value = stage;
+    stockIssueFinish.value = reportAfterPicking;
+    stockIssueOpen.value = true;
+  } else if (independentProcess.value) {
+    emit('startActual', independentProcess.value, stage, reportAfterPicking);
+  }
+}
+function stockIssueSaved(text: string) {
+  message.success(text);
+  emit('refresh');
+}
 /** 合并发泡任务分给各订单明细的张数。 */
 function coverLines(task: ScheduleApi.Task) {
   return (task.covers ?? []).map((cover) => {
@@ -344,15 +383,51 @@ const mixOutputLines = (task: ScheduleApi.Task) => reportMixPlanLines(task).filt
 <template>
   <div class="flex min-h-full min-w-0 flex-col gap-3 p-3 sm:p-4">
     <header class="flex flex-wrap items-center justify-between gap-3">
-      <div><h1 class="m-0 text-xl font-bold">{{ title }}</h1><p class="mb-0 mt-1 text-sm text-muted-foreground">展开订单后勾选任务，可派给员工在「我的工作台」手动领料、分批报工，也可指定实际人员代报。</p></div>
+      <h1 class="m-0 text-xl font-bold">{{ title }}</h1>
       <div class="flex flex-wrap items-center gap-3">
         <FactorySwitch :factories="factories" :value="factoryId" :class="{ 'pointer-events-none opacity-60': busy }" :aria-disabled="busy" @change="!busy && emit('changeFactory', $event)" />
-        <Button v-if="independentProcess" :disabled="busy" @click="emit('startActual', independentProcess)">
-          {{ props.process === 'SLICE' ? '开片 · 选择板材' : `${independentProcess.label} · 独立开单` }}
-        </Button>
-        <Button :disabled="busy" @click="emit('refresh')">刷新</Button>
+        <Button href="/fdmstock/inventory-stock">库存与流水</Button>
+        <Button :disabled="busy || stockIssueOpen" @click="emit('refresh')">刷新</Button>
       </div>
     </header>
+    <div aria-label="车间视图" class="flex flex-wrap gap-2" role="group">
+      <Button :type="view === 'stock' ? 'primary' : 'default'" :aria-pressed="view === 'stock'" :disabled="busy" @click="view = 'stock'">库存流转</Button>
+      <Button :type="view === 'plan' ? 'primary' : 'default'" :aria-pressed="view === 'plan'" :disabled="busy" @click="view = 'plan'">车间日计划</Button>
+      <Button :type="view === 'orders' ? 'primary' : 'default'" :aria-pressed="view === 'orders'" :disabled="busy" @click="view = 'orders'">按订单查看</Button>
+    </div>
+    <template v-if="view === 'stock'">
+      <div class="grid grid-cols-1 gap-3 xl:grid-cols-2">
+        <StockCard :stages="process?.sources ?? []" :factory-id="factoryId" :refresh-key="my" mode="source">
+          <template #actions="{ stage }">
+            <div v-if="stage && (independentProcess || useStockIssue)" class="flex flex-wrap gap-2">
+              <Button type="primary" @click="startStockOperation(stage, false)">{{ estimatedMix ? '确认开工' : '领料' }}</Button>
+              <Button @click="startStockOperation(stage, true)">{{ estimatedMix ? '补录报产出' : '补录领料并报工' }}</Button>
+            </div>
+            <p v-if="stage && !estimatedMix && (independentProcess || useStockIssue)" class="mb-0 text-xs text-muted-foreground">账面库存可为负数，领料时填实际用量。</p>
+          </template>
+        </StockCard>
+        <InProgress
+          :factory-id="factoryId" :process="props.process" :refresh-key="my" class="xl:order-last xl:col-span-2"
+          @report="emit('reportOrder', $event)" @supplement="emit('supplementOrder', $event)" @refresh="emit('refresh')"
+        />
+        <StockCard
+          :factory-id="factoryId" :finished-warehouse="props.process === 'PACK'" :refresh-key="my"
+          :stages="process ? [process.outputStage] : []" mode="output"
+        />
+      </div>
+      <details v-if="recentDone.length" class="border-t border-border pt-3">
+        <summary class="cursor-pointer text-sm text-muted-foreground">近期完工 / 补登领料（{{ recentDone.length }}）</summary>
+        <OrdersTable class="mt-2" :orders="recentDone" :options="job.options" completed @supplement="emit('supplementOrder', $event)" />
+      </details>
+    </template>
+    <PlanTable
+      v-else-if="view === 'plan'"
+      :options="job.options"
+      :process="props.process"
+      :tasks="tasks"
+      @open-order="openPlanOrder"
+    />
+    <template v-else>
       <div class="flex flex-wrap items-center justify-between gap-3 border-y border-border py-2">
         <div class="flex flex-wrap gap-6 text-sm"><span>订单 <b class="text-base">{{ orders.length }}</b></span><span>待跟进任务 <b class="text-base text-primary">{{ followUpCount }}</b></span><span class="text-muted-foreground">重点：{{ WORKSHOP_FOCUS[props.process] }}</span></div>
         <div class="flex flex-wrap gap-2"><Input id="workshop-keyword" v-model:value="keyword" allow-clear class="w-64 max-w-full" placeholder="搜索订单、产品或任务编号" aria-label="搜索车间订单" /><Select id="workshop-status" v-model:value="status" :options="orderStatusOptions" class="w-40" aria-label="订单任务状态" /></div>
@@ -519,6 +594,7 @@ v-model:expanded-row-keys="expandedOrderKeys" class="workshop-order-table" :colu
           </div>
         </template>
       </Table>
+    </template>
     <Modal v-model:open="dispatchOpen" title="派给员工" ok-text="确认派工" :confirm-loading="busy" :closable="!busy" :mask-closable="!busy" :keyboard="!busy" :cancel-button-props="{ disabled: busy }" @ok="dispatch">
       <div class="flex flex-col gap-3">
         <p class="m-0">将选中的 {{ selectedIds.length }} 个任务安排到员工的「我的工作台」，员工可核对规格、手选材料并填写实际领取数量。</p>
@@ -529,7 +605,11 @@ v-model:expanded-row-keys="expandedOrderKeys" class="workshop-order-table" :colu
         <Alert v-if="warning" type="error" :message="warning" />
       </div>
     </Modal>
-    <details v-if="inProgress.length || recentDone.length" class="border-t border-border pt-3"><summary class="cursor-pointer text-sm text-muted-foreground">历史工序单 / 补登领料（{{ inProgress.length + recentDone.length }}）</summary><OrdersTable v-if="inProgress.length" class="mt-2" :orders="inProgress" :options="job.options" @report="emit('reportOrder', $event)" @supplement="emit('supplementOrder', $event)" /><OrdersTable v-if="recentDone.length" class="mt-2" :orders="recentDone" :options="job.options" completed @supplement="emit('supplementOrder', $event)" /></details>
+    <OrderModal
+      v-if="useStockIssue && job.options" v-model:open="stockIssueOpen" :options="job.options"
+      :initial-finish="stockIssueFinish" :initial-process="props.process" :initial-stage="stockIssueStage"
+      mode="create" @saved="stockIssueSaved"
+    />
   </div>
 </template>
 

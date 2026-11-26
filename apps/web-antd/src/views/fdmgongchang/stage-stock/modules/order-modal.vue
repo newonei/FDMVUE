@@ -76,12 +76,19 @@ import AttrFields from './attr-fields.vue';
  * - create：选工序 → 从上游库存领料 → 选操作人 → 领料并报完工，或只领料（车间在制）；
  * - report：对在制工序单报产出，可以只登记这一批（继续在制），也可以报完关单。
  */
-const props = defineProps<{
+const props = withDefaults(defineProps<{
+  initialFinish?: boolean;
+  initialProcess?: string;
   initialStage?: string;
   mode: 'create' | 'report';
   options: Api.Options;
   orderId?: number;
-}>();
+}>(), {
+  initialFinish: true,
+  initialProcess: undefined,
+  initialStage: undefined,
+  orderId: undefined,
+});
 const emit = defineEmits<{ saved: [message: string, outputStage?: string] }>();
 const open = defineModel<boolean>('open', { required: true });
 const processCode = ref('SLICE');
@@ -525,10 +532,12 @@ function defaultProcessFor(stage?: string) {
   );
 }
 
+const openingProcess = computed(() => props.options.processes.find((p) => p.code === props.initialProcess));
+
 watch(open, async (value) => {
   if (!value) return;
   resetPicking();
-  finish.value = true;
+  finish.value = props.initialFinish;
   step.value = 'input';
   reportFinish.value = true;
   Object.assign(meta, { remark: '' });
@@ -561,7 +570,7 @@ watch(open, async (value) => {
   order.value = undefined;
   linkedProductionItemId.value = undefined;
   void loadProductionOrders();
-  const code = defaultProcessFor(props.initialStage);
+  const code = openingProcess.value?.code ?? defaultProcessFor(props.initialStage);
   processCode.value = code;
   void loadOperators();
   void loadScheduleTasks();
@@ -1038,8 +1047,9 @@ const summaryText = computed(() => {
           v-show="shown('input')"
           class="flex min-w-0 flex-col gap-3"
         >
-          <h3 class="m-0 text-base font-semibold">选择工序</h3>
+          <h3 class="m-0 text-base font-semibold">{{ openingProcess?.label ?? '选择工序' }}</h3>
           <Radio.Group
+            v-if="!openingProcess"
             :value="processCode"
             button-style="solid"
             class="flex flex-wrap gap-y-1.5"

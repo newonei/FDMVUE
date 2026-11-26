@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => ({
   my: vi.fn(),
   options: vi.fn(),
   order: vi.fn(),
+  orderPage: vi.fn(),
   plan: vi.fn(),
   productionOrders: vi.fn(),
   stock: vi.fn(),
@@ -40,6 +41,10 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock('@vben/access', () => ({ useAccess: () => ({ hasAccessByCodes: mocks.access }) }));
 vi.mock('#/api/fdmgongchang/schedule', () => ({ reassignScheduleTasks: mocks.reassign }));
+vi.mock('#/api/fdmgongchang/stage-stock', async (importOriginal) => ({
+  ...await importOriginal<typeof import('#/api/fdmgongchang/stage-stock')>(),
+  getOrderPage: mocks.orderPage,
+}));
 vi.mock('vue-router', () => ({ useRoute: () => mocks.route }));
 vi.mock('#/api/fdmgongchang/factory', () => ({
   getMyFactories: mocks.factories,
@@ -200,10 +205,11 @@ function fill(id: string, value: number | string) {
   input.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
-function clickButton(text: string) {
-  const el = [...document.querySelectorAll('button')].find((b) =>
-    b.textContent?.replaceAll(/\s/g, '').includes(text),
-  );
+function clickButton(text: string, exact = false) {
+  const el = [...document.querySelectorAll('button')].find((button) => {
+    const label = button.textContent?.replaceAll(/\s/g, '');
+    return exact ? label === text : label?.includes(text);
+  });
   if (!el) throw new Error(`找不到按钮：${text}`);
   el.click();
 }
@@ -236,7 +242,7 @@ describe('workbench page', () => {
   };
   beforeEach(() => {
     mocks.route.query = {};
-    mocks.access.mockReturnValue(true);
+    mocks.access.mockImplementation((codes: string[]) => !codes.some((code) => code.startsWith('fdmgongchang:stage-stock:')));
     mocks.reassign.mockResolvedValue(1);
     mocks.factories.mockResolvedValue({
       canSeeAll: false,
@@ -257,6 +263,7 @@ describe('workbench page', () => {
     mocks.productionOrders.mockResolvedValue([]);
     mocks.stock.mockResolvedValue({ list: [board], total: 1 });
     mocks.order.mockResolvedValue(order);
+    mocks.orderPage.mockResolvedValue({ list: [], total: 0 });
     mocks.wage.mockResolvedValue([{ itemId: 1, matched: true, name: '开片', price: 27, score: 0, unit: 'm³' }]);
     mocks.mates.mockResolvedValue([]);
   });
@@ -275,7 +282,13 @@ describe('workbench page', () => {
     ],
   });
 
+  const openOrderView = async () => {
+    if (document.querySelector('.workshop-order-table')) return;
+    clickButton('按订单查看', true);
+    await flush();
+  };
   const expandOrder = async (orderNo: string) => {
+    await openOrderView();
     const row = [...document.querySelectorAll<HTMLElement>('[data-order-key]')].find((row) => row.dataset.orderKey === orderNo)!;
     [...row.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('展开订单'))!.click();
     await flush();
@@ -285,6 +298,98 @@ describe('workbench page', () => {
     await flush();
   };
 
+  it('opens the workshop on the inventory flow and keeps order progress available separately', async () => {
+    const negativeBoard = { ...board, batchNo: 'BOARD-DEBT', quantity: -8 };
+    const sheets = { ...board, batchNo: 'SHEET-READY', id: 12, quantity: 24, stage: 'SHEET' };
+    mocks.my.mockResolvedValue({ ...workshop(), inProgress: [my.inProgress[0]!] });
+    mocks.stock.mockImplementation(async (stage: string) => ({ list: stage === 'BOARD' ? [negativeBoard] : [sheets], total: 1 }));
+
+    await mount('SLICE');
+    const inventory = document.body.textContent;
+    expect(inventory).toContain('上道可领库存');
+    expect(inventory).toContain('本工序在制');
+    expect(inventory).toContain('可供下道的库存');
+    expect(inventory).toContain('GX20261011-001');
+    expect(inventory).toContain('BOARD-DEBT');
+    expect(inventory).toMatch(/-8\s*张/);
+    expect(inventory).toContain('SHEET-READY');
+    expect(inventory).toMatch(/24\s*片/);
+    expect(document.querySelector('.workshop-order-table')).toBeNull();
+    expect(mocks.orderPage).not.toHaveBeenCalled();
+
+    await openOrderView();
+    expect(document.querySelector('.workshop-order-table')).not.toBeNull();
+    expect(document.body.textContent).toContain('本车间完成进度');
+    expect(document.body.textContent).not.toContain('BOARD-DEBT');
+  });
+
+  it('opens an existing in-progress processing order directly for output reporting', async () => {
+    mocks.my.mockResolvedValue({ ...workshop(), inProgress: [my.inProgress[0]!] });
+
+    await mount('SLICE');
+    clickButton('报产出', true);
+    await flush();
+
+    expect(mocks.order).toHaveBeenCalledExactlyOnceWith(5);
+    expect(document.querySelector('[id^="total-"]')).not.toBeNull();
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(mocks.issue).not.toHaveBeenCalled();
+  });
+
+  it('lists another operator’s in-progress orders for workshop stock readers without letting them report', async () => {
+    mocks.access.mockImplementation((codes: string[]) => !codes.includes('fdmgongchang:stage-stock:operate'));
+    mocks.my.mockResolvedValue(workshop());
+    mocks.orderPage.mockResolvedValue({
+      list: [{ ...order, id: 13, operatorName: '李四', operatorUserId: 3, orderNo: 'GX-WORKSHOP-002' }],
+      total: 1,
+    });
+
+    await mount('SLICE');
+    expect(mocks.orderPage).toHaveBeenCalledWith(expect.objectContaining({ process: 'SLICE', status: 'IN_PROGRESS' }));
+    expect(document.body.textContent).toContain('GX-WORKSHOP-002');
+    expect([...document.querySelectorAll('button')].some((button) => button.textContent?.trim() === '报产出')).toBe(false);
+    expect(mocks.order).not.toHaveBeenCalled();
+  });
+
+  it('records actual material use and output together from the workshop even when the source ledger is negative', async () => {
+    const negativeBoard = { ...board, batchNo: 'BOARD-DEBT', quantity: -8 };
+    mocks.my.mockResolvedValue(workshop());
+    mocks.stock.mockImplementation(async (stage: string) => stage === 'BOARD'
+      ? { list: [negativeBoard], total: 1 }
+      : { list: [], total: 0 });
+
+    await mount('SLICE');
+    clickButton('补录领料并报工', true);
+    await flush();
+    clickButton('批次BOARD-DEBT');
+    await flush();
+    fill('actual-pick-11', 3);
+    await flush();
+    expect(document.body.textContent).toContain('领料后欠账 11 张，需补录上工序产出');
+    clickButton('下一步：确认领料');
+    await flush();
+    clickButton('已经做完了，领料同时报数量');
+    await flush();
+    fill(document.querySelector<HTMLInputElement>('[id^="wb-"][id$="-thickness"]')!.id, 3);
+    fill(document.querySelector<HTMLInputElement>('[id^="total-"]')!.id, 5);
+    await flush();
+    clickButton('下一步');
+    await flush();
+    document.querySelector<HTMLInputElement>('input[aria-label="确认本批全部做完"]')!.click();
+    await flush();
+    clickButton('提交');
+    await flush();
+
+    expect(mocks.create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      finish: true,
+      process: 'SLICE',
+      sourceStage: 'BOARD',
+      inputs: [{ laminationSide: undefined, quantity: 3, stockId: 11 }],
+      outputs: [expect.objectContaining({ goodQuantity: 5, defectQuantity: 0 })],
+    }));
+    expect(mocks.reportOrder).not.toHaveBeenCalled();
+  });
+
   it('groups all workshop tasks by order and expands tasks without a claim step', async () => {
     const value = workshop();
     value.workshopTasks!.push({ ...my.tasks[0]!, id: 39 });
@@ -292,6 +397,7 @@ describe('workbench page', () => {
     await mount('SLICE');
     expect(mocks.my).toHaveBeenCalledExactlyOnceWith('SLICE');
     expect(document.querySelector('h1')?.textContent).toBe('开片车间');
+    await openOrderView();
     expect(document.querySelectorAll('[data-order-key]')).toHaveLength(4);
     expect(document.querySelectorAll('[data-task-id]')).toHaveLength(0);
     expect(document.querySelector('.workshop-order-table article')).toBeNull();
@@ -364,6 +470,7 @@ describe('workbench page', () => {
   it('hides dispatch without schedule confirmation permission', async () => {
     mocks.access.mockReturnValue(false);
     mocks.my.mockResolvedValue(workshop()); await mount('SLICE');
+    await openOrderView();
     expect([...document.querySelectorAll('button')].some((button) => button.textContent?.includes('派给员工'))).toBe(false);
   });
 
@@ -518,6 +625,7 @@ describe('workbench page', () => {
     };
 
     await mount('LAMINATE');
+    await openOrderView();
     const orderHeaders = [...document.querySelectorAll('.workshop-order-table thead th')].map((header) => header.textContent);
     expect(orderHeaders[orderHeaders.indexOf('订单 / 客户') + 1]).toBe('本车间完成进度');
     expect(document.body.textContent).toMatch(/待跟进任务\s*1/);
@@ -766,6 +874,7 @@ describe('workbench page', () => {
     const tasks = Array.from({ length: 25 }, (_, index) => ({ ...my.tasks[0]!, id: 100 + index, contractCode: `HT-BULK-${index}` }));
     mocks.my.mockResolvedValue({ ...workshop(), workshopTasks: tasks });
     await mount('SLICE');
+    await openOrderView();
     expect(document.querySelectorAll('[data-order-key]')).toHaveLength(20);
     document.querySelector<HTMLButtonElement>('.workshop-order-table .ant-pagination-next button')!.click(); await flush();
     expect(document.querySelectorAll('[data-order-key]')).toHaveLength(5);
@@ -1432,7 +1541,7 @@ describe('workbench page', () => {
     ] }]);
 
     await mount('PACK');
-    clickButton('包装·独立开单');
+    clickButton('领料', true);
     await flush();
     expect(mocks.stock).toHaveBeenCalledWith('PUNCHED', undefined);
     clickButton(`批次${punched.batchNo}`);
