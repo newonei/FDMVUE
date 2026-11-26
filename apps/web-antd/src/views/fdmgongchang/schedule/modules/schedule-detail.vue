@@ -33,6 +33,7 @@ import {
   TASK_STATUS,
   taskMaterialText,
 } from '../../shared/schedule';
+import { formatQty } from '../../stage-stock/model';
 import MixBatchModal from './mix-batch-modal.vue';
 import PlanEditor from './plan-editor.vue';
 import TaskFormModal from './task-form-modal.vue';
@@ -438,9 +439,21 @@ function discard() {
               <span class="text-xs font-normal text-muted-foreground">关联产品：</span>{{ task.product || '备货' }}
             </div>
             <div v-if="task.parentTaskId" class="text-xs text-muted-foreground">补派子任务 · 原任务 #{{ task.parentTaskId }}</div>
-            <TaskMaterials v-if="task.output || task.inputs?.length" :task="task" card-view />
+            <TaskMaterials
+              v-if="task.output || task.inputs?.length"
+              :omit-output-quantity="task.process === 'MIX' && task.output?.mixPlan?.wholeBatchBoards != null"
+              :task="task"
+              card-view
+            />
             <div v-else class="break-words text-base font-semibold leading-6">
               <span class="text-xs font-normal text-muted-foreground">产出：</span>{{ taskMaterialText(task.output, task.spec) }}
+            </div>
+            <div v-if="task.process === 'MIX' && task.output?.mixPlan?.wholeBatchBoards != null" class="text-sm text-muted-foreground tabular-nums">
+              <template v-if="task.output.recipeBatches != null">{{ formatQty(task.output.recipeBatches) }} 锅 · </template>
+              整锅预计出板 <strong class="text-foreground">{{ formatQty(task.output.mixPlan.wholeBatchBoards) }} 张</strong>
+              <div v-if="Number(task.output.mixPlan.surplusBoards) > 0">
+                预计余板 {{ formatQty(task.output.mixPlan.surplusBoards) }} 张，按实际良品报工后入半成品库存
+              </div>
             </div>
             <div class="text-xs">
               {{ task.workerNames || (task.status === 'OPEN' ? '待领取，本工序人员可在车间领取' : '未排人') }}
@@ -460,7 +473,8 @@ function discard() {
               <span class="flex flex-wrap items-baseline justify-end gap-x-1.5 text-sm tabular-nums">
                 实际 <strong class="text-xl text-primary">{{ Number(task.actualQuantity) }}</strong>
                 <template v-if="Number(task.supplementGoodQuantity) > 0">＋ 补派良品 <strong>{{ Number(task.supplementGoodQuantity) }}</strong></template>
-                / 计划 <strong class="text-lg">{{ Number(task.quantity) }}</strong> {{ task.unit }}
+                / {{ task.process === 'MIX' && task.output?.mixPlan?.wholeBatchBoards != null ? '本单需用' : '计划' }}
+                <strong class="text-lg">{{ Number(task.quantity) }}</strong> {{ task.unit }}
               </span>
             </div>
             <div class="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">

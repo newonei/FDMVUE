@@ -63,7 +63,8 @@ const invalidStock = computed(() => selection.value.some(({ stockId, quantity })
   const count = Number(quantity);
   return !batch || !Number.isInteger(count) || count <= 0 || count > num(batch.available);
 }));
-const canPreview = computed(() => !busy.value && hasShortage.value && selection.value.length > 0 && !invalidStock.value);
+const canPreview = computed(() => !busy.value && hasShortage.value && !invalidStock.value
+  && (selection.value.length > 0 || candidates.value.length === 0));
 const canRelease = computed(() => !busy.value && !invalidStock.value && !!preview.value?.canRelease
   && preview.value.taskCount > 0 && preview.value.errors.length === 0 && !!releaseRequest.value
   && !preview.value.rows.some((row) => row.status === 'BLOCKED'));
@@ -145,7 +146,11 @@ async function prepare() {
     previewHeading.value?.focus({ preventScroll: true });
     previewHeading.value?.scrollIntoView?.({ block: 'nearest' });
   } catch {
-    if (current === version) previewError.value = '工序预览加载失败，当前批次选择已保留，请重试。';
+    if (current === version) {
+      previewError.value = stockSelections.length > 0
+        ? '工序预览加载失败，当前批次选择已保留，请重试。'
+        : '工序预览加载失败，请重试。';
+    }
   } finally {
     if (current === version) previewing.value = false;
   }
@@ -223,7 +228,13 @@ async function release() {
           </template>
         </Alert>
         <template v-else>
-          <section aria-labelledby="shortage-stock-heading" class="space-y-3">
+          <Alert v-if="!candidates.length" message="暂无匹配的板材和片材" show-icon type="info">
+            <template v-if="!preview" #description>
+              <span v-if="catalog.errors.length">{{ catalog.errors.join('；') }}</span>
+              <span v-else>按订单工艺从发泡开始补产，预览后确认各道工序。</span>
+            </template>
+          </Alert>
+          <section v-else aria-labelledby="shortage-stock-heading" class="space-y-3">
             <div class="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h3 id="shortage-stock-heading" class="m-0 text-base font-semibold">选择库存批次</h3>
@@ -272,15 +283,15 @@ async function release() {
             <Alert v-if="invalidStock" message="部分批次可用量已变化，或所填数量无效。请调整用量后再预览。" show-icon type="warning">
               <template #action><Button :disabled="busy" @click="load">刷新库存</Button></template>
             </Alert>
-            <p v-if="!candidates.length && catalog.errors.length" class="m-0 text-sm text-muted-foreground">
-              {{ catalog.errors.join('；') }}
-            </p>
           </section>
           <Alert v-if="previewError" :message="previewError" show-icon type="warning" />
           <section v-if="preview" aria-labelledby="shortage-preview-heading" class="space-y-3">
             <div class="flex flex-wrap items-baseline justify-between gap-2">
               <h3 id="shortage-preview-heading" ref="previewHeading" tabindex="-1" class="m-0 text-base font-semibold">工序预览</h3>
-              <span v-if="coverage" class="text-sm text-muted-foreground">
+              <span v-if="preview.canRelease && !candidates.length" class="text-sm text-muted-foreground">
+                从发泡补产 {{ formatQty(shortage?.netGoodShortage) }} {{ unit }}
+              </span>
+              <span v-else-if="coverage" class="text-sm text-muted-foreground">
                 所选批次覆盖 {{ formatQty(coverage.covered) }} {{ unit }} ·
                 <b :class="{ 'text-warning': num(coverage.remainingFromStart) > 0 }">
                   尚缺 {{ formatQty(coverage.remainingFromStart) }} {{ unit }}
@@ -313,8 +324,17 @@ async function release() {
                   <div v-if="row.reason" class="mt-1 text-sm text-muted-foreground">{{ row.reason }}</div>
                 </div>
                 <div v-if="row.quantity != null" class="tabular-nums">
-                  <span class="text-sm text-muted-foreground">计划产出</span>
+                  <span class="text-sm text-muted-foreground">{{ row.process === 'MIX' && row.output?.mixPlan ? '本单需用' : '计划产出' }}</span>
                   <b class="ml-2 text-base">{{ formatQty(row.quantity) }} {{ row.unit }}</b>
+                  <template v-if="row.process === 'MIX' && row.output?.mixPlan">
+                    <p v-if="row.output.mixPlan.wholeBatchBoards != null" class="mb-0 mt-1 text-sm text-muted-foreground">
+                      <template v-if="row.output.recipeBatches != null">{{ formatQty(row.output.recipeBatches) }} 锅 · </template>
+                      整锅预计出板 {{ formatQty(row.output.mixPlan.wholeBatchBoards) }} 张
+                    </p>
+                    <p v-if="num(row.output.mixPlan.surplusBoards) > 0" class="mb-0 mt-1 text-sm text-muted-foreground">
+                      预计余板 {{ formatQty(row.output.mixPlan.surplusBoards) }} 张，按实际良品报工后入半成品库存
+                    </p>
+                  </template>
                   <p v-if="row.output" class="mb-0 mt-1 break-words text-sm text-muted-foreground">
                     {{ materialText({ ...row.output, quantity: undefined }) }}
                   </p>

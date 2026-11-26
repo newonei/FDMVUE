@@ -494,9 +494,18 @@ describe('workbench page', () => {
       { ...reported, id: 928, contractCode: 'HT-FULFILLED', actualQuantity: 201 },
       { ...reported, id: 929, contractCode: 'HT-CLOSED', status: 'CLOSED', actualQuantity: 0, orderCount: 0, completedOrderCount: 0 },
       { ...reported, id: 930, contractCode: 'HT-HANDLED', actualQuantity: 190, shortageHandledAt: '2026-11-21 09:00:00', shortageNote: '已补派 10 片' },
+      { ...reported, id: 931, contractCode: shortOrder, actualQuantity: 200 },
     ] });
     const visibleOrderKeys = () => [...document.querySelectorAll<HTMLElement>('[data-order-key]')].map((row) => row.dataset.orderKey);
-    const orderText = (key: string) => document.querySelector(`[data-order-key="${key}"]`)!.textContent!;
+    const expectProgress = (key: string, completed: number, total: number, percent: number) => {
+      const bar = document.querySelector(`[data-order-key="${key}"] [role="progressbar"]`)!;
+      const cellText = bar.closest('td')!.textContent!;
+      expect(bar.getAttribute('aria-valuenow')).toBe(String(percent));
+      expect(bar.getAttribute('aria-valuetext')).toBe(`良品达标 ${completed} / ${total} 项任务`);
+      expect(cellText).toMatch(new RegExp(`良品达标\\s*${completed} / ${total} 项`));
+      expect(cellText).toContain(`${percent}%`);
+      return cellText;
+    };
     const taskRow = (id: number) => document.querySelector<HTMLElement>(`[data-task-id="${id}"]`)!;
     const reportStatus = (id: number) => taskRow(id).querySelector('.ant-tag')!;
     const outputStatus = (id: number) => taskRow(id).querySelector('.ant-tag-gold, .ant-tag-green')!;
@@ -509,10 +518,11 @@ describe('workbench page', () => {
     };
 
     await mount('LAMINATE');
+    const orderHeaders = [...document.querySelectorAll('.workshop-order-table thead th')].map((header) => header.textContent);
+    expect(orderHeaders[orderHeaders.indexOf('订单 / 客户') + 1]).toBe('本车间完成进度');
     expect(document.body.textContent).toMatch(/待跟进任务\s*1/);
     expect(visibleOrderKeys()).toEqual([shortOrder]);
-    expect(orderText(shortOrder)).toMatch(/待跟进\s*1/);
-    expect(orderText(shortOrder)).toMatch(/良品达标\s*0/);
+    expect(expectProgress(shortOrder, 1, 2, 50)).toMatch(/待跟进\s*1/);
     await expandOrder(shortOrder);
     expect(reportStatus(926).textContent).toBe('报工已结束');
     expect(outputStatus(926).textContent).toBe('良品未达计划');
@@ -525,8 +535,10 @@ describe('workbench page', () => {
     expect(taskRow(926).querySelector<HTMLInputElement>('input[type="checkbox"]')!.disabled).toBe(true);
 
     await changeFilter('有达标任务');
+    expect(visibleOrderKeys()).toEqual([shortOrder, 'HT-FULFILLED']);
+    await changeFilter('全部任务达标');
     expect(visibleOrderKeys()).toEqual(['HT-FULFILLED']);
-    expect(orderText('HT-FULFILLED')).toMatch(/良品达标\s*2/);
+    expect(expectProgress('HT-FULFILLED', 2, 2, 100)).not.toMatch(/待跟进|差额已处理|已关闭/);
     await expandOrder('HT-FULFILLED');
     for (const id of [927, 928]) {
       expect(reportStatus(id).textContent).toBe('报工已结束');
@@ -542,13 +554,12 @@ describe('workbench page', () => {
     expect(visibleOrders).toEqual(
       expect.arrayContaining([shortOrder, 'HT-CLOSED', 'HT-FULFILLED', 'HT-HANDLED']),
     );
-    expect(orderText('HT-CLOSED')).toMatch(/良品达标\s*0/);
-    expect(orderText('HT-CLOSED')).toMatch(/已关闭\s*1/);
+    expect(expectProgress('HT-CLOSED', 0, 1, 0)).toMatch(/已关闭\s*1/);
     await expandOrder('HT-CLOSED');
     expect(reportStatus(929).textContent).toBe('已关闭');
     expect(taskRow(929).dataset.progressColor).toBeUndefined();
     expect(taskRow(929).querySelector<HTMLInputElement>('input[type="checkbox"]')!.disabled).toBe(true);
-    expect(orderText('HT-HANDLED')).toMatch(/差额已处理\s*1/);
+    expect(expectProgress('HT-HANDLED', 0, 1, 0)).toMatch(/差额已处理\s*1/);
     await expandOrder('HT-HANDLED');
     expect(reportStatus(930).textContent).toBe('报工已结束');
     expect(outputStatus(930).textContent).toBe('良品未达计划');

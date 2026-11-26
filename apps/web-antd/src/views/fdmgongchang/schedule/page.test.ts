@@ -241,6 +241,29 @@ describe('schedule page', () => {
           workerIds: '2',
           workerNames: '张三',
         },
+        {
+          actualQuantity: 11,
+          contractCode: 'HT-001',
+          id: 33,
+          orderCount: 1,
+          output: {
+            mixPlan: { surplusBoards: 10, wholeBatchBoards: 11 },
+            name: '发泡板材',
+            recipeBatches: 1,
+            stage: 'BOARD',
+            unit: '张',
+          },
+          process: 'MIX',
+          product: '紫色瑜伽垫',
+          quantity: 1,
+          scheduleId: 12,
+          sequence: 3,
+          status: 'DONE',
+          unit: '张',
+          workDate: '2026-10-10',
+          workerIds: '2',
+          workerNames: '张三',
+        },
       ],
     };
     mocks.manual.mockResolvedValue(12);
@@ -285,6 +308,10 @@ describe('schedule page', () => {
     // 已报工的任务显示差额待处理，不能再改派、关闭
     expect(document.body.textContent).toContain('已报工');
     expect(document.body.textContent).toContain('报工差 40 片，待处理');
+    expect(document.body.textContent).toMatch(/1 锅 ·\s+整锅预计出板 11 张/);
+    expect(document.body.textContent).toContain('预计余板 10 张，按实际良品报工后入半成品库存');
+    expect(document.body.textContent).toMatch(/本单需用\s+1 张/);
+    expect(document.body.textContent).not.toContain('发泡板材 1张');
     expect([...document.querySelectorAll('button')].filter((b) => b.textContent?.replaceAll(/\s/g, '') === '关闭')).toHaveLength(1);
     clickButton('改派/改量');
     await flush();

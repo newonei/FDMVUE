@@ -13,10 +13,11 @@ import { materialRows } from '../../shared/schedule';
 const props = defineProps<{
   /** 排单卡片突出物料规格和数量，领料默认收起；其他入口保持紧凑展示。 */
   cardView?: boolean;
+  omitOutputQuantity?: boolean;
   task: Pick<Api.PlanTask, 'inputs' | 'output' | 'quantity'> | Pick<Api.Task, 'inputs' | 'output' | 'plannedQuantity' | 'quantity'>;
 }>();
 
-const rows = computed(() => materialRows(props.task));
+const rows = computed(() => materialRows(props.task, !props.omitOutputQuantity));
 const groups = computed(() => (['领料', '产出'] as const)
   .map((kind) => ({ kind, rows: rows.value.filter((row) => row.kind === kind) }))
   .filter((group) => group.rows.length > 0));

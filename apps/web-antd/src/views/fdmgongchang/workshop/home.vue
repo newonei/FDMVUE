@@ -13,7 +13,7 @@ import { computed, reactive, ref, watch } from 'vue';
 import { useAccess } from '@vben/access';
 import { buildUUID } from '@vben/utils';
 
-import { Alert, AutoComplete, Button, Input, InputNumber, message, Modal, Select, Table, Tag } from 'ant-design-vue';
+import { Alert, AutoComplete, Button, Input, InputNumber, message, Modal, Progress, Select, Table, Tag } from 'ant-design-vue';
 
 import { reassignScheduleTasks } from '#/api/fdmgongchang/schedule';
 import { batchReportWorkbenchTasks, getWorkbenchBatchOptions, getWorkbenchMates } from '#/api/fdmgongchang/workbench';
@@ -47,8 +47,19 @@ const tasks = computed(() => uniqueTasks((my.value.workshopTasks ?? []).filter((
 const orders = computed(() => groupWorkshopOrders(tasks.value));
 const keyword = ref('');
 const status = ref('ACTIVE');
-const visibleOrders = computed(() => orders.value.filter((order) => orderMatches(order, keyword.value)
-  && (status.value === 'ALL' || (status.value === 'ACTIVE' ? order.counts.pending : order.counts.completed) > 0)));
+const orderStatusOptions = [
+  { label: '有待跟进任务', value: 'ACTIVE' },
+  { label: '全部订单', value: 'ALL' },
+  { label: '有达标任务', value: 'DONE' },
+  { label: '全部任务达标', value: 'COMPLETE' },
+];
+const visibleOrders = computed(() => orders.value.filter((order) => {
+  if (!orderMatches(order, keyword.value)) return false;
+  if (status.value === 'ACTIVE') return order.counts.pending > 0;
+  if (status.value === 'DONE') return order.counts.completed > 0;
+  if (status.value === 'COMPLETE') return order.counts.completed === order.tasks.length;
+  return true;
+}));
 const followUpCount = computed(() => tasks.value.filter((task) => workshopTaskProgress(task).group === 'pending').length);
 const expandedOrderKeys = ref<string[]>([]);
 const selectedIds = ref<number[]>([]);
@@ -253,10 +264,15 @@ const pageNo = ref(1); const pageSize = ref(20);
 const pagination = computed<TablePaginationConfig>(() => ({ current: pageNo.value, pageSize: pageSize.value, total: visibleOrders.value.length,
   showSizeChanger: true, pageSizeOptions: ['10', '20', '50', '100'], showTotal: (total) => `共 ${total} 个订单` }));
 const orderColumns: TableColumnsType<WorkshopOrder> = [
-  { key: 'order', title: '订单 / 客户', width: 210 }, { key: 'products', title: '订单产品', width: 220 },
-  { key: 'focus', title: '本车间重点', width: 400 }, { key: 'progress', title: '本车间任务', width: 150 },
+  { key: 'order', title: '订单 / 客户', width: 210 },
+  { key: 'progress', title: '本车间完成进度', width: 240 },
+  { key: 'products', title: '订单产品', width: 220 },
+  { key: 'focus', title: '本车间重点', width: 400 },
   { key: 'actions', title: '操作', width: 130, fixed: 'right' },
 ];
+function orderCompletionPercent(order: WorkshopOrder) {
+  return Math.floor(order.counts.completed * 100 / order.tasks.length);
+}
 const reportOutputTitle = computed(() => {
   if (props.process === 'MIX') return '报工选择板材';
   if (props.process === 'FOLD') return '报工折叠类型';
@@ -339,7 +355,7 @@ const mixOutputLines = (task: ScheduleApi.Task) => reportMixPlanLines(task).filt
     </header>
       <div class="flex flex-wrap items-center justify-between gap-3 border-y border-border py-2">
         <div class="flex flex-wrap gap-6 text-sm"><span>订单 <b class="text-base">{{ orders.length }}</b></span><span>待跟进任务 <b class="text-base text-primary">{{ followUpCount }}</b></span><span class="text-muted-foreground">重点：{{ WORKSHOP_FOCUS[props.process] }}</span></div>
-        <div class="flex flex-wrap gap-2"><Input id="workshop-keyword" v-model:value="keyword" allow-clear class="w-64 max-w-full" placeholder="搜索订单、产品或任务编号" aria-label="搜索车间订单" /><Select id="workshop-status" v-model:value="status" :options="[{ label: '有待跟进任务', value: 'ACTIVE' }, { label: '全部订单', value: 'ALL' }, { label: '有达标任务', value: 'DONE' }]" class="w-40" aria-label="订单任务状态" /></div>
+        <div class="flex flex-wrap gap-2"><Input id="workshop-keyword" v-model:value="keyword" allow-clear class="w-64 max-w-full" placeholder="搜索订单、产品或任务编号" aria-label="搜索车间订单" /><Select id="workshop-status" v-model:value="status" :options="orderStatusOptions" class="w-40" aria-label="订单任务状态" /></div>
       </div>
       <div class="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 rounded border border-primary/20 bg-background px-3 py-2 shadow-sm">
         <div class="text-sm">已勾选 <strong class="text-base text-primary">{{ selectedIds.length }}</strong> 个任务<span class="ml-3 text-xs text-muted-foreground">员工自报请先派工；主任代报须选实际人员，按任务用料比例自动领料。已领料任务请回原工序单报工。</span></div>
@@ -351,22 +367,44 @@ const mixOutputLines = (task: ScheduleApi.Task) => reportMixPlanLines(task).filt
       <Alert v-if="reportWarnings.length" type="warning" show-icon message="报工已保存，以下事项需要补充处理" closable @close="reportWarnings = []"><template #description><ul class="mb-0 mt-2 list-disc pl-4"><li v-for="item in reportWarnings" :key="item">{{ item }}</li></ul></template></Alert>
       <Table
 v-model:expanded-row-keys="expandedOrderKeys" class="workshop-order-table" :columns="orderColumns" :data-source="visibleOrders"
-        row-key="key" :custom-row="(order: WorkshopOrder) => ({ class: 'workshop-order-row', 'data-order-key': order.key })" :pagination="pagination" :scroll="{ x: 1110 }"
+        row-key="key" :custom-row="(order: WorkshopOrder) => ({ class: 'workshop-order-row', 'data-order-key': order.key })" :pagination="pagination" :scroll="{ x: 1200 }"
         :locale="{ emptyText: orders.length ? '没有符合条件的订单' : '本车间暂无已下发订单任务' }" bordered size="middle"
         @change="(value: TablePaginationConfig) => { pageNo = value.current ?? 1; pageSize = value.pageSize ?? 20; }"
 >
         <template #bodyCell="{ column, record: order }">
           <template v-if="column.key === 'order'"><div class="break-words font-semibold">{{ order.orderNo }}</div><div class="mt-1 text-xs text-muted-foreground">{{ order.customer || '—' }}</div><div v-if="order.items[0]?.promisedDate || order.items[0]?.requiredDate" class="mt-1 text-xs text-muted-foreground">交期 {{ dateText(order.items[0].promisedDate || order.items[0].requiredDate) }}</div></template>
-          <template v-else-if="column.key === 'products'"><div v-for="item in order.items.slice(0, 2)" :key="item.itemId" class="line-clamp-1 text-sm" :title="item.productName">{{ item.productName || item.productCode || '未填写产品名称' }}</div><div v-if="order.items.length > 2" class="text-xs text-muted-foreground">等 {{ order.items.length }} 条产品明细，展开查看</div><div v-if="!order.items.length" class="text-xs text-muted-foreground">未关联具体订单产品明细</div></template>
-          <template v-else-if="column.key === 'focus'"><div v-for="field in summaryFields(order as WorkshopOrder)" :key="`${field.label}:${field.value}`" class="mb-1 flex gap-2 text-sm"><span class="shrink-0 text-xs text-muted-foreground">{{ field.label }}</span><strong class="break-words" :title="field.value">{{ field.value }}</strong></div></template>
           <template v-else-if="column.key === 'progress'">
-            <div>共 <b>{{ order.tasks.length }}</b> 项任务</div>
-            <div class="mt-1 text-xs text-muted-foreground">
-              待跟进 {{ order.counts.pending }} · 良品达标 {{ order.counts.completed }}
-              <span v-if="order.counts.handled"> · 差额已处理 {{ order.counts.handled }}</span>
-              <span v-if="order.counts.closed"> · 已关闭 {{ order.counts.closed }}</span>
+            <div class="flex flex-col gap-1">
+              <div class="flex items-baseline justify-between gap-2 tabular-nums">
+                <div class="flex flex-wrap items-baseline gap-x-1.5">
+                  <span class="text-xs text-muted-foreground">良品达标</span>
+                  <strong class="whitespace-nowrap text-base">{{ order.counts.completed }} / {{ order.tasks.length }} 项</strong>
+                </div>
+                <strong class="text-sm" :class="order.counts.completed === order.tasks.length ? 'text-success' : 'text-primary'">
+                  {{ orderCompletionPercent(order as WorkshopOrder) }}%
+                </strong>
+              </div>
+              <Progress
+                :aria-valuenow="orderCompletionPercent(order as WorkshopOrder)"
+                :aria-valuetext="`良品达标 ${order.counts.completed} / ${order.tasks.length} 项任务`"
+                :percent="orderCompletionPercent(order as WorkshopOrder)"
+                :show-info="false"
+                aria-label="本车间良品达标进度"
+                class="!m-0"
+                size="small"
+              />
+              <div
+                v-if="order.counts.pending || order.counts.handled || order.counts.closed"
+                class="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground tabular-nums"
+              >
+                <span v-if="order.counts.pending" class="font-medium text-amber-700 dark:text-amber-400">待跟进 {{ order.counts.pending }} 项</span>
+                <span v-if="order.counts.handled">差额已处理 {{ order.counts.handled }} 项</span>
+                <span v-if="order.counts.closed">已关闭 {{ order.counts.closed }} 项</span>
+              </div>
             </div>
           </template>
+          <template v-else-if="column.key === 'products'"><div v-for="item in order.items.slice(0, 2)" :key="item.itemId" class="line-clamp-1 text-sm" :title="item.productName">{{ item.productName || item.productCode || '未填写产品名称' }}</div><div v-if="order.items.length > 2" class="text-xs text-muted-foreground">等 {{ order.items.length }} 条产品明细，展开查看</div><div v-if="!order.items.length" class="text-xs text-muted-foreground">未关联具体订单产品明细</div></template>
+          <template v-else-if="column.key === 'focus'"><div v-for="field in summaryFields(order as WorkshopOrder)" :key="`${field.label}:${field.value}`" class="mb-1 flex gap-2 text-sm"><span class="shrink-0 text-xs text-muted-foreground">{{ field.label }}</span><strong class="break-words" :title="field.value">{{ field.value }}</strong></div></template>
           <template v-else-if="column.key === 'actions'"><Button type="link" :aria-expanded="expandedOrderKeys.includes(order.key)" @click="toggleOrder(order as WorkshopOrder)">{{ expandedOrderKeys.includes(order.key) ? '收起订单' : '展开订单' }}</Button></template>
         </template>
         <template #expandedRowRender="{ record: order }">

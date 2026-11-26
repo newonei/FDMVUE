@@ -115,7 +115,7 @@ export function materialNote(note: null | string | undefined, stage: string) {
   return note;
 }
 
-export function materialRows(task: Parameters<typeof taskMaterials>[0]): MaterialRow[] {
+export function materialRows(task: Parameters<typeof taskMaterials>[0], showOutputQuantity = true): MaterialRow[] {
   const ratio = task.plannedQuantity ? Number(task.quantity) / Number(task.plannedQuantity) : 1;
   const row = (kind: MaterialRow['kind'], m: Api.Material, text: string): MaterialRow => ({
     code: m.code,
@@ -127,7 +127,7 @@ export function materialRows(task: Parameters<typeof taskMaterials>[0]): Materia
   });
   return [
     ...(task.inputs ?? []).map((m) => row('领料', m, materialText(m, ratio))),
-    ...(task.output ? [row('产出', task.output, materialText({ ...task.output, quantity: task.quantity }))] : []),
+    ...(task.output ? [row('产出', task.output, materialText({ ...task.output, quantity: showOutputQuantity ? task.quantity : undefined }))] : []),
   ];
 }
 

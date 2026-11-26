@@ -174,6 +174,50 @@ describe('order-line shortage dispatch', () => {
     expect(button('确认下发').disabled).toBe(true);
     await click('确认下发');
     expect(api.release).not.toHaveBeenCalled();
+    await replaceQuantity(81, '0');
+    expect(button('预览工序').disabled).toBe(true);
+  });
+
+  it('previews and releases a separate foaming route when no matching stock exists', async () => {
+    const slice = plan().rows[0]!;
+    api.preview.mockResolvedValue(plan({
+      taskCount: 3,
+      stockCandidates: [],
+      stockCoverage: [{ itemId, covered: 0, remainingFromStart: 12 }],
+      suggestedStockSelections: [],
+      rows: [
+        { ...slice, rowKey: '20-mix', process: 'MIX', quantity: 1, unit: '张', inputs: [],
+          output: { stage: 'BOARD', recipeBatches: 1, mixPlan: { wholeBatchBoards: 11, surplusBoards: 10 } } },
+        { ...slice, inputs: [], upstreamProcesses: ['MIX'] },
+        { ...slice, rowKey: '20-cut', process: 'CUT', quantity: 12, inputs: [], upstreamProcesses: ['SLICE'] },
+      ],
+    }));
+    api.release.mockResolvedValue({ scheduleId: 9, tasks: 3, warnings: [] });
+    const released = await mount();
+
+    expect(document.body.textContent).toContain('暂无匹配的板材和片材');
+    expect(button('预览工序').disabled).toBe(false);
+    expect(button('确认下发').disabled).toBe(true);
+    await click('预览工序');
+
+    expect(api.preview).toHaveBeenCalledTimes(2);
+    expect(api.preview).toHaveBeenLastCalledWith([orderId], [], itemId);
+    expect(document.body.textContent).toContain('从发泡补产 12 条');
+    const sequence = [...document.querySelectorAll('[aria-label="补产工序清单"] > li')].map((row) => row.textContent);
+    expect(sequence).toEqual([
+      expect.stringContaining('发泡'),
+      expect.stringContaining('等待发泡报出合格批次后领料'),
+      expect.stringContaining('等待开片报出合格批次后领料'),
+    ]);
+    expect(sequence[0]).toContain('本单需用1 张');
+    expect(sequence[0]).toMatch(/1 锅 ·\s+整锅预计出板 11 张/);
+    expect(sequence[0]).toContain('预计余板 10 张，按实际良品报工后入半成品库存');
+    expect(sequence[1]).toContain('计划产出4 片');
+    await click('确认下发');
+    expect(api.release).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      productionOrderIds: [orderId], shortageItemId: itemId, stockSelections: [], previewKey: 'shortage-plan-key',
+    }));
+    expect(released).toHaveBeenCalledExactlyOnceWith(9);
   });
 
   it('shows a completed shortage using the latest server quantity', async () => {
