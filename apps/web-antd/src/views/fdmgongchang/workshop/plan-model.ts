@@ -6,7 +6,7 @@ import type { FdmgongchangStageStockApi as StockApi } from '#/api/fdmgongchang/s
 import { factoryTodayText } from '../shared/factory-date';
 import { dateText, TASK_STAGE_LABELS } from '../shared/schedule';
 import { attrSummary, formatQty, makeLabels, sizeText, sumQty, toNumber } from '../stage-stock/model';
-import { finishedQuantity, finishedSize, mixPlanLines, taskFocus, taskOrderNos, uniqueTasks, workshopTaskProgress } from './order-model';
+import { finishedQuantity, finishedSize, mixPlanLines, taskColors, taskFocus, taskOrderNos, uniqueTasks, workshopTaskProgress } from './order-model';
 
 export interface WorkshopPlanRow {
   colors: FocusField[];
@@ -42,30 +42,6 @@ function uniqueText(values: Array<null | string | undefined>) {
 function planDate(value: Api.Task['doneAt']) {
   const date = typeof value === 'number' ? factoryTodayText(new Date(value)) : dateText(value);
   return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : '';
-}
-
-function planColors(task: Api.Task, items: Api.RelatedOrderItem[], options?: StockApi.Options) {
-  const color = makeLabels(options).color;
-  const { attrs, side } = task.output ?? {};
-  const front = uniqueText(items.map((item) => color(item.targetFrontColor))).join('、');
-  const back = uniqueText(items.map((item) => color(item.targetBackColor))).join('、');
-  const general = uniqueText(items.map((item) => color(item.color))).join('、');
-  const fields: FocusField[] = [];
-  const add = (label: string, value: string, face?: FocusField['side']) => {
-    if (value) fields.push({ label, value, side: face });
-  };
-  if (side === 'FRONT') {
-    add('正面颜色', color(attrs?.color || attrs?.frontColor) || front || general, 'FRONT');
-  } else if (side === 'BACK') {
-    add('反面颜色', color(attrs?.color || attrs?.backColor) || back || general, 'BACK');
-  } else if (attrs?.color && !attrs.frontColor && !attrs.backColor) {
-    add(side === 'BOTH' ? '正反颜色' : '颜色', color(attrs.color));
-  } else {
-    add('正面颜色', color(attrs?.frontColor) || front, 'FRONT');
-    add('反面颜色', color(attrs?.backColor) || back, 'BACK');
-    if (fields.length === 0) add('颜色', general);
-  }
-  return fields;
 }
 
 function planRequirements(task: Api.Task, options?: StockApi.Options) {
@@ -121,7 +97,7 @@ export function buildWorkshopPlanRows(
     const items = task.relatedOrderItems ?? [];
     const orderQuantity = finishedQuantity(items);
     return {
-      colors: planColors(task, items, options),
+      colors: taskColors(task, options),
       completed: planDate(task.doneAt),
       customer: uniqueText(items.map((item) => item.customerName)).join('、'),
       date: task.undated ? '' : planDate(task.workDate),

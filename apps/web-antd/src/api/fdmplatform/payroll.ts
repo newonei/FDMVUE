@@ -103,14 +103,30 @@ export interface PayrollDepartmentMonth
   extends PayrollMonthlyTotals, PayrollOrganization {}
 
 interface PayrollYearRange {
-  endYear: number;
-  startYear: number;
+  endYear?: number;
+  startYear?: number;
+}
+
+interface PayrollMonthRange {
+  endMonth?: string;
+  startMonth?: string;
 }
 
 interface PayrollAnalyticsScope {
   company?: string;
   department?: string;
   region?: string;
+}
+
+export interface PayrollRangeQuery extends PayrollAnalyticsScope {
+  endMonth: string;
+  keyword?: string;
+  startMonth: string;
+}
+
+interface PayrollRangePage {
+  page: number;
+  pageSize: number;
 }
 
 export function getPayrollAnalyticsOptions() {
@@ -120,7 +136,8 @@ export function getPayrollAnalyticsOptions() {
 }
 
 export function searchPayrollEmployees(
-  params: PayrollAnalyticsScope & { keyword: string; page: number },
+  params: PayrollAnalyticsScope &
+    PayrollMonthRange & { keyword?: string; page: number },
 ) {
   return requestClient.get<{ hasMore: boolean; items: PayrollEmployeeMatch[] }>(
     `${base}/analytics/employees`,
@@ -129,7 +146,8 @@ export function searchPayrollEmployees(
 }
 
 export function getPayrollEmployeeMonths(
-  params: PayrollYearRange & { employeeKey: string; region?: string },
+  params: PayrollMonthRange &
+    PayrollYearRange & { employeeKey: string; region?: string },
 ) {
   return requestClient.get<PayrollEmployeeMonth[]>(
     `${base}/analytics/employee-months`,
@@ -138,7 +156,9 @@ export function getPayrollEmployeeMonths(
 }
 
 export function getPayrollMonthlyAnalytics(
-  params: PayrollAnalyticsScope & PayrollYearRange,
+  params: PayrollAnalyticsScope &
+    PayrollMonthRange &
+    PayrollYearRange & { keyword?: string },
 ) {
   return requestClient.get<PayrollMonthlyAnalytics[]>(
     `${base}/analytics/monthly`,
@@ -147,7 +167,8 @@ export function getPayrollMonthlyAnalytics(
 }
 
 export function getPayrollDepartmentMonths(
-  params: PayrollAnalyticsScope & { year: number },
+  params: PayrollAnalyticsScope &
+    PayrollMonthRange & { keyword?: string; year?: number },
 ) {
   return requestClient.get<PayrollDepartmentMonth[]>(
     `${base}/analytics/departments`,
@@ -165,6 +186,17 @@ export type PayrollDeliveryStatus =
   | 'SENDING'
   | 'UNCERTAIN'
   | 'VIEWED';
+
+export type PayrollRowStatus = 'PENDING' | PayrollDeliveryStatus;
+
+export interface PayrollRangeRow extends PayrollEmployeeMonth {
+  status: PayrollRowStatus;
+}
+
+export interface PayrollPeriodDelivery {
+  delivery: PayrollDelivery;
+  month: string;
+}
 
 export interface PayrollDelivery {
   company: string;
@@ -222,6 +254,29 @@ export function getPayrollTrend(
       month,
     },
   });
+}
+
+export function getPayrollRows(params: PayrollRangePage & PayrollRangeQuery) {
+  return requestClient.get<{ items: PayrollRangeRow[]; total: number }>(
+    `${base}/rows`,
+    { params },
+  );
+}
+
+export function getPayrollDeliveryRange(
+  params: PayrollRangePage & PayrollRangeQuery,
+) {
+  return requestClient.get<{ items: PayrollPeriodDelivery[]; total: number }>(
+    `${base}/deliveries/range`,
+    { params },
+  );
+}
+
+export function getPayrollDeliveryProgress(params: PayrollRangeQuery) {
+  return requestClient.get<Partial<Record<PayrollRowStatus, number>>>(
+    `${base}/delivery-progress`,
+    { params },
+  );
 }
 
 export function getPayrollHistory(rowId: string) {

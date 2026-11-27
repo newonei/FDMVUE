@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { AnalyticsView, CostMetric } from './analytics-model';
+import type { PayrollFilters } from './payroll-filters';
 
 import type {
   PayrollEmployeeMatch,
@@ -8,7 +9,7 @@ import type {
 
 import { computed, ref, shallowRef, watch } from 'vue';
 
-import { RefreshCw, Search } from '@vben/icons';
+import { RefreshCw } from '@vben/icons';
 
 import {
   getPayrollAnalyticsOptions,
@@ -23,39 +24,48 @@ import {
   amount,
   annualAnalytics,
   average,
-  calendarMonths,
   costMetrics,
   departmentTotals,
   employeeAnalytics,
   employerContribution,
   monthChange,
-  yearList,
-  yearsWithMonths,
+  reportPeriod,
+  summarize,
 } from './analytics-model';
 import { currency, monthLabel, monthOffset, payrollRegions } from './model';
 import PayrollAnalysisCharts from './PayrollAnalysisCharts.vue';
 import PayrollChartCard from './PayrollChartCard.vue';
 import PayrollReportTable from './PayrollReportTable.vue';
 
-const props = defineProps<{ reportMonth: string; view: AnalyticsView }>();
+const props = defineProps<{
+  filters: PayrollFilters;
+  reportMonth: string;
+  view: AnalyticsView;
+}>();
 const emit = defineEmits<{ detail: [row: PayrollRow, month: string] }>();
 
-const initialYear = Number(props.reportMonth.slice(0, 4));
-const startYear = ref(initialYear);
-const endYear = ref(initialYear);
 const region = ref<null | string>(null);
 const company = ref('');
 const department = ref('');
-const focusMonth = ref(props.reportMonth.slice(5));
 const grouping = ref<'annual' | 'monthly'>('monthly');
 const costMetric = ref<CostMetric>('cashGross');
 const costPane = ref<'composition' | 'records' | 'trends'>('trends');
 const employeePane = ref<'composition' | 'records' | 'trends'>('records');
 const employee = shallowRef<PayrollEmployeeMatch>();
-const employeeStart = ref(initialYear);
-const employeeEnd = ref(initialYear);
-const name = ref('');
-const keyword = ref('');
+const keyword = computed(() => props.filters.employeeName.trim());
+const timeScope = computed(() => ({
+  endMonth: props.filters.endMonth,
+  startMonth: props.filters.startMonth,
+}));
+const singleMonth = computed(
+  () => timeScope.value.startMonth === timeScope.value.endMonth,
+);
+const rangeLabel = computed(() => {
+  const { startMonth, endMonth } = timeScope.value;
+  return singleMonth.value
+    ? monthLabel(startMonth)
+    : `${monthLabel(startMonth)}至${monthLabel(endMonth)}`;
+});
 const searchPage = ref(1);
 const refresh = ref(0);
 
@@ -95,20 +105,6 @@ const {
   loading: optionsLoading,
   retry: retryOptions,
 } = useReportQuery(() => getPayrollAnalyticsOptions);
-const availableYears = computed(() =>
-  yearsWithMonths(options.value?.months ?? []),
-);
-const firstYear = computed(() => availableYears.value.at(-1) ?? initialYear);
-const lastYear = computed(() => availableYears.value[0] ?? initialYear);
-const endYears = computed(() =>
-  yearList(firstYear.value, lastYear.value).toReversed(),
-);
-const startYears = computed(() =>
-  yearList(
-    Math.max(firstYear.value, endYear.value - 9),
-    endYear.value,
-  ).toReversed(),
-);
 const organizations = computed(() => options.value?.organizations ?? []);
 const regions = computed(() => [
   ...new Set([
@@ -139,33 +135,12 @@ const scope = computed(() => ({
   department: department.value || undefined,
   region: region.value ?? undefined,
 }));
-const selectedMonth = computed(() => `${endYear.value}-${focusMonth.value}`);
-let yearsInitialized = false;
-
-watch(options, (result) => {
-  if (!result || yearsInitialized) return;
-  endYear.value = lastYear.value;
-  startYear.value = Math.max(firstYear.value, endYear.value - 2);
-  yearsInitialized = true;
-});
-
-watch([endYear, options], () => {
-  if (!options.value) return;
-  startYear.value = Math.max(
-    firstYear.value,
-    endYear.value - 9,
-    Math.min(startYear.value, endYear.value),
-  );
-  const lastMonth = options.value?.months.findLast((month) =>
-    month.startsWith(String(endYear.value)),
-  );
-  focusMonth.value =
-    lastMonth?.slice(5) ??
-    (endYear.value === initialYear ? props.reportMonth.slice(5) : '12');
-});
-
-watch([region, company, department], () => {
+watch([region, company, department, keyword], () => {
   employee.value = undefined;
+  searchPage.value = 1;
+});
+
+watch(timeScope, () => {
   searchPage.value = 1;
 });
 
@@ -178,8 +153,8 @@ const {
   if (!options.value || !['cost', 'overall'].includes(props.view)) return;
   const params = {
     ...scope.value,
-    endYear: endYear.value,
-    startYear: startYear.value,
+    ...timeScope.value,
+    keyword: keyword.value || undefined,
   };
   return () => getPayrollMonthlyAnalytics(params);
 });
@@ -190,7 +165,11 @@ const {
   retry: retryDepartments,
 } = useReportQuery(() => {
   if (!options.value || props.view !== 'departments') return;
-  const params = { ...scope.value, year: endYear.value };
+  const params = {
+    ...scope.value,
+    ...timeScope.value,
+    keyword: keyword.value || undefined,
+  };
   return () => getPayrollDepartmentMonths(params);
 });
 const {
@@ -199,10 +178,11 @@ const {
   loading: searching,
   retry: retrySearch,
 } = useReportQuery(() => {
-  if (!options.value || props.view !== 'employee' || !keyword.value) return;
+  if (!options.value || props.view !== 'employee') return;
   const params = {
     ...scope.value,
-    keyword: keyword.value,
+    ...timeScope.value,
+    keyword: keyword.value || undefined,
     page: searchPage.value,
   };
   return () => searchPayrollEmployees(params);
@@ -215,63 +195,41 @@ const {
 } = useReportQuery(() => {
   if (!options.value || props.view !== 'employee' || !employee.value) return;
   const params = {
+    ...timeScope.value,
     employeeKey: employee.value.employeeKey,
-    endYear: employeeEnd.value,
-    region: employee.value.region,
-    startYear: employeeStart.value,
+    region: employee.value.region ?? '',
   };
   return () => getPayrollEmployeeMonths(params);
 });
 
-const employeeFirstYear = computed(() =>
-  Number(employee.value?.firstMonth.slice(0, 4) ?? initialYear),
-);
-const employeeLastYear = computed(() =>
-  Number(employee.value?.lastMonth.slice(0, 4) ?? initialYear),
-);
-const employeeEndYears = computed(() =>
-  yearList(employeeFirstYear.value, employeeLastYear.value).toReversed(),
-);
-const employeeStartYears = computed(() =>
-  yearList(
-    Math.max(employeeFirstYear.value, employeeEnd.value - 9),
-    employeeEnd.value,
-  ).toReversed(),
-);
 const employeeRows = computed(() =>
   employeeAnalytics(employeeResults.value ?? []),
 );
+
+function sumAvailable(values: (null | number | undefined)[]) {
+  const available = values.filter((value) => typeof value === 'number');
+  return available.length > 0
+    ? available.reduce((sum, value) => sum + value, 0)
+    : null;
+}
+
 const employeeTable = computed(() =>
   (employeeResults.value ?? []).map(({ month, row }) => ({
-    base: row.base + row.grade + row.tenurePay,
+    base: sumAvailable([row.base, row.grade, row.tenurePay]),
     gross: row.gross,
-    key: month,
+    key: row.id,
     month,
     net: row.net,
-    performance:
-      row.performance +
-      row.beeAward +
-      row.bonus +
-      row.commission +
+    performance: sumAvailable([
+      row.performance,
+      row.beeAward,
+      row.bonus,
+      row.commission,
       row.priorBonus,
+    ]),
     tax: row.tax,
   })),
 );
-watch(employeeEnd, () => {
-  employeeStart.value = Math.max(
-    employeeFirstYear.value,
-    employeeEnd.value - 9,
-    Math.min(employeeStart.value, employeeEnd.value),
-  );
-});
-
-function submitSearch() {
-  const value = name.value.trim();
-  employee.value = undefined;
-  if (value && value === keyword.value && searchPage.value === 1) retrySearch();
-  searchPage.value = 1;
-  keyword.value = value;
-}
 
 function clearCompanyAndDepartment() {
   company.value = '';
@@ -285,11 +243,6 @@ function chooseEmployee(item: PayrollEmployeeMatch) {
   )
     return;
   employee.value = item;
-  employeeEnd.value = employeeLastYear.value;
-  employeeStart.value = Math.max(
-    employeeFirstYear.value,
-    employeeEnd.value - 2,
-  );
   employeePane.value = 'records';
 }
 
@@ -297,8 +250,8 @@ function employeeMatchKey(item: PayrollEmployeeMatch) {
   return JSON.stringify([item.employeeKey, item.region]);
 }
 
-function openEmployeeMonth(month: string) {
-  const record = employeeResults.value?.find((item) => item.month === month);
+function openEmployeeMonth(rowId: string) {
+  const record = employeeResults.value?.find(({ row }) => row.id === rowId);
   if (record) emit('detail', record.row, record.month);
 }
 
@@ -307,37 +260,23 @@ const annual = computed(() => annualAnalytics(monthly.value));
 const byMonth = computed(
   () => new Map(monthly.value.map((row) => [row.month, row])),
 );
-const current = computed(() => byMonth.value.get(selectedMonth.value));
-const currentYear = computed(() =>
-  annual.value.find(({ year }) => year === endYear.value),
-);
+const selectedTotals = computed(() => summarize(monthly.value));
 const summary = computed(() => [
+  { title: '应发合计', value: currency(selectedTotals.value.gross) },
+  { title: '实发合计', value: currency(selectedTotals.value.net) },
   {
-    title: '月度总薪资（应发）',
-    value: current.value?.gross,
-    date: selectedMonth.value,
+    title: singleMonth.value ? '核算人数' : '核算人月',
+    value: selectedTotals.value.people.toLocaleString('zh-CN'),
   },
-  {
-    title: '月度实发合计',
-    value: current.value?.net,
-    date: selectedMonth.value,
-  },
-  {
-    title: '年度总薪资（应发）',
-    value: currentYear.value?.gross,
-    date: `${endYear.value} 年 · ${currentYear.value?.months ?? 0} / 12 个月有记录`,
-  },
-  {
-    title: '年度实发合计',
-    value: currentYear.value?.net,
-    date: `${endYear.value} 年 · ${currentYear.value?.months ?? 0} / 12 个月有记录`,
-  },
+  { title: '有记录月数', value: String(selectedTotals.value.months) },
 ]);
-const yearlyLabels = computed(() => yearList(startYear.value, endYear.value));
+const reportRange = computed(() =>
+  reportPeriod(timeScope.value.startMonth, timeScope.value.endMonth),
+);
 const monthComparison = computed(() =>
-  yearlyLabels.value.map((year) => ({
+  reportRange.value.years.map((year) => ({
     name: `${year} 年`,
-    values: calendarMonths.map(
+    values: reportRange.value.comparisonMonths.map(
       ({ key }) => byMonth.value.get(`${year}-${key}`)?.gross ?? null,
     ),
   })),
@@ -345,7 +284,7 @@ const monthComparison = computed(() =>
 const annualComparison = computed(() =>
   (['gross', 'net'] as const).map((key) => ({
     name: key === 'gross' ? '应发' : '实发',
-    values: yearlyLabels.value.map(
+    values: reportRange.value.years.map(
       (year) => annual.value.find((row) => row.year === year)?.[key] ?? null,
     ),
   })),
@@ -418,18 +357,15 @@ const reportRows = computed(() =>
 );
 
 const departmentRows = computed(() =>
-  departmentTotals(
-    departmentResult.value ?? [],
-    grouping.value === 'monthly' ? selectedMonth.value : '',
-  ),
+  departmentTotals(departmentResult.value ?? []),
 );
 const departmentColumns = computed(() => [
   { key: 'region', label: '所属区域' },
   { key: 'company', label: '所属公司' },
   { key: 'department', label: '部门' },
-  ...(grouping.value === 'annual' ? [number('months', '有记录月数')] : []),
+  ...(singleMonth.value ? [] : [number('months', '有记录月数')]),
   ...amountColumns,
-  number('people', grouping.value === 'annual' ? '核算人月' : '核算人数'),
+  number('people', singleMonth.value ? '核算人数' : '核算人月'),
 ]);
 const ranked = computed(() => departmentRows.value.slice(0, 10));
 const departmentSeries = computed(() =>
@@ -438,9 +374,6 @@ const departmentSeries = computed(() =>
     values: ranked.value.map((row) => row[key]),
   })),
 );
-const departmentHeading = computed(() =>
-  grouping.value === 'annual' ? '各部门年度总薪资' : '各部门月度薪资统计',
-);
 
 function chooseDepartment(key: string) {
   const match = departmentRows.value.find((row) => row.key === key);
@@ -448,7 +381,6 @@ function chooseDepartment(key: string) {
   region.value = match.region ?? '';
   company.value = match.company;
   department.value = match.department;
-  grouping.value = 'monthly';
 }
 </script>
 
@@ -467,38 +399,6 @@ function chooseDepartment(key: string) {
     </div>
     <template v-else>
       <div class="analysis-toolbar">
-        <template v-if="view !== 'employee'">
-          <label v-if="view !== 'departments'">起始年度
-            <select v-model.number="startYear">
-              <option v-for="year in startYears" :key="year" :value="year">
-                {{ year }} 年
-              </option>
-            </select>
-          </label>
-          <label>{{ view === 'departments' ? '统计年度' : '截至年度' }}
-            <select v-model.number="endYear">
-              <option v-for="year in endYears" :key="year" :value="year">
-                {{ year }} 年
-              </option>
-            </select>
-          </label>
-          <label
-            v-if="
-              view === 'overall' ||
-              (view === 'departments' && grouping === 'monthly')
-            "
-            >工资月份
-            <select v-model="focusMonth">
-              <option
-                v-for="item in calendarMonths"
-                :key="item.key"
-                :value="item.key"
-              >
-                {{ item.label }}
-              </option>
-            </select>
-          </label>
-        </template>
         <label>所属区域
           <select
             v-model="region"
@@ -539,28 +439,7 @@ function chooseDepartment(key: string) {
             </option>
           </select>
         </label>
-        <form
-          v-if="view === 'employee'"
-          class="employee-search"
-          @submit.prevent="submitSearch"
-        >
-          <label>员工姓名
-            <input
-              v-model="name"
-              placeholder="输入姓名或部分姓名"
-              maxlength="128"
-            />
-          </label>
-          <button
-            type="submit"
-            class="control primary"
-            :disabled="!name.trim()"
-          >
-            <Search :size="15" /> 查询
-          </button>
-        </form>
         <button
-          v-else
           type="button"
           class="control refresh"
           aria-label="刷新分析数据"
@@ -571,13 +450,7 @@ function chooseDepartment(key: string) {
       </div>
 
       <template v-if="view === 'employee'">
-        <div v-if="!keyword" class="analysis-panel state">
-          <strong>按姓名查询员工薪资</strong>
-          <p>
-            支持搜索已导入的所有年份。出现同名记录时，可按区域、公司和部门确认。
-          </p>
-        </div>
-        <div v-else-if="searchError" class="analysis-panel state" role="alert">
+        <div v-if="searchError" class="analysis-panel state" role="alert">
           <p>{{ searchError }}</p>
           <button type="button" class="control" @click="retrySearch">
             重试
@@ -590,7 +463,10 @@ function chooseDepartment(key: string) {
           当前条件下没有匹配的员工。
         </p>
         <details v-else class="analysis-panel search-results" open>
-          <summary>员工搜索结果 · 本页 {{ matches.items.length }} 位</summary>
+          <summary>
+            {{ keyword ? '员工搜索结果' : '员工列表' }} · 本页
+            {{ matches.items.length }} 位
+          </summary>
           <div class="matches">
             <button
               v-for="item in matches.items"
@@ -638,30 +514,7 @@ function chooseDepartment(key: string) {
                 {{ employee.department }}
               </p>
             </div>
-            <div class="analysis-toolbar">
-              <label>起始年度
-                <select v-model.number="employeeStart">
-                  <option
-                    v-for="year in employeeStartYears"
-                    :key="year"
-                    :value="year"
-                  >
-                    {{ year }} 年
-                  </option>
-                </select>
-              </label>
-              <label>截至年度
-                <select v-model.number="employeeEnd">
-                  <option
-                    v-for="year in employeeEndYears"
-                    :key="year"
-                    :value="year"
-                  >
-                    {{ year }} 年
-                  </option>
-                </select>
-              </label>
-            </div>
+            <p>{{ rangeLabel }}</p>
           </div>
           <div class="switch" aria-label="员工薪资视图">
             <button
@@ -707,41 +560,27 @@ function chooseDepartment(key: string) {
             <PayrollReportTable
               :columns="employeeColumns"
               :rows="employeeTable"
-              empty="所选年度内暂无薪资记录。"
+              empty="所选月份范围内暂无薪资记录。"
               action="查看明细"
               @select="openEmployeeMonth"
             />
           </section>
           <PayrollAnalysisCharts
             v-else-if="employeeRows.length"
-            :end-year="employeeEnd"
-            :start-year="employeeStart"
+            :end-month="timeScope.endMonth"
+            :start-month="timeScope.startMonth"
             :mode="employeePane"
             :rows="employeeRows"
             individual
             metric="gross"
           />
-          <p v-else class="analysis-panel state">所选年度内暂无薪资记录。</p>
+          <p v-else class="analysis-panel state">
+            所选月份范围内暂无薪资记录。
+          </p>
         </template>
       </template>
 
       <template v-else-if="view === 'departments'">
-        <div class="switch" aria-label="部门统计周期">
-          <button
-            type="button"
-            :aria-pressed="grouping === 'monthly'"
-            @click="grouping = 'monthly'"
-          >
-            月度统计
-          </button>
-          <button
-            type="button"
-            :aria-pressed="grouping === 'annual'"
-            @click="grouping = 'annual'"
-          >
-            年度统计
-          </button>
-        </div>
         <div v-if="departmentError" class="analysis-panel state" role="alert">
           <p>{{ departmentError }}</p>
           <button type="button" class="control" @click="retryDepartments">
@@ -759,27 +598,21 @@ function chooseDepartment(key: string) {
           <section class="analysis-panel">
             <div class="section-head">
               <div>
-                <h2>{{ departmentHeading }}</h2>
-                <p>
-                  {{
-                    grouping === 'annual'
-                      ? `${endYear} 年 · 按工资表所属公司与部门归集`
-                      : monthLabel(selectedMonth)
-                  }}
-                </p>
+                <h2>各部门薪资统计</h2>
+                <p>{{ rangeLabel }}</p>
               </div>
             </div>
             <PayrollReportTable
               :columns="departmentColumns"
               :rows="departmentRows"
               empty="当前统计范围内暂无部门工资记录。"
-              :action="grouping === 'annual' ? '查看月度' : undefined"
+              :action="department ? undefined : '筛选部门'"
               @select="chooseDepartment"
             />
           </section>
           <PayrollChartCard
             v-if="ranked.length"
-            :title="`${departmentHeading}对比`"
+            title="部门薪资对比"
             :description="
               departmentRows.length > 10
                 ? '按应发金额取前 10 个部门'
@@ -827,25 +660,25 @@ function chooseDepartment(key: string) {
                 class="analysis-panel metric-card"
               >
                 <h2>{{ metric.title }}</h2>
-                <strong>{{
-                  metric.value === undefined ? '—' : currency(metric.value)
-                }}</strong>
-                <p>{{ metric.date }}</p>
+                <strong>{{ metric.value }}</strong>
+                <p>{{ rangeLabel }}</p>
               </article>
             </div>
             <div class="overview-charts">
               <PayrollChartCard
                 title="各月总薪资对比"
-                description="同一月份按年度对比应发总额"
-                :columns="calendarMonths.map(({ label }) => label)"
+                description="按年度对比所选月份的应发总额"
+                :columns="
+                  reportRange.comparisonMonths.map(({ label }) => label)
+                "
                 :series="monthComparison"
                 large-amounts
                 type="bar"
               />
               <PayrollChartCard
-                title="年度总薪资"
-                description="汇总各年有工资记录的月份"
-                :columns="yearlyLabels.map((year) => `${year} 年`)"
+                title="按年汇总薪资"
+                description="各年仅汇总所选范围内有工资记录的月份"
+                :columns="reportRange.years.map((year) => `${year} 年`)"
                 :series="annualComparison"
                 large-amounts
                 type="bar"
@@ -884,7 +717,7 @@ function chooseDepartment(key: string) {
                 <h2>
                   {{ view === 'overall' ? '总体数据表' : '人力成本数据查询' }}
                 </h2>
-                <p>汇总范围包含所选年度内有工资记录的月份</p>
+                <p>{{ rangeLabel }}</p>
               </div>
               <div class="switch" aria-label="数据表周期">
                 <button
@@ -892,14 +725,14 @@ function chooseDepartment(key: string) {
                   :aria-pressed="grouping === 'monthly'"
                   @click="grouping = 'monthly'"
                 >
-                  月度数据
+                  按月分行
                 </button>
                 <button
                   type="button"
                   :aria-pressed="grouping === 'annual'"
                   @click="grouping = 'annual'"
                 >
-                  年度数据
+                  按年汇总
                 </button>
               </div>
             </div>
@@ -911,8 +744,8 @@ function chooseDepartment(key: string) {
           </section>
           <PayrollAnalysisCharts
             v-else
-            :start-year="startYear"
-            :end-year="endYear"
+            :start-month="timeScope.startMonth"
+            :end-month="timeScope.endMonth"
             :rows="monthly"
             :mode="costPane === 'composition' ? 'composition' : 'trends'"
             :metric="costMetric"

@@ -29,6 +29,21 @@ export function yearList(start: number, end: number) {
   );
 }
 
+export function reportPeriod(startMonth: string, endMonth: string) {
+  const years = yearList(
+    Number(startMonth.slice(0, 4)),
+    Number(endMonth.slice(0, 4)),
+  );
+  const months = years
+    .flatMap((year) => calendarMonths.map(({ key }) => `${year}-${key}`))
+    .filter((month) => month >= startMonth && month <= endMonth);
+  const monthKeys = new Set(months.map((month) => month.slice(5)));
+  const comparisonMonths = calendarMonths.filter(({ key }) =>
+    monthKeys.has(key),
+  );
+  return { comparisonMonths, months, years };
+}
+
 export function yearsWithMonths(months: string[]) {
   return [
     ...new Set(months.map((month) => Number(month.slice(0, 4)))),
@@ -90,10 +105,7 @@ export function average(value: number, count: number) {
   return count > 0 ? Math.round(value / count) : null;
 }
 
-export function departmentTotals(
-  rows: PayrollDepartmentMonth[],
-  month: string,
-) {
+export function departmentTotals(rows: PayrollDepartmentMonth[]) {
   const departments = new Map<
     string,
     Pick<
@@ -105,7 +117,6 @@ export function departmentTotals(
     }
   >();
   for (const row of rows) {
-    if (month && row.month !== month) continue;
     const key = JSON.stringify([row.region ?? '', row.company, row.department]);
     const item = departments.get(key);
     if (item) {

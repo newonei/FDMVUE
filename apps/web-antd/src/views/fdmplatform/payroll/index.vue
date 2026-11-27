@@ -1,12 +1,20 @@
 <script setup lang="ts">
+import type { PayrollFilters } from './payroll-filters';
+
 import type {
   PayrollBatch,
   PayrollCandidate,
   PayrollDelivery,
+  PayrollDepartmentMonth,
   PayrollImportPreview,
+  PayrollMonthlyAnalytics,
   PayrollMonthlyTotals,
+  PayrollOrganization,
+  PayrollPeriodDelivery,
+  PayrollRangeRow,
   PayrollRecipient,
   PayrollRow,
+  PayrollRowStatus,
   PayrollSettings,
   PayrollSlipField,
 } from '#/api/fdmplatform/payroll';
@@ -41,7 +49,6 @@ import {
   List,
   LockKeyhole,
   RefreshCw,
-  Search,
   Settings,
   Upload,
   UserRoundPen,
@@ -52,12 +59,17 @@ import { message } from 'ant-design-vue';
 
 import {
   commitPayrollImport,
+  getPayrollAnalyticsOptions,
   getPayrollCandidates,
   getPayrollDeliveries,
-  getPayrollHistory,
+  getPayrollDeliveryProgress,
+  getPayrollDeliveryRange,
+  getPayrollDepartmentMonths,
+  getPayrollEmployeeMonths,
   getPayrollMonth,
+  getPayrollMonthlyAnalytics,
+  getPayrollRows,
   getPayrollSettings,
-  getPayrollTrend,
   previewPayrollImport,
   sendPayrollSlips,
   updatePayrollSettings,
@@ -82,6 +94,7 @@ import {
   validMonth,
 } from './model';
 import PayrollAnalytics from './PayrollAnalytics.vue';
+import PayrollFiltersBar from './PayrollFilters.vue';
 import PayrollSlipFields from './PayrollSlipFields.vue';
 import PayrollTrend from './PayrollTrend.vue';
 
@@ -114,9 +127,9 @@ const tabs = [
   },
   {
     id: 'overview',
-    label: '当月核算',
+    label: '工资核算',
     icon: History,
-    description: '按月核对工资成本、人员分布与发放进度。',
+    description: '按所选期间核对工资成本、人员分布与发放进度。',
   },
   {
     id: 'detail',
@@ -168,136 +181,160 @@ const analyticsView = computed(() => {
 const monthlyWork = computed(
   () => !analyticsView.value && tab.value !== 'settings',
 );
-const month = ref(monthOffset(currentMonth(), -1));
+const initialMonth = ref(monthOffset(currentMonth(), -1));
+const filters = ref<PayrollFilters>({
+  employeeName: '',
+  endMonth: initialMonth.value,
+  startMonth: initialMonth.value,
+});
+let initializedPeriod = false;
+const month = computed(() => filters.value.endMonth);
+const singleMonth = computed(() => filters.value.startMonth === month.value);
+const rangeLabel = computed(() =>
+  singleMonth.value
+    ? monthLabel(month.value)
+    : `${monthLabel(filters.value.startMonth)} 至 ${monthLabel(month.value)}`,
+);
 const company = ref('');
 const department = ref('');
 const region = ref('');
-const query = ref('');
+const scope = computed(() => ({
+  company: company.value || undefined,
+  department: department.value || undefined,
+  endMonth: month.value,
+  keyword: filters.value.employeeName || undefined,
+  region: region.value || undefined,
+  startMonth: filters.value.startMonth,
+}));
 const rankBy = ref<'company' | 'department'>('department');
-const detailPage = ref(1);
 const batch = ref<PayrollBatch>();
-const trend = ref<PayrollMonthlyTotals[]>([]);
-const deliveries = ref<PayrollDelivery[]>([]);
-const batchError = ref('');
-const batchLoading = ref(false);
-const trendError = ref('');
-const trendLoading = ref(false);
+const sendingMonth = ref('');
+const monthDeliveries = ref<PayrollDelivery[]>([]);
+const sendScopeReady = ref(false);
+const sendScopeError = ref('');
+const organizations = ref<PayrollOrganization[]>([]);
+const organizationError = ref('');
+const monthly = ref<PayrollMonthlyAnalytics[]>([]);
+const departmentTotals = ref<PayrollDepartmentMonth[]>([]);
+const overviewError = ref('');
+const overviewLoading = ref(false);
+const detailPage = ref(1);
+const detailPageSize = 12;
+const detailTotal = ref(0);
+const detailRows = ref<PayrollRangeRow[]>([]);
+const detailError = ref('');
+const detailLoading = ref(false);
+const detailPages = computed(() =>
+  Math.max(1, Math.ceil(detailTotal.value / detailPageSize)),
+);
+const deliveryPage = ref(1);
+const deliveryPageSize = 15;
+const deliveryTotal = ref(0);
+const deliveryRows = ref<PayrollPeriodDelivery[]>([]);
+const deliveryPages = computed(() =>
+  Math.max(1, Math.ceil(deliveryTotal.value / deliveryPageSize)),
+);
 const deliveryError = ref('');
 const deliveryLoading = ref(false);
-const deliveryReady = ref(false);
+const progress = ref<Partial<Record<PayrollRowStatus, number>>>({});
+const progressReady = ref(false);
+const progressError = ref('');
 const active = ref(false);
+const refresh = ref(0);
+let organizationRequest = 0;
 let monthRequest = 0;
-let trendRequest = 0;
+let overviewRequest = 0;
+let detailRequest = 0;
 let deliveryRequest = 0;
+let progressRequest = 0;
 
 const currentTab = computed(() => tabs.find(({ id }) => id === tab.value)!);
+const regions = computed(() =>
+  [
+    ...new Set(
+      organizations.value.flatMap((row) => (row.region ? [row.region] : [])),
+    ),
+  ].toSorted((a, b) => a.localeCompare(b, 'zh-CN')),
+);
 const companies = computed(() =>
-  [...new Set(batch.value?.rows.map((row) => row.company))].toSorted(),
+  [
+    ...new Set(
+      organizations.value
+        .filter((row) => !region.value || row.region === region.value)
+        .map((row) => row.company),
+    ),
+  ].toSorted((a, b) => a.localeCompare(b, 'zh-CN')),
 );
 const departments = computed(() =>
   [
     ...new Set(
-      batch.value?.rows
-        .filter((row) => !company.value || row.company === company.value)
+      organizations.value
+        .filter(
+          (row) =>
+            (!region.value || row.region === region.value) &&
+            (!company.value || row.company === company.value),
+        )
         .map((row) => row.department),
-    ),
-  ].toSorted(),
-);
-
-function inScope(row: { company: string; department: string }) {
-  return (
-    (!company.value || row.company === company.value) &&
-    (!department.value || row.department === department.value)
-  );
-}
-
-const visibleRows = computed(() => batch.value?.rows.filter(inScope) ?? []);
-const regions = computed(() =>
-  [
-    ...new Set(
-      visibleRows.value.flatMap(({ region }) => (region ? [region] : [])),
     ),
   ].toSorted((a, b) => a.localeCompare(b, 'zh-CN')),
 );
-const filteredRows = computed(() =>
-  visibleRows.value.filter(
-    (row) =>
-      (!region.value || row.region === region.value) &&
-      row.name.includes(query.value.trim()),
-  ),
-);
-const detailPageSize = 12;
-const detailPages = computed(() =>
-  Math.max(1, Math.ceil(filteredRows.value.length / detailPageSize)),
-);
-const detailRows = computed(() =>
-  filteredRows.value.slice(
-    (detailPage.value - 1) * detailPageSize,
-    detailPage.value * detailPageSize,
-  ),
-);
-const deliveryPage = ref(1);
-const deliveryPageSize = 15;
-const scopedDeliveries = computed(() => deliveries.value.filter(inScope));
-const deliveryPages = computed(() =>
-  Math.max(1, Math.ceil(scopedDeliveries.value.length / deliveryPageSize)),
-);
-const deliveryRows = computed(() =>
-  scopedDeliveries.value.slice(
-    (deliveryPage.value - 1) * deliveryPageSize,
-    deliveryPage.value * deliveryPageSize,
-  ),
-);
-const latestByRow = computed(() => latestDeliveries(deliveries.value));
-const rowStatus = (row: PayrollRow) =>
-  latestByRow.value.get(row.id)?.status ?? 'PENDING';
+
+const latestByRow = computed(() => latestDeliveries(monthDeliveries.value));
 const eligibleRows = computed(() => {
-  if (!deliveryReady.value || deliveryError.value) return [];
-  const list = tab.value === 'detail' ? filteredRows.value : visibleRows.value;
-  return list.filter((row) =>
-    ['EXPIRED', 'FAILED', 'PENDING'].includes(rowStatus(row)),
+  if (
+    !singleMonth.value ||
+    !sendScopeReady.value ||
+    sendingMonth.value !== month.value
+  )
+    return [];
+  const keyword = filters.value.employeeName;
+  return (batch.value?.rows ?? []).filter(
+    (row) =>
+      (!company.value || row.company === company.value) &&
+      (!department.value || row.department === department.value) &&
+      (!region.value || row.region === region.value) &&
+      row.name.includes(keyword) &&
+      ['EXPIRED', 'FAILED', 'PENDING'].includes(
+        latestByRow.value.get(row.id)?.status ?? 'PENDING',
+      ),
   );
 });
 const stateCounts = computed(() => {
-  const statuses = visibleRows.value.map(rowStatus);
+  const counts = progress.value;
   return [
-    {
-      code: 'PENDING',
-      label: '待发送',
-      count: statuses.filter((status) => status === 'PENDING').length,
-    },
+    { code: 'PENDING', label: '待发送', count: counts.PENDING ?? 0 },
     {
       code: 'ACCEPTED',
       label: '已提交 / 已送达',
-      count: statuses.filter((status) =>
-        ['ACCEPTED', 'DELIVERED', 'QUEUED', 'SENDING'].includes(status),
-      ).length,
+      count:
+        (counts.ACCEPTED ?? 0) +
+        (counts.DELIVERED ?? 0) +
+        (counts.QUEUED ?? 0) +
+        (counts.SENDING ?? 0),
     },
-    {
-      code: 'VIEWED',
-      label: '已查看',
-      count: statuses.filter((status) => status === 'VIEWED').length,
-    },
+    { code: 'VIEWED', label: '已查看', count: counts.VIEWED ?? 0 },
     {
       code: 'EXPIRED',
-      label: '已到期',
-      count: statuses.filter((status) => status === 'EXPIRED').length,
+      label: '已到期 / 已失效',
+      count: (counts.EXPIRED ?? 0) + (counts.REVOKED ?? 0),
     },
     {
       code: 'FAILED',
       label: '失败 / 待核实',
-      count: statuses.filter((status) =>
-        ['FAILED', 'UNCERTAIN'].includes(status),
-      ).length,
+      count: (counts.FAILED ?? 0) + (counts.UNCERTAIN ?? 0),
     },
   ];
 });
-watch(regions, (choices) => {
-  if (region.value && !choices.includes(region.value)) region.value = '';
-});
-watch([company, department, region, query], () => {
+
+watch(scope, () => {
   detailPage.value = 1;
+  detailRows.value = [];
+  detailTotal.value = 0;
   deliveryPage.value = 1;
+  deliveryRows.value = [];
+  deliveryTotal.value = 0;
+  progressReady.value = false;
+  progressError.value = '';
 });
 watch(detailPages, (pages) => {
   detailPage.value = Math.min(detailPage.value, pages);
@@ -312,41 +349,53 @@ function percentChange(next: number, previous: number) {
     : ((next - previous) / Math.abs(previous)) * 100;
 }
 
+const trend = computed(() =>
+  monthly.value.filter((item) => item.month >= filters.value.startMonth),
+);
+const overviewTotals = computed(() => {
+  const totals = { gross: 0, net: 0, people: 0 };
+  for (const item of trend.value) {
+    totals.gross += item.gross;
+    totals.net += item.net;
+    totals.people += item.people;
+  }
+  return totals;
+});
 const metrics = computed(() => {
-  const rows = visibleRows.value;
-  const last = trend.value.find(
-    (item) => item.month === monthOffset(month.value, -1),
-  );
-  const prior = rows.length > 0 && last && last.people > 0 ? last : undefined;
-  const net = total(rows, ['net']);
-  const gross = total(rows, ['gross']);
-  const avg = rows.length > 0 ? Math.round(net / rows.length) : 0;
+  const { gross, net, people } = overviewTotals.value;
+  const prior =
+    singleMonth.value && people > 0
+      ? monthly.value.find(
+          (item) => item.month < month.value && item.people > 0,
+        )
+      : undefined;
+  const avg = people > 0 ? Math.round(net / people) : 0;
   return [
     {
       title: '应发合计',
-      value: rows.length > 0 ? currency(gross) : '—',
-      delta: prior && percentChange(gross, Number(prior.gross)),
+      value: people > 0 ? currency(gross) : '—',
+      delta: prior && percentChange(gross, prior.gross),
       symbol: 'gross',
       unit: '%',
     },
     {
       title: '实发合计',
-      value: rows.length > 0 ? currency(net) : '—',
-      delta: prior && percentChange(net, Number(prior.net)),
+      value: people > 0 ? currency(net) : '—',
+      delta: prior && percentChange(net, prior.net),
       symbol: 'net',
       unit: '%',
     },
     {
-      title: '核算人数',
-      value: String(rows.length),
-      delta: prior && rows.length - Number(prior.people),
+      title: singleMonth.value ? '核算人数' : '核算人次',
+      value: String(people),
+      delta: prior && people - prior.people,
       symbol: 'people',
       unit: '人',
     },
     {
-      title: '人均实发',
-      value: rows.length > 0 ? currency(avg) : '—',
-      delta: prior && percentChange(avg, Number(prior.net) / prior.people),
+      title: singleMonth.value ? '人均实发' : '每人次平均实发',
+      value: people > 0 ? currency(avg) : '—',
+      delta: prior && percentChange(avg, prior.net / prior.people),
       symbol: 'average',
       unit: '%',
     },
@@ -358,18 +407,11 @@ const ranking = computed(() => {
     string,
     { label: string; net: number; people: number }
   >();
-  for (const row of batch.value?.rows ?? []) {
-    if (company.value && row.company !== company.value) continue;
-    if (
-      rankBy.value === 'company' &&
-      department.value &&
-      row.department !== department.value
-    )
-      continue;
+  for (const row of departmentTotals.value) {
     const label = row[rankBy.value];
     const item = grouped.get(label) ?? { label, people: 0, net: 0 };
-    item.people++;
-    item.net += Number(row.net);
+    item.people += row.people;
+    item.net += row.net;
     grouped.set(label, item);
   }
   return [...grouped.values()].toSorted(
@@ -383,56 +425,134 @@ const composition = computed(() =>
   incomeGroups.map(({ title, color, keys }) => ({
     title,
     color,
-    cents: total(visibleRows.value, keys),
+    cents: trend.value.reduce(
+      (sum, row) =>
+        sum + keys.reduce((amount, key) => amount + (row.income[key] ?? 0), 0),
+      0,
+    ),
   })),
 );
 const compositionTotal = computed(() =>
   composition.value.reduce((sum, item) => sum + Math.abs(item.cents), 0),
 );
 
-async function loadMonth() {
-  const request = ++monthRequest;
-  batchLoading.value = true;
-  batchError.value = '';
+async function loadOrganizations() {
+  const request = ++organizationRequest;
+  organizationError.value = '';
   try {
-    const result = await getPayrollMonth(month.value);
-    if (request === monthRequest) batch.value = result;
+    const options = await getPayrollAnalyticsOptions();
+    if (request !== organizationRequest) return;
+    organizations.value = options.organizations;
+    const latest = options.months.at(-1);
+    if (
+      !initializedPeriod &&
+      latest &&
+      validMonth(latest) &&
+      filters.value.startMonth === initialMonth.value &&
+      filters.value.endMonth === initialMonth.value &&
+      !filters.value.employeeName
+    ) {
+      filters.value = {
+        employeeName: '',
+        startMonth: latest,
+        endMonth: latest,
+      };
+    }
+    initializedPeriod = true;
+    if (latest && validMonth(latest)) initialMonth.value = latest;
   } catch (error) {
-    if (request === monthRequest) batchError.value = errorText(error);
-  } finally {
-    if (request === monthRequest) batchLoading.value = false;
+    if (request === organizationRequest)
+      organizationError.value = errorText(error);
   }
 }
 
-async function loadTrend() {
-  const request = ++trendRequest;
-  trendLoading.value = true;
-  trendError.value = '';
-  trend.value = [];
+async function loadMonth() {
+  const request = ++monthRequest;
+  const period = month.value;
+  sendScopeReady.value = false;
+  sendScopeError.value = '';
   try {
-    const result = await getPayrollTrend(
-      month.value,
-      company.value,
-      department.value,
-    );
-    if (request === trendRequest) trend.value = result;
+    const [result, deliveries] = await Promise.all([
+      getPayrollMonth(period),
+      canSend.value ? getPayrollDeliveries(period) : Promise.resolve([]),
+    ]);
+    if (
+      request !== monthRequest ||
+      period !== month.value ||
+      !singleMonth.value
+    )
+      return;
+    batch.value = result;
+    monthDeliveries.value = deliveries;
+    sendingMonth.value = period;
+    sendScopeReady.value = true;
   } catch (error) {
-    if (request === trendRequest) trendError.value = errorText(error);
+    if (request === monthRequest) sendScopeError.value = errorText(error);
+  }
+}
+
+async function loadOverview() {
+  const request = ++overviewRequest;
+  overviewLoading.value = true;
+  overviewError.value = '';
+  const params = scope.value;
+  const previous = monthOffset(params.startMonth, -1);
+  try {
+    const [summaries, departments] = await Promise.all([
+      getPayrollMonthlyAnalytics({
+        ...params,
+        startMonth:
+          singleMonth.value && previous >= '2000-01'
+            ? previous
+            : params.startMonth,
+      }),
+      getPayrollDepartmentMonths(params),
+    ]);
+    if (request !== overviewRequest) return;
+    monthly.value = summaries;
+    departmentTotals.value = departments;
+  } catch (error) {
+    if (request === overviewRequest) overviewError.value = errorText(error);
   } finally {
-    if (request === trendRequest) trendLoading.value = false;
+    if (request === overviewRequest) overviewLoading.value = false;
+  }
+}
+
+async function loadDetails() {
+  const request = ++detailRequest;
+  detailLoading.value = true;
+  detailError.value = '';
+  try {
+    const result = await getPayrollRows({
+      ...scope.value,
+      page: detailPage.value,
+      pageSize: detailPageSize,
+    });
+    if (request === detailRequest) {
+      detailRows.value = result.items;
+      detailTotal.value = result.total;
+    }
+  } catch (error) {
+    if (request === detailRequest) detailError.value = errorText(error);
+  } finally {
+    if (request === detailRequest) detailLoading.value = false;
   }
 }
 
 async function loadDeliveries() {
-  if (deliveryLoading.value) return;
   const request = ++deliveryRequest;
   deliveryLoading.value = true;
+  deliveryError.value = '';
   try {
-    const result = await getPayrollDeliveries(month.value);
-    if (request !== deliveryRequest) return;
-    deliveries.value = result;
-    deliveryError.value = '';
-    deliveryReady.value = true;
+    const result = await getPayrollDeliveryRange({
+      ...scope.value,
+      page: deliveryPage.value,
+      pageSize: deliveryPageSize,
+    });
+    if (request === deliveryRequest) {
+      deliveryRows.value = result.items;
+      deliveryTotal.value = result.total;
+    }
   } catch (error) {
     if (request === deliveryRequest) deliveryError.value = errorText(error);
   } finally {
@@ -440,37 +560,83 @@ async function loadDeliveries() {
   }
 }
 
-function resetPeriod() {
-  monthRequest++;
-  trendRequest++;
-  deliveryRequest++;
-  deliveries.value = [];
-  deliveryReady.value = false;
-  deliveryError.value = '';
-  deliveryLoading.value = false;
-  batch.value = undefined;
-  trend.value = [];
-  detailPage.value = 1;
-  deliveryPage.value = 1;
+async function loadProgress() {
+  const request = ++progressRequest;
+  progressError.value = '';
+  try {
+    const result = await getPayrollDeliveryProgress(scope.value);
+    if (request === progressRequest) {
+      progress.value = result;
+      progressReady.value = true;
+    }
+  } catch (error) {
+    if (request === progressRequest) progressError.value = errorText(error);
+  }
 }
 
-watch(
-  [month, active, canQuery, monthlyWork],
-  ([, isActive, allowed, showMonthlyWork]) => {
-    resetPeriod();
-    if (isActive && allowed && showMonthlyWork) {
-      void loadMonth();
-      void loadDeliveries();
-    }
-  },
-  { flush: 'sync' },
+function refreshDeliveries() {
+  void loadDeliveries();
+  void loadProgress();
+  if (singleMonth.value && canSend.value) void loadMonth();
+}
+
+const workError = computed(() =>
+  tab.value === 'overview' ? overviewError.value : detailError.value,
 );
+const workLoading = computed(() =>
+  tab.value === 'overview' ? overviewLoading.value : detailLoading.value,
+);
+const loadWork = () =>
+  tab.value === 'overview' ? loadOverview() : loadDetails();
 
 watch(
-  [month, active, canQuery, company, department, tab],
+  [active, canQuery, refresh],
+  ([isActive, allowed]) => {
+    if (isActive && allowed) void loadOrganizations();
+  },
+  { flush: 'post' },
+);
+watch(
+  [month, singleMonth, active, canQuery, canSend, monthlyWork, refresh],
   () => {
-    if (active.value && tab.value === 'overview' && canQuery.value)
-      void loadTrend();
+    if (
+      active.value &&
+      canQuery.value &&
+      monthlyWork.value &&
+      singleMonth.value
+    )
+      void loadMonth();
+    else {
+      monthRequest++;
+      sendScopeReady.value = false;
+      sendScopeError.value = '';
+    }
+  },
+  { flush: 'post' },
+);
+watch(
+  [scope, active, canQuery, tab, refresh],
+  () => {
+    if (!active.value || !canQuery.value) return;
+    if (tab.value === 'overview') void loadOverview();
+    if (tab.value === 'overview' || tab.value === 'delivery')
+      void loadProgress();
+  },
+  { flush: 'post' },
+);
+watch(
+  [scope, active, canQuery, tab, detailPage, refresh],
+  () => {
+    if (active.value && canQuery.value && tab.value === 'detail')
+      void loadDetails();
+  },
+  { flush: 'post' },
+);
+watch(
+  [scope, active, canQuery, tab, deliveryPage, refresh],
+  () => {
+    if (active.value && canQuery.value && tab.value === 'delivery')
+      void loadDeliveries();
   },
   { flush: 'post' },
 );
@@ -479,20 +645,12 @@ function navigate(next: Tab) {
   if (next === 'settings' && !canConfigure.value) return;
   tab.value = next;
   if (next === 'settings') void loadSettings();
-  if (next === 'delivery') void loadDeliveries();
 }
 
-function changeMonth(event: Event) {
-  const input = event.target as HTMLInputElement;
-  if (!validMonth(input.value) || input.value > currentMonth()) {
-    input.value = month.value;
-    return;
-  }
+function changeRegion(event: Event) {
+  region.value = (event.target as HTMLSelectElement).value;
   company.value = '';
   department.value = '';
-  region.value = '';
-  query.value = '';
-  month.value = input.value;
 }
 
 function changeCompany(event: Event) {
@@ -503,7 +661,6 @@ function changeCompany(event: Event) {
 function drillDown(label: string) {
   if (rankBy.value === 'company') company.value = label;
   else department.value = label;
-  query.value = '';
   navigate('detail');
 }
 
@@ -524,9 +681,11 @@ onMounted(() => {
       active.value &&
       canQuery.value &&
       tab.value === 'delivery' &&
-      !document.hidden
-    )
-      void loadDeliveries();
+      !document.hidden &&
+      !deliveryLoading.value
+    ) {
+      refreshDeliveries();
+    }
   }, 5000);
 });
 onActivated(activate);
@@ -606,7 +765,7 @@ const dialog = ref<HTMLDialogElement>();
 const mode = ref<DialogMode>();
 const employee = ref<PayrollRow>();
 const employeeMonth = ref('');
-const notice = ref<PayrollDelivery>();
+const notice = ref<PayrollPeriodDelivery>();
 const showAllFields = ref(false);
 const employeePane = ref<'history' | 'items'>('items');
 const employeeHistory = ref<PayrollMonthlyTotals[]>();
@@ -672,11 +831,22 @@ async function showHistory() {
   historyLoading.value = true;
   historyError.value = '';
   try {
-    const result = await getPayrollHistory(row.id);
-    if (request === historyRequest)
-      employeeHistory.value = result.toSorted((a, b) =>
-        b.month.localeCompare(a.month),
-      );
+    const result = await getPayrollEmployeeMonths({
+      employeeKey: row.employeeKey,
+      endMonth: filters.value.endMonth,
+      region: row.region ?? '',
+      startMonth: filters.value.startMonth,
+    });
+    if (request === historyRequest) {
+      employeeHistory.value = result
+        .toSorted((a, b) => b.month.localeCompare(a.month))
+        .map(({ month, row }) => ({
+          gross: row.gross,
+          month,
+          net: row.net,
+          people: 1,
+        }));
+    }
   } catch (error) {
     if (request === historyRequest) historyError.value = errorText(error);
   } finally {
@@ -800,19 +970,10 @@ async function confirmImport() {
     company.value = '';
     department.value = '';
     region.value = '';
-    query.value = '';
-    month.value = period;
+    filters.value = { employeeName: '', startMonth: period, endMonth: period };
     navigate('overview');
-    monthRequest++;
-    batch.value = result;
-    batchLoading.value = false;
-    batchError.value = '';
-    deliveryRequest++;
-    deliveryLoading.value = false;
-    deliveryReady.value = false;
     dialog.value?.close();
-    void loadTrend();
-    void loadDeliveries();
+    refresh.value++;
     message.success(`已导入 ${result.rows.length} 条工资明细`);
   } catch (error) {
     importError.value = errorText(error);
@@ -937,12 +1098,10 @@ async function confirmSend() {
       sendSlipFields.value,
     );
     if (!active.value) return;
-    deliveryRequest++;
-    deliveryLoading.value = false;
     const currentIds = new Set(records.map(({ id }) => id));
-    deliveries.value = [
+    monthDeliveries.value = [
       ...records,
-      ...deliveries.value.filter(({ id }) => !currentIds.has(id)),
+      ...monthDeliveries.value.filter(({ id }) => !currentIds.has(id)),
     ];
     const sentRows = new Set(records.map(({ rowId }) => rowId));
     const remaining = candidateRows.value.filter(({ id }) => !sentRows.has(id));
@@ -954,17 +1113,18 @@ async function confirmSend() {
       navigate('delivery');
       deliveryPage.value = 1;
     }
+    refresh.value++;
     message.success(
       `已提交 ${records.length} 条工资条，发放状态将在记录中更新`,
     );
   } catch (error) {
     candidateError.value = errorText(error);
-    if (active.value) void loadDeliveries();
+    if (active.value) refreshDeliveries();
   } finally {
     sending.value = false;
   }
 }
-function showNotice(item: PayrollDelivery) {
+function showNotice(item: PayrollPeriodDelivery) {
   notice.value = item;
   showDialog('notice');
 }
@@ -992,6 +1152,7 @@ function showNotice(item: PayrollDelivery) {
             class="button primary"
             type="button"
             :disabled="!eligibleRows.length"
+            :title="!singleMonth ? '请选择一个工资月份发送工资条' : undefined"
             @click="startSend"
           >
             <Bell :size="16" /> 批量发送工资条
@@ -1018,22 +1179,35 @@ function showNotice(item: PayrollDelivery) {
           </template>
         </nav>
 
+        <PayrollFiltersBar
+          v-show="tab !== 'settings'"
+          v-model="filters"
+          :initial-month="initialMonth"
+        />
+
         <PayrollAnalytics
           v-if="analyticsView"
           :view="analyticsView"
-          :report-month="month"
+          :report-month="initialMonth"
+          :filters="filters"
           @detail="showEmployee"
         />
 
         <div v-if="monthlyWork" class="filters">
-          <label class="filter"><span>工资月份</span><input
-              :value="month"
-              type="month"
-              min="2000-01"
-              :max="currentMonth()"
-              aria-label="工资月份"
-              @change="changeMonth"
-          /></label>
+          <label class="filter">
+            <span>所属区域</span>
+            <select
+              :value="region"
+              aria-label="所属区域"
+              @change="changeRegion"
+            >
+              <option value="">全部区域</option>
+              <option v-for="item in regions" :key="item" :value="item">
+                {{ item }}
+              </option>
+            </select>
+            <ChevronDown :size="13" />
+          </label>
           <label class="filter"><span>所属公司</span><select
               :value="company"
               aria-label="所属公司"
@@ -1048,38 +1222,57 @@ function showNotice(item: PayrollDelivery) {
               <option v-for="item in departments" :key="item">
                 {{ item }}
               </option></select><ChevronDown :size="13" /></label>
-          <label v-if="tab === 'detail'" class="filter">
-            <span>所属区域</span>
-            <select v-model="region" aria-label="所属区域">
-              <option value="">全部区域</option>
-              <option v-for="item in regions" :key="item" :value="item">
-                {{ item }}
-              </option>
-            </select>
-            <ChevronDown :size="13" />
-          </label>
-          <span v-if="batch?.importedAt" class="source" :title="batch.source">
+          <span
+            v-if="singleMonth && sendingMonth === month && batch?.importedAt"
+            class="source"
+            :title="batch.source"
+          >
             <span class="source-dot"></span>更新于
             {{ dateTime(batch.importedAt) }}
           </span>
         </div>
 
-        <div v-if="monthlyWork && batchError" class="panel empty" role="alert">
-          <p>{{ batchError }}</p>
-          <button type="button" class="button" @click="loadMonth">
+        <div
+          v-if="monthlyWork && organizationError"
+          class="callout error table-feedback"
+          role="alert"
+        >
+          {{ organizationError }}
+          <button type="button" class="text-button" @click="loadOrganizations">
+            重新加载组织选项
+          </button>
+        </div>
+        <div
+          v-if="monthlyWork && canSend && singleMonth && sendScopeError"
+          class="callout error table-feedback"
+          role="alert"
+        >
+          {{ sendScopeError }}
+          <button type="button" class="text-button" @click="loadMonth">
+            重新加载发送范围
+          </button>
+        </div>
+
+        <div
+          v-if="(tab === 'overview' || tab === 'detail') && workError"
+          class="panel empty"
+          role="alert"
+        >
+          <p>{{ workError }}</p>
+          <button type="button" class="button" @click="loadWork">
             重新加载
           </button>
         </div>
         <div
-          v-else-if="monthlyWork && batchLoading"
+          v-else-if="(tab === 'overview' || tab === 'detail') && workLoading"
           class="panel empty"
           role="status"
         >
           正在加载工资数据…
         </div>
         <template v-else-if="tab === 'overview'">
-          <div v-if="!batch?.rows.length" class="panel empty overview-empty">
-            <strong>{{ monthLabel(month) }}暂无工资数据</strong>
+          <div v-if="!overviewTotals.people" class="panel empty overview-empty">
+            <strong>{{ rangeLabel }}暂无工资数据</strong>
             <p v-if="canImport">导入工资表后可查看应发、实发及人员分布。</p>
           </div>
 
@@ -1100,7 +1293,9 @@ function showNotice(item: PayrollDelivery) {
               </div>
               <div class="metric-value">
                 {{ metric.value
-                }}<span v-if="metric.symbol === 'people'">人</span>
+                }}<span v-if="metric.symbol === 'people'">{{
+                  singleMonth ? '人' : '人次'
+                }}</span>
               </div>
               <div class="metric-foot">
                 <template v-if="metric.delta !== undefined">
@@ -1117,7 +1312,9 @@ function showNotice(item: PayrollDelivery) {
                   </span>
                   <span>较上月</span>
                 </template>
-                <span v-else>暂无可比上月数据</span>
+                <span v-else>{{
+                  singleMonth ? '暂无可比上月数据' : '所选期间'
+                }}</span>
               </div>
             </article>
           </div>
@@ -1127,26 +1324,13 @@ function showNotice(item: PayrollDelivery) {
               <div class="panel-head">
                 <div>
                   <h2>薪酬趋势</h2>
-                  <p>近 6 个月 · 单位万元</p>
+                  <p>{{ rangeLabel }} · 单位万元</p>
                 </div>
                 <div class="legend">
                   <span><i></i>应发</span><span><i></i>实发</span>
                 </div>
               </div>
-              <div v-if="trendError" class="empty" role="alert">
-                {{ trendError }}
-                <button type="button" class="text-button" @click="loadTrend">
-                  重试
-                </button>
-              </div>
-              <div v-else-if="trendLoading" class="empty" role="status">
-                正在加载趋势…
-              </div>
-              <PayrollTrend
-                v-else-if="trend.some((item) => item.people > 0)"
-                :month="month"
-                :rows="trend"
-              />
+              <PayrollTrend v-if="trend.length" :month="month" :rows="trend" />
               <div v-else class="empty">所选范围内暂无薪酬趋势</div>
             </section>
 
@@ -1181,7 +1365,9 @@ function showNotice(item: PayrollDelivery) {
                   class="rank-row"
                   @click="drillDown(item.label)"
                 >
-                  <span class="rank-name">{{ item.label }} <small>{{ item.people }} 人</small></span>
+                  <span class="rank-name">{{ item.label }}
+                    <small>{{ item.people }}
+                      {{ singleMonth ? '人' : '人次' }}</small></span>
                   <span class="rank-value">{{ currency(item.net) }}</span>
                   <span class="rank-track"><i
                       :style="{
@@ -1190,7 +1376,7 @@ function showNotice(item: PayrollDelivery) {
                     ></i></span>
                 </button>
               </div>
-              <div v-else class="empty">本月暂无实发排行</div>
+              <div v-else class="empty">所选期间暂无实发排行</div>
             </section>
 
             <section class="panel dashboard-panel">
@@ -1200,7 +1386,7 @@ function showNotice(item: PayrollDelivery) {
                   <p>含单位缴费及考勤扣款</p>
                 </div>
               </div>
-              <template v-if="visibleRows.length">
+              <template v-if="overviewTotals.people">
                 <div
                   v-if="compositionTotal"
                   class="composition-bar"
@@ -1221,7 +1407,7 @@ function showNotice(item: PayrollDelivery) {
                   </div>
                 </div>
               </template>
-              <div v-else class="empty">本月暂无薪酬构成</div>
+              <div v-else class="empty">所选期间暂无薪酬构成</div>
             </section>
 
             <section class="panel dashboard-panel">
@@ -1238,16 +1424,16 @@ function showNotice(item: PayrollDelivery) {
                   发放记录 <ChevronRight :size="14" />
                 </button>
               </div>
-              <div v-if="deliveryReady && !deliveryError" class="send-states">
+              <div v-if="progressReady && !progressError" class="send-states">
                 <div v-for="item in stateCounts" :key="item.code">
                   <span class="status" :data-status="item.code">{{
                     item.label
-                  }}</span><strong>{{ item.count }}<small> 人</small></strong>
+                  }}</span><strong>{{ item.count }}<small> 条</small></strong>
                 </div>
               </div>
               <div v-else class="empty">
                 {{
-                  deliveryError ? '暂时无法读取发放进度' : '正在读取发放进度…'
+                  progressError ? '暂时无法读取发放进度' : '正在读取发放进度…'
                 }}
               </div>
             </section>
@@ -1257,21 +1443,16 @@ function showNotice(item: PayrollDelivery) {
         <section v-else-if="tab === 'detail'" class="panel wide-table">
           <div class="panel-head">
             <div>
-              <h2>{{ monthLabel(month) }}工资明细</h2>
-              <p>{{ filteredRows.length }} 名员工</p>
+              <h2>工资明细</h2>
+              <p>{{ rangeLabel }} · {{ detailTotal }} 条</p>
             </div>
-            <label class="search"><Search :size="16" /><input
-                v-model="query"
-                aria-label="员工姓名"
-                placeholder="搜索员工姓名"
-                type="search"
-            /></label>
           </div>
           <div v-if="detailRows.length" class="table-scroll">
             <table>
               <thead>
                 <tr>
                   <th>员工</th>
+                  <th>工资月份</th>
                   <th>所属区域</th>
                   <th>所属公司</th>
                   <th>部门</th>
@@ -1282,35 +1463,37 @@ function showNotice(item: PayrollDelivery) {
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="row in detailRows" :key="row.id">
+                <tr
+                  v-for="{ month: rowMonth, row, status } in detailRows"
+                  :key="row.id"
+                >
                   <td>
                     <button
                       class="employee-link"
                       type="button"
-                      @click="showEmployee(row)"
+                      @click="showEmployee(row, rowMonth)"
                     >
                       <span class="employee-avatar" aria-hidden="true">{{
                         row.name.slice(-2)
                       }}</span>{{ row.name }}
                     </button>
                   </td>
+                  <td>{{ monthLabel(rowMonth) }}</td>
                   <td>{{ row.region || '—' }}</td>
                   <td>{{ row.company }}</td>
                   <td>{{ row.department }}</td>
                   <td class="numeric">{{ currency(row.gross) }}</td>
                   <td class="numeric strong">{{ currency(row.net) }}</td>
                   <td>
-                    <span
-                      v-if="deliveryReady && !deliveryError"
-                      class="status"
-                      :data-status="rowStatus(row)"
-                      >{{ statusLabels[rowStatus(row)] }}</span><span v-else>—</span>
+                    <span class="status" :data-status="status">{{
+                      statusLabels[status]
+                    }}</span>
                   </td>
                   <td>
                     <button
                       type="button"
                       class="text-button"
-                      @click="showEmployee(row)"
+                      @click="showEmployee(row, rowMonth)"
                     >
                       查看明细 <ChevronRight :size="14" />
                     </button>
@@ -1320,7 +1503,11 @@ function showNotice(item: PayrollDelivery) {
             </table>
           </div>
           <div v-else class="empty">
-            {{ query ? '没有找到匹配的员工' : '所选范围内暂无工资明细' }}
+            {{
+              filters.employeeName
+                ? '没有找到匹配的员工'
+                : '所选范围内暂无工资明细'
+            }}
           </div>
           <div v-if="detailPages > 1" class="pagination">
             <span>第 {{ detailPage }} / {{ detailPages }} 页</span>
@@ -1347,26 +1534,26 @@ function showNotice(item: PayrollDelivery) {
 
         <template v-else-if="tab === 'delivery'">
           <div
-            v-if="deliveryReady && !deliveryError"
+            v-if="progressReady && !progressError"
             class="send-states panel summary"
           >
             <div v-for="item in stateCounts" :key="item.code">
               <span class="status" :data-status="item.code">{{
                 item.label
-              }}</span><strong>{{ item.count }}<small> 人</small></strong>
+              }}</span><strong>{{ item.count }}<small> 条</small></strong>
             </div>
           </div>
           <section class="panel wide-table">
             <div class="panel-head">
               <div>
                 <h2>发放记录</h2>
-                <p>渠道 · 钉钉企业应用工作通知</p>
+                <p>{{ rangeLabel }} · {{ deliveryTotal }} 条</p>
               </div>
               <button
                 type="button"
                 class="text-button"
                 :disabled="deliveryLoading"
-                @click="loadDeliveries"
+                @click="refreshDeliveries"
               >
                 <RefreshCw :size="15" /> 刷新状态
               </button>
@@ -1384,6 +1571,7 @@ function showNotice(item: PayrollDelivery) {
                   <tr>
                     <th>员工 / 收件账号</th>
                     <th>所属公司 / 部门</th>
+                    <th>工资月份</th>
                     <th>提交时间</th>
                     <th>查看时长</th>
                     <th>状态</th>
@@ -1391,28 +1579,34 @@ function showNotice(item: PayrollDelivery) {
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="item in deliveryRows" :key="item.id">
+                  <tr v-for="entry in deliveryRows" :key="entry.delivery.id">
                     <td>
-                      <strong>{{ item.name }}</strong><small v-if="item.recipient" class="secondary">{{
-                        item.recipient
-                      }}</small>
+                      <strong>{{ entry.delivery.name }}</strong><small
+                        v-if="entry.delivery.recipient"
+                        class="secondary"
+                        >{{ entry.delivery.recipient }}</small>
                     </td>
-                    <td>{{ item.company }} / {{ item.department }}</td>
-                    <td>{{ dateTime(item.sentAt) }}</td>
-                    <td>{{ item.minutes }} 分钟</td>
                     <td>
-                      <span class="status" :data-status="item.status">{{
-                        statusLabels[item.status]
-                      }}</span><small
-                        v-if="item.error"
+                      {{ entry.delivery.company }} /
+                      {{ entry.delivery.department }}
+                    </td>
+                    <td>{{ monthLabel(entry.month) }}</td>
+                    <td>{{ dateTime(entry.delivery.sentAt) }}</td>
+                    <td>{{ entry.delivery.minutes }} 分钟</td>
+                    <td>
+                      <span
+                        class="status"
+                        :data-status="entry.delivery.status"
+                        >{{ statusLabels[entry.delivery.status] }}</span><small
+                        v-if="entry.delivery.error"
                         class="secondary record-error"
-                        >{{ item.error }}</small>
+                        >{{ entry.delivery.error }}</small>
                     </td>
                     <td>
                       <button
                         type="button"
                         class="text-button"
-                        @click="showNotice(item)"
+                        @click="showNotice(entry)"
                       >
                         预览通知 <ChevronRight :size="14" />
                       </button>
@@ -1421,11 +1615,7 @@ function showNotice(item: PayrollDelivery) {
                 </tbody>
               </table>
             </div>
-            <div
-              v-else-if="deliveryLoading && !deliveryReady"
-              class="empty"
-              role="status"
-            >
+            <div v-else-if="deliveryLoading" class="empty" role="status">
               正在加载发放记录…
             </div>
             <div v-else-if="!deliveryError" class="empty delivery-empty">
@@ -1925,7 +2115,7 @@ function showNotice(item: PayrollDelivery) {
                   :aria-pressed="employeePane === 'history'"
                   @click="showHistory"
                 >
-                  近 6 个月对比
+                  所选期间对比
                 </button>
               </div>
               <button
@@ -1992,10 +2182,10 @@ function showNotice(item: PayrollDelivery) {
           class="dialog-body notice-body"
         >
           <div class="notice-sender">
-            <span class="brand-mark" aria-hidden="true">F</span><span>飞德慕管理系统</span><small>{{ dateTime(notice.sentAt) }}</small>
+            <span class="brand-mark" aria-hidden="true">F</span><span>飞德慕管理系统</span><small>{{ dateTime(notice.delivery.sentAt) }}</small>
           </div>
           <div class="notification-card">
-            <h3>{{ monthLabel(month) }}工资条</h3>
+            <h3>{{ monthLabel(notice.month) }}工资条</h3>
             <p>本月工资条已生成，请点击下方按钮查阅。</p>
             <div class="notice-button">查看明细</div>
           </div>

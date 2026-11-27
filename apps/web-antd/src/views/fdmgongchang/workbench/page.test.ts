@@ -681,17 +681,25 @@ describe('workbench page', () => {
   it('shows the original task as completed when its supplemental work fills the good quantity gap', async () => {
     const process = { code: 'PUNCH', label: '冲切', outputLabel: '成品', outputStage: 'FINISHED', outputUnit: '件', sources: ['CUT'] };
     const original = { ...my.tasks[0]!, id: 1128, process: 'PUNCH', contractCode: 'GD20261124-004',
-      status: 'CLAIMED', orderCount: 1, quantity: 6891, actualQuantity: 6800, defectQuantity: 91, unit: '件' };
+      status: 'CLAIMED', orderCount: 1, quantity: 6891, actualQuantity: 6800, defectQuantity: 91, unit: '件',
+      output: { stage: 'PUNCHED', attrs: { frontColor: 'PU', backColor: 'GY' } } };
     const supplement = { ...original, id: 1144, status: 'DONE', quantity: 91, actualQuantity: 91,
       defectQuantity: 0, parentTaskId: 1128 };
     const unrelated = { ...original, id: 1139, quantity: 4491, actualQuantity: 4400 };
     const data = { ...workshop(), processes: [process], workshopProcess: process };
+    mocks.options.mockResolvedValue({ ...options, colors: [...options.colors, { label: '灰色', value: 'GY' }] });
     mocks.my.mockResolvedValue({ ...data, workshopTasks: [
       { ...original, supplementGoodQuantity: '90', shortage: 1 }, { ...supplement, actualQuantity: 90 }, unrelated,
     ] });
 
     await mount('PUNCH'); await expandOrder('GD20261124-004');
     const row = (id: number) => document.querySelector<HTMLElement>(`[data-task-id="${id}"]`)!;
+    const orderSummary = document.querySelector('[data-order-key="GD20261124-004"]')?.textContent;
+    const taskFocus = row(1128).querySelector('.task-focus-fields')?.textContent;
+    expect(orderSummary).toMatch(/正面颜色\s*紫色/);
+    expect(orderSummary).toMatch(/反面颜色\s*灰色/);
+    expect(taskFocus).toMatch(/正面颜色\s*紫色/);
+    expect(taskFocus).toMatch(/反面颜色\s*灰色/);
     expect(row(1128).querySelector('.ant-tag')?.textContent).toBe('部分报工');
     expect(row(1128).textContent).toContain('良品缺口 1 件');
 

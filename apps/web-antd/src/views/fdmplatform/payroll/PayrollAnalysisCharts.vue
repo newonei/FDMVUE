@@ -9,40 +9,33 @@ import {
   amount,
   annualAnalytics,
   average,
-  calendarMonths,
   costMetrics,
+  reportPeriod,
   summarize,
-  yearList,
 } from './analytics-model';
 import { incomeGroups } from './model';
 import PayrollChartCard from './PayrollChartCard.vue';
 
 const props = defineProps<{
-  endYear: number;
+  endMonth: string;
   individual: boolean;
   metric: CostMetric;
   mode: 'composition' | 'trends';
   rows: PayrollMonthlyAnalytics[];
-  startYear: number;
+  startMonth: string;
 }>();
 
-const years = computed(() => yearList(props.startYear, props.endYear));
+const range = computed(() => reportPeriod(props.startMonth, props.endMonth));
 const annual = computed(
   () => new Map(annualAnalytics(props.rows).map((row) => [row.year, row])),
 );
 const monthly = computed(
   () => new Map(props.rows.map((row) => [row.month, row])),
 );
-const months = computed(() =>
-  years.value.flatMap((year) =>
-    calendarMonths.map(({ key }) => `${year}-${key}`),
-  ),
+const monthsOfYear = computed(() =>
+  range.value.comparisonMonths.map(({ label }) => label),
 );
-const monthsOfYear = computed(() => calendarMonths.map(({ label }) => label));
-const yearLabels = computed(() => years.value.map((year) => `${year}年`));
-const selectedRows = computed(() =>
-  props.rows.filter(({ month }) => month.startsWith(String(props.endYear))),
-);
+const yearLabels = computed(() => range.value.years.map((year) => `${year}年`));
 const trendFields = computed<Array<{ key: CostMetric; name: string }>>(() =>
   props.individual
     ? [
@@ -54,7 +47,7 @@ const trendFields = computed<Array<{ key: CostMetric; name: string }>>(() =>
 const yearAverageSeries = computed(() =>
   trendFields.value.map(({ key, name }) => ({
     name,
-    values: years.value.map((year) => {
+    values: range.value.years.map((year) => {
       const row = annual.value.get(year);
       return row
         ? average(amount(row, key), props.individual ? row.months : row.people)
@@ -65,7 +58,7 @@ const yearAverageSeries = computed(() =>
 const yearTotalSeries = computed(() =>
   trendFields.value.map(({ key, name }) => ({
     name,
-    values: years.value.map((year) => {
+    values: range.value.years.map((year) => {
       const row = annual.value.get(year);
       return row ? amount(row, key) : null;
     }),
@@ -74,16 +67,16 @@ const yearTotalSeries = computed(() =>
 const timeSeries = computed(() =>
   trendFields.value.map(({ key, name }) => ({
     name,
-    values: months.value.map((month) => {
+    values: range.value.months.map((month) => {
       const row = monthly.value.get(month);
       return row ? amount(row, key) : null;
     }),
   })),
 );
 const monthCompare = computed(() =>
-  years.value.map((year) => ({
+  range.value.years.map((year) => ({
     name: `${year}年`,
-    values: calendarMonths.map(({ key }) => {
+    values: range.value.comparisonMonths.map(({ key }) => {
       const row = monthly.value.get(`${year}-${key}`);
       return row
         ? amount(row, props.individual ? 'gross' : props.metric)
@@ -93,10 +86,10 @@ const monthCompare = computed(() =>
 );
 const compositionAverage = computed(() => {
   const buckets = props.individual
-    ? calendarMonths.map(({ key }) =>
+    ? range.value.comparisonMonths.map(({ key }) =>
         summarize(props.rows.filter(({ month }) => month.endsWith(`-${key}`))),
       )
-    : years.value.map((year) => annual.value.get(year));
+    : range.value.years.map((year) => annual.value.get(year));
   return incomeGroups.map(({ title, color, keys }) => ({
     color,
     name: title,
@@ -114,7 +107,7 @@ const compositionTotal = computed(() =>
   incomeGroups.map(({ title, color, keys }) => ({
     color,
     name: title,
-    values: years.value.map((year) => {
+    values: range.value.years.map((year) => {
       const row = annual.value.get(year);
       return row
         ? keys.reduce((sum, key) => sum + (row.income[key] ?? 0), 0)
@@ -129,7 +122,9 @@ const compositionTotal = computed(() =>
     <PayrollChartCard
       :columns="yearLabels"
       :description="
-        individual ? '年度合计 ÷ 实际有工资记录的月数' : '年度金额 ÷ 核算人月数'
+        individual
+          ? '范围内各年合计 ÷ 实际有工资记录的月数'
+          : '范围内各年金额 ÷ 核算人月数'
       "
       :series="yearAverageSeries"
       :title="individual ? '年度月均薪资趋势' : '年度人均月薪趋势'"
@@ -144,7 +139,7 @@ const compositionTotal = computed(() =>
       :title="individual ? '年度各月薪资对比' : '年度各月工资对比'"
     />
     <PayrollChartCard
-      :columns="months"
+      :columns="range.months"
       description="按年月连续排列，缺少工资记录的月份留空"
       :large-amounts="!individual"
       :series="timeSeries"
@@ -152,7 +147,7 @@ const compositionTotal = computed(() =>
     />
     <PayrollChartCard
       :columns="yearLabels"
-      description="只汇总有工资记录的月份"
+      description="只汇总所选范围内有工资记录的月份"
       :large-amounts="!individual"
       :series="yearTotalSeries"
       :title="individual ? '年总薪资趋势' : '年总工资趋势'"
@@ -164,7 +159,7 @@ const compositionTotal = computed(() =>
       :columns="individual ? monthsOfYear : yearLabels"
       :description="
         individual
-          ? '对所选年度的同一月份取平均，缺失月份不参与'
+          ? '对所选范围内的同一月份取平均'
           : '按年度核算人月计算人均月度构成'
       "
       :series="compositionAverage"
@@ -174,7 +169,7 @@ const compositionTotal = computed(() =>
     />
     <PayrollChartCard
       :columns="yearLabels"
-      :description="`${endYear} 年包含 ${selectedRows.length} 个有记录月份，单位缴费单列`"
+      description="汇总所选范围内的已记录项目，单位缴费单列"
       :large-amounts="!individual"
       :series="compositionTotal"
       title="年度薪资构成"

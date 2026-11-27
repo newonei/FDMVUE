@@ -62,8 +62,8 @@ export const WORKSHOP_OUTPUT: Record<string, string> = {
 export const WORKSHOP_FOCUS: Record<string, string> = {
   MIX: '克重 · 成品规格 · 成品数量 · 颜色', SLICE: '颜色 · 成品规格 · 成品数量 · 单双色', CUT: '颜色 · 成品规格 · 成品数量',
   LAMINATE: '正反面颜色 · 成品规格 · 成品数量', EMBOSS: '正反花纹 · 正反面颜色',
-  PUNCH: '成品规格 · 成品数量', ENGRAVE: '雕刻图案 · 成品规格 · 成品数量', FOLD: '成品规格 · 成品数量 · 折叠类型',
-  PACK: '包装要求 · 成品规格 · 成品数量',
+  PUNCH: '成品规格 · 成品数量 · 颜色', ENGRAVE: '雕刻图案 · 成品规格 · 成品数量 · 颜色',
+  FOLD: '成品规格 · 成品数量 · 颜色 · 折叠类型', PACK: '包装要求 · 成品规格 · 成品数量 · 颜色',
 };
 
 export function taskOrderNos(task: Api.Task) {
@@ -163,6 +163,30 @@ export function mixPlanLines(task: Api.Task): FocusField[] {
   return lines;
 }
 
+export function taskColors(task: Api.Task, options?: StockApi.Options): FocusField[] {
+  const color = makeLabels(options).color;
+  const { attrs, side } = task.output ?? {};
+  const items = task.relatedOrderItems ?? [];
+  const orderColors = (key: 'color' | 'targetBackColor' | 'targetFrontColor') =>
+    [...new Set(items.map((item) => color(item[key]?.trim()).trim()).filter(Boolean))].join('、');
+  const fields: FocusField[] = [];
+  const add = (label: string, value: string, face?: FocusField['side']) => {
+    if (value) fields.push({ label, value, side: face });
+  };
+  if (side === 'FRONT') {
+    add('正面颜色', color(attrs?.color || attrs?.frontColor) || orderColors('targetFrontColor') || orderColors('color'), 'FRONT');
+  } else if (side === 'BACK') {
+    add('反面颜色', color(attrs?.color || attrs?.backColor) || orderColors('targetBackColor') || orderColors('color'), 'BACK');
+  } else if (attrs?.color && !attrs.frontColor && !attrs.backColor) {
+    add(side === 'BOTH' ? '正反颜色' : '颜色', color(attrs.color));
+  } else {
+    add('正面颜色', color(attrs?.frontColor) || orderColors('targetFrontColor'), 'FRONT');
+    add('反面颜色', color(attrs?.backColor) || orderColors('targetBackColor'), 'BACK');
+    if (fields.length === 0) add('颜色', orderColors('color'));
+  }
+  return fields;
+}
+
 export function taskFocus(task: Api.Task, options?: StockApi.Options): FocusField[] {
   const labels = makeLabels(options);
   const attrs = task.output?.attrs ?? {};
@@ -194,6 +218,8 @@ export function taskFocus(task: Api.Task, options?: StockApi.Options): FocusFiel
       add(sideLabel[side ?? 'BOTH'],
         labels.color(attrs.color) || join(items.map((item) => item.color)), side === 'FRONT' || side === 'BACK' ? side : undefined);
     }
+  } else if (['ENGRAVE', 'FOLD', 'PACK', 'PUNCH'].includes(task.process)) {
+    fields.push(...taskColors(task, options));
   }
   if (task.process === 'SLICE') add('单双色', join(items.map((item) => ({ DUAL: '双色', SINGLE: '单色' } as Record<string, string>)[item.targetColorMode ?? ''])));
   return fields;

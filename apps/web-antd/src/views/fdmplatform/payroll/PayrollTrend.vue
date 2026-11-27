@@ -32,6 +32,9 @@ const description = computed(() =>
     .join('。'),
 );
 
+const spansYears = computed(
+  () => new Set(props.rows.map(({ month }) => month.slice(0, 4))).size > 1,
+);
 const option = computed<ECOption>(() => ({
   animation: false,
   grid: { bottom: 25, left: 8, right: 4, top: 12, containLabel: true },
@@ -46,7 +49,9 @@ const option = computed<ECOption>(() => ({
   },
   xAxis: {
     type: 'category',
-    data: props.rows.map(({ month }) => shortMonth(month)),
+    data: props.rows.map(({ month }) =>
+      spansYears.value ? month : shortMonth(month),
+    ),
     axisTick: { show: false },
     axisLine: { show: false },
   },

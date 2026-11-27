@@ -94,8 +94,50 @@ describe('workshop order grouping and process focus', () => {
     expect(taskFocus({ ...task, process: 'MIX', relatedOrderItems: [first] }, options).find((field) => field.label === '克重')?.value).toBe('未填写');
     expect(taskFocus({ ...task, process: 'SLICE', relatedOrderItems: [first] }, options).map((field) => field.label)).not.toContain('克重');
   });
-  it('shows only finished dimensions for punching and highlights pattern for engraving', () => {
-    expect(taskFocus({ ...task, process: 'PUNCH', relatedOrderItems: [first] }, options).map((field) => field.label)).toEqual(['成品规格', '成品数量']);
+  it.each([
+    ['PUNCH', 'PUNCHED'], ['ENGRAVE', 'ENGRAVED'], ['FOLD', 'FOLDED'], ['PACK', 'PACKED'],
+  ])('shows the planned front and back colors for %s in both task and order focus', (process, stage) => {
+    const downstream: Api.Task = {
+      ...task,
+      process,
+      output: { stage, attrs: { frontColor: 'GY', backColor: 'PU' } },
+      relatedOrderItems: [first],
+    };
+    const [order] = groupWorkshopOrders([downstream]);
+    const expectedColors = [
+      { label: '正面颜色', value: '灰色', side: 'FRONT' },
+      { label: '反面颜色', value: '紫色', side: 'BACK' },
+    ];
+    const taskFields = taskFocus(downstream, options);
+    expect(taskFields).toEqual(expect.arrayContaining(expectedColors));
+    expect(orderFocus(order!, options)).toEqual(expect.arrayContaining(expectedColors));
+    expect(taskFields).toContainEqual({ label: '成品规格', value: '1830×610×6 mm', side: undefined });
+  });
+  it('uses order target colors when a punching task has no output color', () => {
+    const fields = taskFocus({
+      ...task, process: 'PUNCH', output: { stage: 'PUNCHED' }, relatedOrderItems: [first],
+    }, options);
+    expect(fields).toEqual(expect.arrayContaining([
+      { label: '正面颜色', value: '紫色', side: 'FRONT' },
+      { label: '反面颜色', value: '灰色', side: 'BACK' },
+    ]));
+  });
+  it('uses the order color on older tasks with no front or back color', () => {
+    const legacyOrder = { ...first, targetFrontColor: undefined, targetBackColor: undefined, color: 'GY' };
+    const fields = taskFocus({
+      ...task, process: 'FOLD', output: { stage: 'FOLDED' }, relatedOrderItems: [legacyOrder],
+    }, options);
+    expect(fields.filter((field) => field.label.endsWith('颜色'))).toEqual([
+      { label: '颜色', value: '灰色', side: undefined },
+    ]);
+  });
+  it('shows the single output color for a stock task without an order', () => {
+    const [order] = groupWorkshopOrders([{
+      ...task, process: 'PACK', output: { stage: 'PACKED', attrs: { color: 'PU' } },
+    }]);
+    expect(orderFocus(order!, options)).toContainEqual({ label: '颜色', value: '紫色', side: undefined });
+  });
+  it('highlights the engraving pattern', () => {
     expect(taskFocus({ ...task, process: 'ENGRAVE', relatedOrderItems: [{ ...first, targetPattern: 'TTXL' }] }, options)[0]).toEqual({ label: '雕刻图案', value: '体态训练', side: undefined });
   });
 });
