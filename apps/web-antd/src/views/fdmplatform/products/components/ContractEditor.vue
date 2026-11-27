@@ -16,6 +16,8 @@ import type { Product, TaxBasis } from '#/api/fdmplatform/products';
 
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue';
 
+import { ArrowDown, ArrowUp, GripVertical } from '@vben/icons';
+
 import {
   Alert,
   Button,
@@ -194,6 +196,24 @@ const childOpen = computed(
     customerEditorOpen.value ||
     configurationOpen.value ||
     companyChange.open,
+);
+const showLineOrder = computed(
+  () => !props.contract || props.contract.status === 'DRAFT',
+);
+const canReorderLines = computed(
+  () =>
+    showLineOrder.value &&
+    lines.value.length > 1 &&
+    !saving.value &&
+    !resolving.value &&
+    !childOpen.value,
+);
+const draggedLineId = ref<string>();
+const dropLineId = ref<string>();
+const draggedLineIndex = computed(() =>
+  draggedLineId.value === undefined
+    ? -1
+    : lines.value.findIndex((line) => line.id === draggedLineId.value),
 );
 const replacementId = ref<string>();
 const key = ref('');
@@ -528,6 +548,9 @@ function onConfigured(
 /** 外贸建合同不填交期；内销保留，按内销习惯叫销售数量、单价、总价 */
 const columns = computed(() =>
   [
+    ...(showLineOrder.value
+      ? [{ title: '顺序', key: 'lineOrder', width: 100 }]
+      : []),
     { title: '选择', key: 'configurationSelection', width: 45 },
     { title: '产品与规格', key: 'product', width: 300 },
     { title: '单位', dataIndex: 'unit', width: 60 },
@@ -547,6 +570,63 @@ const columns = computed(() =>
     { title: '操作', key: 'action', width: 150 },
   ].filter((column) => domestic.value || column.key !== 'date'),
 );
+function moveLine(from: number, to: number) {
+  const line = lines.value[from];
+  if (!canReorderLines.value || !line || !lines.value[to] || from === to)
+    return;
+  const reordered = [...lines.value];
+  reordered.splice(from, 1);
+  reordered.splice(to, 0, line);
+  lines.value = reordered;
+}
+function startLineDrag(event: DragEvent, id: string) {
+  if (!canReorderLines.value || !event.dataTransfer) {
+    event.preventDefault();
+    return;
+  }
+  draggedLineId.value = id;
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('application/x-fdm-contract-line', id);
+}
+function clearLineDrag() {
+  draggedLineId.value = undefined;
+  dropLineId.value = undefined;
+}
+function lineSortRow(record: ContractItem, index?: number) {
+  const from = draggedLineIndex.value;
+  if (
+    !canReorderLines.value ||
+    from === -1 ||
+    index === undefined ||
+    from === index
+  )
+    return {};
+  return {
+    class: {
+      'line-drop-above': dropLineId.value === record.id && index < from,
+      'line-drop-below': dropLineId.value === record.id && index > from,
+    },
+    onDragover(event: DragEvent) {
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+      dropLineId.value = record.id;
+    },
+    onDragleave(event: DragEvent) {
+      const row = event.currentTarget as HTMLElement;
+      if (
+        !row.contains(event.relatedTarget as Node | null) &&
+        dropLineId.value === record.id
+      ) {
+        dropLineId.value = undefined;
+      }
+    },
+    onDrop(event: DragEvent) {
+      event.preventDefault();
+      moveLine(from, index);
+      clearLineDrag();
+    },
+  };
+}
 function lineAmountValue(line: ContractItem) {
   return amountDrafts[line.id] ?? contractLineAmount(line);
 }
@@ -592,6 +672,7 @@ watch(
     pickerOpen.value = false;
     customerEditorOpen.value = false;
     companyChange.open = false;
+    clearLineDrag();
     resolving.value = false;
     attachmentsLoading.value = false;
     if (!open) return;
@@ -1339,6 +1420,7 @@ async function save(activate = false) {
           />
           <Table
             :columns="columns"
+            :custom-row="lineSortRow"
             :data-source="lines"
             row-key="id"
             :pagination="false"
@@ -1351,9 +1433,44 @@ async function save(activate = false) {
                 description="从产品中心批量选择，自动带入规格、单位、标准包装和参考价"
               />
             </template>
-            <template #bodyCell="{ column, record }">
+            <template #bodyCell="{ column, index, record }">
+              <div
+                v-if="column.key === 'lineOrder'"
+                class="line-order-controls"
+              >
+                <span
+                  class="line-drag-handle"
+                  :draggable="canReorderLines"
+                  aria-hidden="true"
+                  title="拖动调整产品顺序"
+                  @dragstart="startLineDrag($event, record.id)"
+                  @dragend="clearLineDrag"
+                >
+                  <GripVertical :size="16" />
+                </span>
+                <Button
+                  type="text"
+                  size="small"
+                  :disabled="!canReorderLines || index === 0"
+                  :aria-label="`上移 ${record.skuName}`"
+                  title="上移"
+                  @click="moveLine(index, index - 1)"
+                >
+                  <template #icon><ArrowUp :size="14" /></template>
+                </Button>
+                <Button
+                  type="text"
+                  size="small"
+                  :disabled="!canReorderLines || index === lines.length - 1"
+                  :aria-label="`下移 ${record.skuName}`"
+                  title="下移"
+                  @click="moveLine(index, index + 1)"
+                >
+                  <template #icon><ArrowDown :size="14" /></template>
+                </Button>
+              </div>
               <Checkbox
-                v-if="column.key === 'configurationSelection'"
+                v-else-if="column.key === 'configurationSelection'"
                 :checked="selectedConfigurationIds.includes(record.id)"
                 :disabled="
                   !!configurationLock(record as ContractItem) || childOpen
@@ -1848,6 +1965,29 @@ async function save(activate = false) {
 .muted {
   font-size: 12px;
   color: #64748b;
+}
+
+.line-order-controls {
+  display: flex;
+  align-items: center;
+}
+
+.line-drag-handle {
+  display: flex;
+  align-items: center;
+  color: hsl(var(--muted-foreground));
+}
+
+.line-drag-handle[draggable='true'] {
+  cursor: grab;
+}
+
+:deep(.line-drop-above > td) {
+  box-shadow: inset 0 2px var(--ant-color-primary, #1677ff);
+}
+
+:deep(.line-drop-below > td) {
+  box-shadow: inset 0 -2px var(--ant-color-primary, #1677ff);
 }
 
 .custom-fields {

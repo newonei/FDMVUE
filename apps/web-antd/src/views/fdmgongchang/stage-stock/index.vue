@@ -37,9 +37,11 @@ const { hasAccessByCodes } = useAccess();
 const canOperate = computed(() =>
   hasAccessByCodes(['fdmgongchang:stage-stock:operate']),
 );
+const canOpenFoamWorkshop = computed(() => hasAccessByCodes(['fdmgongchang:workbench:use']));
 
 const factory = useFactory();
 const options = ref<Api.Options>();
+const canCreate = computed(() => canOperate.value && options.value?.processes.some((process) => process.code !== 'MIX'));
 const summary = ref<Api.Summary>();
 const loadError = ref(false);
 /** 账号不属于任何工厂，且没有「查看全部工厂」权限。 */
@@ -120,6 +122,7 @@ function selectStage(stage: string) {
 }
 
 function openCreate(stage?: string) {
+  if (!canCreate.value) return;
   orderMode.value = 'create';
   orderStage.value = stage ?? activeStage.value;
   activeOrderId.value = undefined;
@@ -168,18 +171,12 @@ async function onSettingSaved() {
               @change="switchFactory"
             />
           </div>
-          <p class="m-0 mt-1.5 text-sm text-muted-foreground">
-            每道工序从本厂原料仓、半成品仓领料，良品进半成品仓，订单最后一道的成品直接进成品仓；残次品只登记数量。
-          </p>
+          <p class="m-0 mt-1.5 text-sm text-muted-foreground">工序单记录上道工序领料与本工序产出。发泡开工和报工在发泡车间办理。</p>
         </div>
-        <Button
-          v-if="canOperate && options"
-          size="large"
-          type="primary"
-          @click="openCreate()"
-        >
-          ＋ 新建工序单
-        </Button>
+        <div class="flex flex-wrap gap-2">
+          <Button v-if="canOpenFoamWorkshop && options?.processes.some((process) => process.code === 'MIX')" size="large" @click="router.push(FACTORY_ROUTES.foamWorkshop)">发泡车间</Button>
+          <Button v-if="canCreate" size="large" type="primary" @click="openCreate()">＋ 新建工序单</Button>
+        </div>
       </header>
 
       <Alert

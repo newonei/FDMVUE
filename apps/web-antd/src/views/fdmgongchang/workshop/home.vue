@@ -9,6 +9,7 @@ import type { FdmgongchangScheduleApi as ScheduleApi } from '#/api/fdmgongchang/
 import type { FdmgongchangWorkbenchApi as Api } from '#/api/fdmgongchang/workbench';
 
 import { computed, nextTick, reactive, ref, watch } from 'vue';
+import { useRouter } from 'vue-router';
 
 import { useAccess } from '@vben/access';
 import { buildUUID } from '@vben/utils';
@@ -24,6 +25,7 @@ import { businessError, reportFailureText } from '../shared/business-error';
 import FactorySwitch from '../shared/factory-switch.vue';
 import { changeLaminationDefect, changeLaminationGood, laminationDefects, laminationLayers } from '../shared/lamination-report';
 import { quantityPrecision } from '../shared/quantity';
+import { FACTORY_ROUTES } from '../shared/routes';
 import { dateText, PROCESS_LABELS } from '../shared/schedule';
 import { formatQty, makeLabels, roundQty, sizeText, toNumber } from '../stage-stock/model';
 import OrderModal from '../stage-stock/modules/order-modal.vue';
@@ -42,6 +44,8 @@ const emit = defineEmits<{
 }>();
 const job = useJob();
 const { hasAccessByCodes } = useAccess();
+const router = useRouter();
+const canSeeFoamRaw = computed(() => hasAccessByCodes(['fdmgongchang:foam-raw:query']));
 const canDispatch = computed(() => hasAccessByCodes(['fdmgongchang:schedule:confirm']));
 const canOperateStock = computed(() => hasAccessByCodes(['fdmgongchang:stage-stock:query'])
   && hasAccessByCodes(['fdmgongchang:stage-stock:operate']));
@@ -118,7 +122,7 @@ async function dispatch() {
   try {
     const count = await reassignScheduleTasks({ taskIds: selectedIds.value, toWorkerIds: dispatchWorkers.value });
     if (version !== contextVersion) return;
-    message.success(`已派发 ${count} 个任务，员工可在「我的工作台」查看并手动领料`);
+    message.success(`已派发 ${count} 个任务，员工可在「我的工作台」查看并${props.process === 'MIX' ? '确认开工' : '手动领料'}`);
     dispatchOpen.value = false;
     for (const id of selectedIds.value) Reflect.deleteProperty(drafts, id);
     clearSelection(); emit('refresh');
@@ -126,7 +130,7 @@ async function dispatch() {
   finally { if (version === contextVersion) busy.value = false; }
 }
 const selected = (task: ScheduleApi.Task) => selectedIds.value.includes(task.id);
-const batchAvailability = (task: ScheduleApi.Task) => task.followActualBatches ? toNumber(task.actualBatchAvailable) : undefined;
+const batchAvailability = (task: ScheduleApi.Task) => props.process !== 'MIX' && task.followActualBatches ? toNumber(task.actualBatchAvailable) : undefined;
 function remainingReportQuantity(task: ScheduleApi.Task, planned: unknown) {
   const expected = toNumber(planned);
   if (expected === undefined) return undefined;
@@ -320,8 +324,8 @@ const taskColumns = computed<TableColumnsType<ScheduleApi.Task>>(() => {
 });
 const recentDone = computed(() => (my.value.recentDone ?? []).filter((order) => order.process === props.process));
 const independentProcess = computed(() => my.value.processes.find((item) => item.code === props.process));
-const useStockIssue = computed(() => canOperateStock.value && (!independentProcess.value || props.process === 'MIX'));
-const estimatedMix = computed(() => props.process === 'MIX' && !useStockIssue.value);
+const estimatedMix = computed(() => props.process === 'MIX');
+const useStockIssue = computed(() => canOperateStock.value && !independentProcess.value && !estimatedMix.value);
 function startStockOperation(stage: string, reportAfterPicking: boolean) {
   if (useStockIssue.value) {
     stockIssueStage.value = stage;
@@ -386,6 +390,7 @@ const mixOutputLines = (task: ScheduleApi.Task) => reportMixPlanLines(task).filt
       <h1 class="m-0 text-xl font-bold">{{ title }}</h1>
       <div class="flex flex-wrap items-center gap-3">
         <FactorySwitch :factories="factories" :value="factoryId" :class="{ 'pointer-events-none opacity-60': busy }" :aria-disabled="busy" @change="!busy && emit('changeFactory', $event)" />
+        <Button v-if="estimatedMix && canSeeFoamRaw" :disabled="busy" type="primary" @click="router.push(FACTORY_ROUTES.foamRaw)">发泡原料领用</Button>
         <Button href="/fdmstock/inventory-stock">库存与流水</Button>
         <Button :disabled="busy || stockIssueOpen" @click="emit('refresh')">刷新</Button>
       </div>
@@ -416,7 +421,7 @@ const mixOutputLines = (task: ScheduleApi.Task) => reportMixPlanLines(task).filt
         />
       </div>
       <details v-if="recentDone.length" class="border-t border-border pt-3">
-        <summary class="cursor-pointer text-sm text-muted-foreground">近期完工 / 补登领料（{{ recentDone.length }}）</summary>
+        <summary class="cursor-pointer text-sm text-muted-foreground">{{ estimatedMix ? '近期完工' : '近期完工 / 补登领料' }}（{{ recentDone.length }}）</summary>
         <OrdersTable class="mt-2" :orders="recentDone" :options="job.options" completed @supplement="emit('supplementOrder', $event)" />
       </details>
     </template>
@@ -433,7 +438,7 @@ const mixOutputLines = (task: ScheduleApi.Task) => reportMixPlanLines(task).filt
         <div class="flex flex-wrap gap-2"><Input id="workshop-keyword" v-model:value="keyword" allow-clear class="w-64 max-w-full" placeholder="搜索订单、产品或任务编号" aria-label="搜索车间订单" /><Select id="workshop-status" v-model:value="status" :options="orderStatusOptions" class="w-40" aria-label="订单任务状态" /></div>
       </div>
       <div class="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 rounded border border-primary/20 bg-background px-3 py-2 shadow-sm">
-        <div class="text-sm">已勾选 <strong class="text-base text-primary">{{ selectedIds.length }}</strong> 个任务<span class="ml-3 text-xs text-muted-foreground">员工自报请先派工；主任代报须选实际人员，按任务用料比例自动领料。已领料任务请回原工序单报工。</span></div>
+        <div class="text-sm">已勾选 <strong class="text-base text-primary">{{ selectedIds.length }}</strong> 个任务<span class="ml-3 text-xs text-muted-foreground">{{ estimatedMix ? '代报请选实际生产人员。原料按配方预估，已开工任务回原工序单报工。' : '员工自报请先派工；主任代报须选实际人员，按任务用料比例自动领料。已领料任务请回原工序单报工。' }}</span></div>
         <div class="flex gap-2"><Button :disabled="busy || !selectedIds.length" @click="clearSelection">取消勾选</Button><Button v-if="canDispatch" :disabled="busy || dispatchDisabled" @click="openDispatch">派给员工</Button><Button type="primary" :loading="busy" :disabled="!selectedIds.length" @click="batchReport">批量报工</Button></div>
       </div>
       <p v-if="canDispatch && selectedTasks.some((task) => !canAssign(task))" class="m-0 text-xs text-orange-600">已开过工序单的任务不能重新派工，请先核对原作业及剩余数量。</p>
@@ -484,7 +489,7 @@ v-model:expanded-row-keys="expandedOrderKeys" class="workshop-order-table" :colu
         </template>
         <template #expandedRowRender="{ record: order }">
           <div class="flex min-w-0 flex-col gap-2 py-1">
-            <div class="flex items-center justify-between"><strong>{{ order.orderNo }} · 本车间全部任务</strong><span class="text-xs text-muted-foreground">未领料任务可派工或代报；已领料任务由原负责人继续</span></div>
+            <div class="flex items-center justify-between"><strong>{{ order.orderNo }} · 本车间全部任务</strong><span class="text-xs text-muted-foreground">{{ estimatedMix ? '未开工任务可派工或代报；已开工任务由原负责人继续' : '未领料任务可派工或代报；已领料任务由原负责人继续' }}</span></div>
             <p v-if="props.process === 'MIX' && summaryFields(order as WorkshopOrder).some((field) => field.label === '克重' && field.value === '未填写')" class="m-0 text-xs text-orange-600">克重未填写，请在采购单生产要求中补全。</p>
             <Table
               class="workshop-task-table" :columns="taskColumns" :data-source="order.tasks" :row-selection="selection(order as WorkshopOrder)"
@@ -502,7 +507,7 @@ v-model:expanded-row-keys="expandedOrderKeys" class="workshop-order-table" :colu
                   <div v-if="task.parentTaskId" class="mt-1 text-xs text-muted-foreground">补派子任务 · 原任务 #{{ task.parentTaskId }}</div>
                   <div v-if="taskOrderNos(task as ScheduleApi.Task).length > 1" class="mt-1 text-xs text-orange-600">合并任务 · 勾选同步，只报一次<br />关联 {{ taskOrderNos(task as ScheduleApi.Task).join('、') }}</div>
                   <ul v-if="coverLines(task as ScheduleApi.Task).length > 1" class="mb-0 mt-1 list-none p-0 text-xs text-muted-foreground"><li v-for="line in coverLines(task as ScheduleApi.Task)" :key="line">{{ line }}</li></ul>
-                  <div v-if="task.activeOrderId" class="mt-1 text-xs text-orange-700">{{ task.activeOperatorName || '原领料人' }} 已领料 · 工序单 #{{ task.activeOrderId }}<br />请由负责人在「我的工作台 → 正在做」继续报工。</div><div v-else class="mt-1 text-xs text-muted-foreground">{{ task.workerNames ? `已派给 ${task.workerNames}` : '待派给员工' }}</div>
+                  <div v-if="task.activeOrderId" class="mt-1 text-xs text-orange-700">{{ task.activeOperatorName || (estimatedMix ? '原负责人' : '原领料人') }} {{ estimatedMix ? '已开工' : '已领料' }} · 工序单 #{{ task.activeOrderId }}<br />请由负责人在「我的工作台 → 正在做」继续报工。</div><div v-else class="mt-1 text-xs text-muted-foreground">{{ task.workerNames ? `已派给 ${task.workerNames}` : '待派给员工' }}</div>
                   <details class="mt-1 text-xs"><summary class="cursor-pointer text-muted-foreground">任务明细 / 用料要求</summary><div class="mt-2"><TaskMaterials :task="task as ScheduleApi.Task" /><p v-if="task.workerNames">负责人：{{ task.workerNames }}</p><p v-if="task.reason">{{ task.reason }}</p><p v-if="task.upstreamNote">{{ task.upstreamNote }}</p></div></details>
                 </template>
                 <template v-else-if="column.key === 'focus'">
@@ -548,7 +553,7 @@ v-model:expanded-row-keys="expandedOrderKeys" class="workshop-order-table" :colu
                 <template v-else-if="column.key === 'progress'">
                   <div v-if="adjustedBoards(task as ScheduleApi.Task) !== undefined" class="text-base text-primary">选板后计划 <b>{{ formatQty(adjustedBoards(task as ScheduleApi.Task)) }}</b> {{ task.unit }}</div>
                   <div v-else class="text-base">计划 <b>{{ formatQty(task.quantity) }}</b> {{ task.unit }}</div>
-                  <div v-if="task.actualBatchAvailable != null" class="mt-1 text-sm" :class="Number(task.actualBatchAvailable) > 0 ? 'text-primary' : 'text-warning'">
+                  <div v-if="!estimatedMix && task.actualBatchAvailable != null" class="mt-1 text-sm" :class="Number(task.actualBatchAvailable) > 0 ? 'text-primary' : 'text-warning'">
                     {{ Number(task.actualBatchAvailable) > 0 ? `按可领批次可做 ${formatQty(task.actualBatchAvailable)} ${task.unit ?? ''}` : '当前无足够的可领批次' }}
                   </div>
                   <div class="mt-1 text-sm">{{ props.process === 'LAMINATE' ? '已贴合良品' : '已报良品' }} {{ formatQty(task.actualQuantity) }} {{ task.unit }}</div>
@@ -600,7 +605,7 @@ v-model:expanded-row-keys="expandedOrderKeys" class="workshop-order-table" :colu
         <p class="m-0">将选中的 {{ selectedIds.length }} 个任务安排到员工的「我的工作台」，员工可核对规格、手选材料并填写实际领取数量。</p>
         <DispatchWageCheck v-if="dispatchOpen && selectedTasks.length" :key="factoryId ?? 0" :tasks="selectedTasks" />
         <Select id="workshop-dispatch-workers" v-model:value="dispatchWorkers" :options="operatorOptions" :loading="operatorsLoading" :disabled="busy" mode="multiple" show-search option-filter-prop="label" placeholder="选择本工序在岗员工" aria-label="派给员工" />
-        <Alert type="info" show-icon message="选择多人表示共同负责同一任务" description="由一位负责人领料并在原工序单分批报工；不会拆成多人独立领料的任务。需要各自领料时，请先按分工拆成不同任务。" />
+        <Alert type="info" show-icon message="选择多人表示共同负责同一任务" :description="estimatedMix ? '由一位负责人开工，并在原工序单分批报工。' : '由一位负责人领料并在原工序单分批报工；不会拆成多人独立领料的任务。需要各自领料时，请先按分工拆成不同任务。'" />
         <p class="m-0 text-xs text-muted-foreground">已经派过人的任务将改为本次所选人员；已开过工序单的任务不能改派。</p>
         <Alert v-if="warning" type="error" :message="warning" />
       </div>

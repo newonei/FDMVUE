@@ -227,20 +227,30 @@ vi.mock('ant-design-vue', () => {
         type: Array as PropType<{ key: string }[]>,
         default: () => [],
       },
+      customRow: Function as PropType<
+        (
+          record: Record<string, unknown>,
+          index: number,
+        ) => Record<string, unknown>
+      >,
     },
     setup: (props, ctx) => () =>
       h(
         'div',
         {},
-        props.dataSource.map((record) =>
+        props.dataSource.map((record, index) =>
           h(
             'div',
-            { 'data-row': record.id, key: String(record.id) },
+            {
+              ...props.customRow?.(record, index),
+              'data-row': record.id,
+              key: String(record.id),
+            },
             props.columns.map((column) =>
               h(
                 'div',
                 { 'data-column': column.key },
-                ctx.slots.bodyCell?.({ column, record }),
+                ctx.slots.bodyCell?.({ column, index, record }),
               ),
             ),
           ),
@@ -876,6 +886,96 @@ describe('order entry without changing menus', () => {
     expect(document.activeElement).toBe(
       rows[2]!.querySelector('[data-column="quantity"] input'),
     );
+  });
+
+  it('moves whole product rows and reopens the draft in the saved order', async () => {
+    api.customers.mockResolvedValue({
+      list: [
+        { id: 'customer', name: '客户甲', type: 'CUSTOMER', active: true },
+      ],
+      total: 1,
+    });
+    const { host } = await mountEditor();
+    await vi.waitFor(() =>
+      expect(
+        host.querySelector('[data-label="客户"] option[value="customer"]'),
+      ).toBeTruthy(),
+    );
+    await fill(host, '客户', 'customer', 'select');
+    await fill(host, '合同主体', '1', 'select');
+    await fill(host, '产品分类', 'YOGA', 'select');
+    await fill(host, '内部单号', 'WM-SORT');
+    await addProduct(host);
+    await addProduct(host);
+    await addProduct(host);
+
+    const rowIds = (root: HTMLElement) =>
+      [...root.querySelectorAll<HTMLElement>('[data-row]')].map(
+        (row) => row.dataset.row,
+      );
+    const [first, , third] = host.querySelectorAll<HTMLElement>('[data-row]');
+    const [firstId, secondId, thirdId] = rowIds(host);
+    const orderButton = (row: HTMLElement, title: '上移' | '下移') =>
+      row.querySelector<HTMLButtonElement>(`button[title="${title}"]`)!;
+    const quantity = third!.querySelector<HTMLInputElement>(
+      '[data-column="quantity"] input',
+    )!;
+    quantity.value = '25';
+    quantity.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(orderButton(first!, '上移').disabled).toBe(true);
+    expect(orderButton(third!, '下移').disabled).toBe(true);
+    orderButton(third!, '上移').click();
+    await nextTick();
+    expect(rowIds(host)).toEqual([firstId, thirdId, secondId]);
+    orderButton(third!, '下移').click();
+    await nextTick();
+    expect(rowIds(host)).toEqual([firstId, secondId, thirdId]);
+
+    const dataTransfer = new DataTransfer();
+    const dragEvent = (type: string) => {
+      const event = new DragEvent(type, { bubbles: true, cancelable: true });
+      // Happy DOM does not populate dataTransfer from DragEventInit.
+      Object.defineProperty(event, 'dataTransfer', { value: dataTransfer });
+      return event;
+    };
+    third!
+      .querySelector('[draggable="true"]')!
+      .dispatchEvent(dragEvent('dragstart'));
+    await nextTick();
+    const over = dragEvent('dragover');
+    first!.dispatchEvent(over);
+    await nextTick();
+    expect(over.defaultPrevented).toBe(true);
+    expect(first!.classList.contains('line-drop-above')).toBe(true);
+    first!.dispatchEvent(dragEvent('drop'));
+    await nextTick();
+    const expected = [thirdId, firstId, secondId];
+    expect(rowIds(host)).toEqual(expected);
+    expect(first!.classList.contains('line-drop-above')).toBe(false);
+
+    api.create.mockImplementation(async (payload) => ({
+      ...payload,
+      id: 'contract-sort',
+      code: 'WM-SORT',
+      status: 'DRAFT',
+      version: 1,
+    }));
+    button(host, '保存草稿').click();
+    await vi.waitFor(() => expect(api.create).toHaveBeenCalledTimes(1));
+    const saved = (await api.create.mock.results[0]!.value) as Contract;
+    expect(saved.items.map((item) => item.id)).toEqual(expected);
+    expect(saved.items[0]).toMatchObject({
+      id: thirdId,
+      quantity: '25',
+      unitPrice: '10',
+    });
+
+    const { host: reopened } = await mountEditor('FOREIGN', saved);
+    expect(rowIds(reopened)).toEqual(expected);
+    expect(
+      reopened.querySelector<HTMLInputElement>('[data-column="quantity"] input')
+        ?.value,
+    ).toBe('25');
   });
 
   it('updates product quantity totals by unit independently of pricing', async () => {

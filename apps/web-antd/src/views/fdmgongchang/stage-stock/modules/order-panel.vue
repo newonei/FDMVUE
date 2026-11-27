@@ -26,6 +26,7 @@ import {
   makeLabels,
   materialGap,
   processLabel as processLabelOf,
+  toNumber,
 } from '../model';
 import HoldModal from './hold-modal.vue';
 import ReturnModal from './return-modal.vue';
@@ -70,6 +71,10 @@ function openReturn(order: Api.Order) {
 function openSupplement(order: Api.Order) {
   supplementOrderId.value = order.id;
   supplementOpen.value = true;
+}
+
+function canReturn(order: Api.Order) {
+  return order.process !== 'MIX' || (toNumber(order.inputQuantity) ?? 0) > (toNumber(order.returnedQuantity) ?? 0);
 }
 
 function openVoid(order: Api.Order) {
@@ -290,8 +295,8 @@ const statCards = computed(() =>
             <span>{{ [o.team, o.operatorName].filter(Boolean).join(' · ') }} ·
               {{ formatDateTime(o.issuedAt) }}</span>
             <span v-if="canOperate" class="flex gap-1">
-              <Button size="small" @click="openSupplement(o)">补领</Button>
-              <Button size="small" @click="openReturn(o)">退料</Button>
+              <Button v-if="o.process !== 'MIX'" size="small" @click="openSupplement(o)">补领</Button>
+              <Button v-if="canReturn(o)" size="small" @click="openReturn(o)">退料</Button>
               <Button size="small" type="primary" @click="emit('report', o.id)">
                 报产出
               </Button>
@@ -357,7 +362,7 @@ const statCards = computed(() =>
             size="small"
           />
           <Button
-            v-if="canOperate"
+            v-if="canOperate && options.processes.some((process) => process.code !== 'MIX')"
             size="small"
             type="primary"
             @click="emit('create')"
@@ -478,7 +483,7 @@ const statCards = computed(() =>
                 报产出
               </button>
               <button
-                v-if="canOperate && record.status === 'IN_PROGRESS'"
+                v-if="canOperate && record.status === 'IN_PROGRESS' && record.process !== 'MIX'"
                 type="button"
                 class="text-primary hover:underline"
                 @click="openSupplement(record as Api.Order)"
@@ -486,7 +491,7 @@ const statCards = computed(() =>
                 补领
               </button>
               <button
-                v-if="canOperate && record.status === 'IN_PROGRESS'"
+                v-if="canOperate && record.status === 'IN_PROGRESS' && canReturn(record as Api.Order)"
                 type="button"
                 class="text-primary hover:underline"
                 @click="openReturn(record as Api.Order)"
@@ -494,7 +499,7 @@ const statCards = computed(() =>
                 退料
               </button>
               <button
-                v-if="canOperate && record.lateSupplementable"
+                v-if="canOperate && record.lateSupplementable && record.process !== 'MIX'"
                 type="button"
                 class="text-primary hover:underline"
                 title="完工 3 天内，实际多拿的料没登记的在这里补登"
@@ -521,7 +526,7 @@ const statCards = computed(() =>
             >
               <div>
                 <h4 class="m-0 mb-1 text-sm font-semibold">
-                  领料（扣{{ stageOf(record.sourceStage)?.label }}库存）
+                  {{ record.process === 'MIX' && !details[record.id]!.inputs?.length ? '发泡预计用料' : `领料（扣${stageOf(record.sourceStage)?.label}库存）` }}
                   <span
                     v-if="details[record.id]!.recipeCode"
                     class="ml-1 text-xs font-normal text-muted-foreground"

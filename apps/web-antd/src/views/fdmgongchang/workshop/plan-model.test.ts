@@ -65,17 +65,23 @@ describe('workshop plan rows', () => {
     expect(rows[2]).toMatchObject({ date: '', order: '备货任务 · 排单 #2', orderQuantity: '', size: '' });
   });
 
-  it('uses current task plan and cumulative good quantity for achievement, excluding scrap and invalid plans', () => {
+  it('calculates good rate from actual output and keeps supplemental credit in plan progress', () => {
     const rows = buildWorkshopPlanRows([
-      { ...task, actualQuantity: 8, defectQuantity: 4, doneAt: [2026, 11, 27, 19, 0, 0], plannedQuantity: 20, supplementGoodQuantity: 3 },
-      { ...task, id: 2, status: 'CLOSED' },
-      { ...task, id: 3, quantity: 0 },
+      {
+        ...task, actualQuantity: '8', completedBySupplement: true, defectQuantity: '4',
+        doneAt: [2026, 11, 27, 19, 0, 0], plannedQuantity: 20, status: 'DONE', supplementGoodQuantity: 3,
+      },
+      { ...task, id: 2, actualQuantity: 6, defectQuantity: 0, quantity: 5, status: 'DONE' },
+      { ...task, id: 3, defectQuantity: 4, quantity: 0 },
       { ...task, id: 4 },
       { ...task, id: 5, actualQuantity: '' },
+      { ...task, id: 6, actualQuantity: 6, status: 'CLOSED' },
     ]);
     expect(rows[0]!.completed).toBe('2026-11-27');
-    expect(rows[0]!.achievement).toBeCloseTo(1.1);
-    expect(rows.slice(1).map((row) => row.achievement)).toEqual([undefined, undefined, 0, undefined]);
+    expect(rows[0]!.goodRate).toBeCloseTo(8 / 12);
+    expect(rows[0]!.progress.targetLabel).toBe('良品已补齐');
+    expect(rows[1]!.progress.targetLabel).toBe('良品已达计划');
+    expect(rows.slice(1).map((row) => row.goodRate)).toEqual([1, 0, undefined, undefined, undefined]);
   });
 
   it('shows the factory date for completion timestamps near midnight', () => {

@@ -4,6 +4,7 @@ import type { TableColumnsType, TablePaginationConfig } from 'ant-design-vue';
 import type { FdmgongchangStageStockApi as Api } from '#/api/fdmgongchang/stage-stock';
 
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { useRouter } from 'vue-router';
 
 import { useAccess } from '@vben/access';
 import { IconifyIcon } from '@vben/icons';
@@ -12,6 +13,7 @@ import { Button, Checkbox, Input, Table, Tooltip } from 'ant-design-vue';
 
 import { getStockPage } from '#/api/fdmgongchang/stage-stock';
 
+import { FACTORY_ROUTES } from '../../shared/routes';
 import {
   extraProcessesAt,
   formatQty,
@@ -41,6 +43,8 @@ const emit = defineEmits<{
 }>();
 
 const { hasAccessByCodes } = useAccess();
+const router = useRouter();
+const canSeeFoamRaw = computed(() => hasAccessByCodes(['fdmgongchang:foam-raw:query']));
 const canOperate = computed(() =>
   hasAccessByCodes(['fdmgongchang:stage-stock:operate']),
 );
@@ -63,7 +67,7 @@ const incoming = computed(() =>
   props.options.processes.find((p) => p.outputStage === props.stage),
 );
 const outgoing = computed(() =>
-  props.options.processes.filter((p) => p.sources.includes(props.stage)),
+  props.options.processes.filter((p) => p.code !== 'MIX' && p.sources.includes(props.stage)),
 );
 const flow = computed(() => stageFlow(props.stage, props.options));
 /** 挂在这个阶段的附加工序（不改变规格，在这个阶段原地加工）。 */
@@ -255,6 +259,7 @@ function onExtraSaved(text: string) {
         >
           从这里领料
         </Button>
+        <Button v-if="stage === 'RAW' && canSeeFoamRaw" type="primary" @click="router.push(FACTORY_ROUTES.foamRaw)">发泡原料领用</Button>
       </div>
     </div>
 

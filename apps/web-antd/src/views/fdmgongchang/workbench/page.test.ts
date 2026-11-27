@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   access: vi.fn(),
   reassign: vi.fn(),
   route: { query: {} as Record<string, string> },
+  routerPush: vi.fn(),
   factories: vi.fn(),
   setFactory: vi.fn(),
   mates: vi.fn(),
@@ -45,7 +46,10 @@ vi.mock('#/api/fdmgongchang/stage-stock', async (importOriginal) => ({
   ...await importOriginal<typeof import('#/api/fdmgongchang/stage-stock')>(),
   getOrderPage: mocks.orderPage,
 }));
-vi.mock('vue-router', () => ({ useRoute: () => mocks.route }));
+vi.mock('vue-router', () => ({
+  useRoute: () => mocks.route,
+  useRouter: () => ({ push: mocks.routerPush }),
+}));
 vi.mock('#/api/fdmgongchang/factory', () => ({
   getMyFactories: mocks.factories,
   setCurrentFactoryId: mocks.setFactory,

@@ -32,7 +32,7 @@ const stageOf = (stage: string) => props.options?.stages.find((item) => item.cod
       <template v-else-if="column.key === 'actions'">
         <div class="flex flex-wrap gap-2">
           <Button v-if="!completed" size="small" type="primary" @click="emit('report', record as Api.Order)">报本工序产出</Button>
-          <Button size="small" @click="emit('supplement', record as Api.Order)">{{ completed ? '补登领料' : '补领材料' }}</Button>
+          <Button v-if="record.process !== 'MIX'" size="small" @click="emit('supplement', record as Api.Order)">{{ completed ? '补登领料' : '补领材料' }}</Button>
         </div>
       </template>
     </template>

@@ -100,7 +100,7 @@ const columns = computed<TableColumnsType<WorkshopPlanRow>>(() => {
     { key: 'planned', title: '任务计划', width: 94, align: 'right' },
     { key: 'good', title: '累计良品', width: 93, align: 'right', className: 'plan-good-cell' },
     { key: 'defect', title: '累计残次', width: 92, align: 'right', className: 'plan-defect-cell' },
-    { key: 'achievement', title: '良品达成率', width: 126, className: 'plan-achievement-cell' },
+    { key: 'goodRate', title: '良品率', width: 126, className: 'plan-good-rate-cell' },
     { key: 'notes', title: '备注', width: 136 },
     { key: 'actions', title: '操作', width: 72 },
   ];
@@ -172,7 +172,7 @@ const percent = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2, style
       size="small"
     >
       <template #headerCell="{ column }">
-        <span v-if="column.key === 'achievement'" title="累计良品含已计入本任务的补派良品，除以当前任务计划量">良品达成率</span>
+        <span v-if="column.key === 'goodRate'" title="本任务实际报工良品 ÷（实际报工良品＋残次品），补派任务按自身报工单独计算">{{ column.title }}</span>
       </template>
       <template #bodyCell="{ column, record: row }">
         <template v-if="column.key === 'date'">
@@ -250,9 +250,9 @@ const percent = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2, style
             <div>反面 {{ qty(row.task.laminationActuals.backDefectQuantity, row.task.unit) }}</div>
           </div>
         </template>
-        <template v-else-if="column.key === 'achievement'">
-          <div class="font-semibold tabular-nums" :class="{ 'text-success': (row.achievement ?? 0) >= 1 }">
-            {{ row.achievement == null ? '—' : percent.format(row.achievement) }}
+        <template v-else-if="column.key === 'goodRate'">
+          <div class="font-semibold tabular-nums" :class="{ 'text-success': row.goodRate === 1 }">
+            {{ row.goodRate == null ? '—' : percent.format(row.goodRate) }}
           </div>
           <div class="text-xs" :class="row.progress.color === 'gold' ? 'text-warning' : 'text-muted-foreground'">
             {{ row.progress.targetLabel || row.progress.label }}
@@ -349,7 +349,7 @@ const percent = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2, style
 }
 
 .workshop-plan-table :deep(.plan-defect-cell),
-.workshop-plan-table :deep(.plan-achievement-cell) {
+.workshop-plan-table :deep(.plan-good-rate-cell) {
   background: color-mix(in srgb, hsl(var(--warning)) 12%, hsl(var(--background)));
 }
 

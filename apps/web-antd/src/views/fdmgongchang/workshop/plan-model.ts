@@ -9,13 +9,13 @@ import { attrSummary, formatQty, makeLabels, sizeText, sumQty, toNumber } from '
 import { finishedQuantity, finishedSize, mixPlanLines, taskFocus, taskOrderNos, uniqueTasks, workshopTaskProgress } from './order-model';
 
 export interface WorkshopPlanRow {
-  /** 本任务累计良品 / 当前任务计划，1 表示 100%。 */
-  achievement: number | undefined;
   colors: FocusField[];
   completed: string;
   customer: string;
   date: string;
   due: string;
+  /** 本任务实际报工良品占实际总产出的比例，1 表示 100%。 */
+  goodRate: number | undefined;
   materials: FocusField[];
   notes: string[];
   order: string;
@@ -105,12 +105,11 @@ function planMaterials(task: Api.Task, options?: StockApi.Options) {
   return fields;
 }
 
-function planAchievement(task: Api.Task) {
-  const planned = toNumber(task.quantity);
-  const actual = toNumber(task.actualQuantity);
-  if (task.status === 'CLOSED' || planned === undefined || planned <= 0 || actual === undefined) return undefined;
-  const good = sumQty([actual, task.supplementGoodQuantity]);
-  return good / planned;
+function actualGoodRate(task: Api.Task) {
+  const good = toNumber(task.actualQuantity);
+  if (task.status === 'CLOSED' || good === undefined) return undefined;
+  const total = sumQty([good, task.defectQuantity]);
+  return total > 0 ? good / total : undefined;
 }
 
 export function buildWorkshopPlanRows(tasks: Api.Task[], options?: StockApi.Options): WorkshopPlanRow[] {
@@ -118,12 +117,12 @@ export function buildWorkshopPlanRows(tasks: Api.Task[], options?: StockApi.Opti
     const items = task.relatedOrderItems ?? [];
     const orderQuantity = finishedQuantity(items);
     return {
-      achievement: planAchievement(task),
       colors: planColors(task, items, options),
       completed: planDate(task.doneAt),
       customer: uniqueText(items.map((item) => item.customerName)).join('、'),
       date: task.undated ? '' : planDate(task.workDate),
       due: uniqueText(items.map((item) => planDate(item.promisedDate) || planDate(item.requiredDate))).toSorted().join('、'),
+      goodRate: actualGoodRate(task),
       materials: planMaterials(task, options),
       notes: uniqueText([task.closedReason, task.shortageNote, task.upstreamNote, task.reason, ...items.map((item) => item.remark)]),
       order: uniqueText(taskOrderNos(task)).join('、') || `备货任务 · 排单 #${task.scheduleId}`,
