@@ -14,6 +14,10 @@ import {
   attachmentSize,
   submissionFilesError,
 } from '#/api/fdmplatform/submission-files';
+import {
+  FILE_PASTE_HINT,
+  takePastedFiles,
+} from '#/components/upload/clipboard-files';
 
 import { attachmentTime } from '../../../components/attachment-preview';
 import FilePreviewButton from '../../../components/FilePreviewButton.vue';
@@ -43,6 +47,13 @@ const visibleVersions = computed(() =>
 );
 const selectedVersion = computed(() =>
   signableVersions.value.find((item) => item.export.id === exportId.value),
+);
+const canUploadSigned = computed(
+  () =>
+    !props.saving &&
+    props.view.storageEnabled &&
+    props.view.allowedActions.includes('UPLOAD_SIGNED') &&
+    Boolean(selectedVersion.value),
 );
 const kindLabels: Record<string, string> = {
   docx: 'Word',
@@ -95,18 +106,23 @@ async function download(file: ProcurementFile) {
     pageError.value = errorText(error);
   }
 }
-function upload(event: Event) {
+function choose(event: Event) {
   const input = event.target as HTMLInputElement;
   const file = input.files?.[0];
   input.value = '';
-  if (
-    !file ||
-    !selectedVersion.value ||
-    props.saving ||
-    !props.view.storageEnabled ||
-    !props.view.allowedActions.includes('UPLOAD_SIGNED')
-  )
+  if (file) upload(file);
+}
+function pasteFile(event: ClipboardEvent) {
+  if (!canUploadSigned.value) return;
+  const files = takePastedFiles(event);
+  if (files.length > 1) {
+    pageError.value = '每次请粘贴一个供应商盖章件';
     return;
+  }
+  if (files[0]) upload(files[0]);
+}
+function upload(file: File) {
+  if (!canUploadSigned.value || !selectedVersion.value) return;
   pageError.value = submissionFilesError([file]);
   if (!pageError.value && file.size > 20 * 1024 * 1024)
     pageError.value = '供应商盖章件不能超过 20 MB';
@@ -143,7 +159,7 @@ function upload(event: Event) {
         <Button
           type="primary"
           :loading="saving"
-          :disabled="!exportId || saving || !view.storageEnabled"
+          :disabled="!canUploadSigned"
           :title="
             !view.storageEnabled
               ? '文件存储未配置'
@@ -152,11 +168,20 @@ function upload(event: Event) {
                 : '选择盖章件后直接上传，单个文件不超过 20 MB'
           "
           @click="fileInput?.click()"
+          @paste="pasteFile"
         >
           {{
             selectedVersion?.signed.length ? '补传盖章件' : '上传供应商盖章件'
           }}
         </Button>
+        <span
+          v-if="canUploadSigned"
+          tabindex="0"
+          class="muted"
+          @paste="pasteFile"
+        >
+          {{ FILE_PASTE_HINT }}
+        </span>
       </div>
     </div>
     <input
@@ -165,13 +190,8 @@ function upload(event: Event) {
       hidden
       :accept="ATTACHMENT_ACCEPT"
       aria-label="选择供应商盖章件"
-      :disabled="
-        saving ||
-        !view.storageEnabled ||
-        !exportId ||
-        !view.allowedActions.includes('UPLOAD_SIGNED')
-      "
-      @change="upload"
+      :disabled="!canUploadSigned"
+      @change="choose"
     />
     <Alert v-if="pageError" type="error" :message="pageError" show-icon />
     <div

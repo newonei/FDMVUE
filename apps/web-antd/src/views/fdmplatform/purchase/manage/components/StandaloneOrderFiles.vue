@@ -22,6 +22,10 @@ import {
   attachmentSize,
   submissionFilesError,
 } from '#/api/fdmplatform/submission-files';
+import {
+  FILE_PASTE_HINT,
+  takePastedFiles,
+} from '#/components/upload/clipboard-files';
 
 import { attachmentTime } from '../../../components/attachment-preview';
 import AttachmentActions from '../../../components/AttachmentActions.vue';
@@ -137,6 +141,11 @@ function dragOver(event: DragEvent) {
 function drop(event: DragEvent) {
   dragDepth.value = 0;
   addFiles([...(event.dataTransfer?.files ?? [])]);
+}
+function pasteFiles(event: ClipboardEvent) {
+  if (busy.value || !canUpload.value) return;
+  const files = takePastedFiles(event);
+  if (files.length > 0) addFiles(files);
 }
 function removeQueuedFile(key: string) {
   if (busy.value) return;
@@ -327,6 +336,7 @@ onBeforeUnmount(() => {
       @dragleave.prevent="dragLeave"
       @dragover.prevent="dragOver"
       @drop.prevent="drop"
+      @paste="pasteFiles"
     >
       <svg
         class="upload-icon"
@@ -352,6 +362,14 @@ onBeforeUnmount(() => {
         </span>
       </span>
     </button>
+    <span
+      v-if="canUpload"
+      :tabindex="busy ? undefined : 0"
+      class="muted"
+      @paste="pasteFiles"
+    >
+      {{ FILE_PASTE_HINT }}
+    </span>
     <span v-if="selectionNotice" role="status" class="muted">{{
       selectionNotice
     }}</span>

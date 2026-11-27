@@ -153,6 +153,31 @@ beforeEach(() => {
 });
 
 describe('员工自评附件上传', () => {
+  it('粘贴的截图沿用上传流程，并按相同规则拒绝不支持的附件', async () => {
+    await mount(undefined, undefined, true);
+    const screenshot = file('截图.png');
+    const unsupported = file('佐证.ai.exe');
+    const paste = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(paste, 'clipboardData', {
+      value: { files: [screenshot, unsupported] },
+    });
+
+    host.querySelector('.self-score-attachments [tabindex="0"]')!.dispatchEvent(paste);
+    await flush();
+
+    expect(paste.defaultPrevented).toBe(true);
+    expect(api.uploadSelfScoreAttachment).toHaveBeenCalledExactlyOnceWith(
+      screenshot,
+      1,
+      'self-score-task',
+      expect.any(Function),
+    );
+    expect(host.textContent).toContain(screenshot.name);
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining('不支持 佐证.ai.exe 的文件格式'),
+    );
+  });
+
   it.each([
     'AI', 'plt', 'eps', 'cdr', 'psd', 'psb', 'dwg', 'dxf', 'tif', 'tiff',
     'zip', 'RAR', '7z', 'docm', 'dotx', 'xlsm', 'xltx', 'pptm', 'ppsx',

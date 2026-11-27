@@ -36,6 +36,10 @@ import {
   attachmentSize,
   submissionFilesError,
 } from '#/api/fdmplatform/submission-files';
+import {
+  FILE_PASTE_HINT,
+  takePastedFiles,
+} from '#/components/upload/clipboard-files';
 
 import FilePreviewButton from '../../../components/FilePreviewButton.vue';
 import { errorText, expenseCategories } from '../../../data';
@@ -236,6 +240,13 @@ function chooseFiles(event: Event, line: ReimbursementLine) {
   const input = event.target as HTMLInputElement;
   const selected = [...(input.files ?? [])];
   input.value = '';
+  addFiles(selected, line);
+}
+function pasteFiles(event: ClipboardEvent, line: ReimbursementLine) {
+  if (props.saving) return;
+  addFiles(takePastedFiles(event), line);
+}
+function addFiles(selected: File[], line: ReimbursementLine) {
   if (selected.length === 0 || props.saving) return;
   const seen = new Set(line.pendingFiles.map(pendingFileKey));
   const added = selected.filter((file) => {
@@ -546,13 +557,17 @@ defineExpose({ payload, pendingAttachments, isDirty, markSaved });
               class="expense-voucher"
               :data-field="`line-${line.localKey}-file`"
             >
-              <div class="voucher-heading">
+              <div
+                class="voucher-heading"
+                :tabindex="saving ? undefined : 0"
+                @paste="pasteFiles($event, line)"
+              >
                 <div>
                   <strong>报销凭证 <span class="required-mark">*</span></strong>
                   <p>
                     可多选，单份不超过 {{ ATTACHMENT_LIMIT_TEXT }}。{{
                       ATTACHMENT_FORMAT_TEXT
-                    }}。
+                    }}。{{ FILE_PASTE_HINT }}。
                   </p>
                 </div>
                 <label class="upload-control" :class="{ disabled: saving }">

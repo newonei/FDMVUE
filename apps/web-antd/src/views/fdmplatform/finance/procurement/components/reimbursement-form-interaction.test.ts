@@ -175,7 +175,7 @@ async function chooseFiles(host: HTMLElement, files: File[]) {
   await nextTick();
 }
 describe('专用报销编辑器实际交互', () => {
-  it('同一费用可多选、追加和单独移除凭证，保存失败保留待上传文件', async () => {
+  it('同一费用可多选、粘贴追加和单独移除凭证，保存失败保留待上传文件', async () => {
     const { host, saved, editor, props } = await mountEditor();
     expect(editor.value!.isDirty()).toBe(false);
     await input(host, 'name', '运输报销');
@@ -184,7 +184,13 @@ describe('专用报销编辑器实际交互', () => {
     const receipt = new File(['receipt'], 'receipt.pdf');
     const payment = new File(['payment'], 'payment.png');
     await chooseFiles(host, [bill, receipt]);
-    await chooseFiles(host, [bill, payment]);
+    const paste = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(paste, 'clipboardData', {
+      value: { files: [bill, payment] },
+    });
+    host.querySelector('.voucher-heading')!.dispatchEvent(paste);
+    await nextTick();
+    expect(paste.defaultPrevented).toBe(true);
     expect(editor.value!.pendingAttachments()).toEqual([
       bill,
       receipt,

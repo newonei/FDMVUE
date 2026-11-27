@@ -38,6 +38,10 @@ import {
   attachmentSize,
   submissionFilesError,
 } from '#/api/fdmplatform/submission-files';
+import {
+  FILE_PASTE_HINT,
+  takePastedFiles,
+} from '#/components/upload/clipboard-files';
 
 import { errorText } from '../data';
 import { attachmentTime, previewMimeType } from './attachment-preview';
@@ -204,6 +208,11 @@ const dragging = ref(false);
 function dropFile(event: DragEvent) {
   dragging.value = false;
   addFiles([...(event.dataTransfer?.files ?? [])]);
+}
+function pasteFiles(event: ClipboardEvent) {
+  if (uploading.value || categories.value.length === 0) return;
+  const files = takePastedFiles(event);
+  if (files.length > 0) addFiles(files);
 }
 async function upload() {
   if (
@@ -377,7 +386,11 @@ const columns = [
           :disabled="uploading"
           @change="changeCategory"
         />
-        <Button :disabled="uploading" @click="fileInput?.click()">
+        <Button
+          :disabled="uploading"
+          @click="fileInput?.click()"
+          @paste="pasteFiles"
+        >
           <template #icon>
             <Upload class="mr-1 inline-block size-4" aria-hidden="true" />
           </template>
@@ -393,6 +406,13 @@ const columns = [
               ? `待上传 ${selectedFiles.length} 个文件，共 ${attachmentSize(selectedBytes)}`
               : '可多选文件，也可将文件拖到这里'
           }}
+        </span>
+        <span
+          :tabindex="uploading ? undefined : 0"
+          class="text-muted-foreground text-xs"
+          @paste="pasteFiles"
+        >
+          {{ FILE_PASTE_HINT }}
         </span>
         <Button
           type="primary"

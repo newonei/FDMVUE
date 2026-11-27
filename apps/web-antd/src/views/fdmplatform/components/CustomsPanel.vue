@@ -58,6 +58,10 @@ import {
   customsActionWithAttachments,
 } from '#/api/fdmplatform/submissions';
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
+import {
+  FILE_PASTE_HINT,
+  takePastedFiles,
+} from '#/components/upload/clipboard-files';
 import AiCheckPanel from '#/views/fdmaicheck/components/AiCheckPanel.vue';
 import AiReviewStatus from '#/views/fdmaicheck/components/AiReviewStatus.vue';
 import { useAiReviewStatuses } from '#/views/fdmaicheck/components/useAiReviewStatuses';
@@ -587,7 +591,17 @@ async function perform() {
   }
 }
 function chooseFiles(event: Event) {
-  pendingFiles.value = [...((event.target as HTMLInputElement).files ?? [])];
+  setPendingFiles([...((event.target as HTMLInputElement).files ?? [])]);
+}
+function pasteFiles(event: ClipboardEvent) {
+  if (saving.value || uploading.value || !storageEnabled.value) return;
+  const files = takePastedFiles(event);
+  if (files.length === 0) return;
+  if (fileInput.value) fileInput.value.value = '';
+  setPendingFiles(files);
+}
+function setPendingFiles(files: File[]) {
+  pendingFiles.value = files;
   uploadError.value = '';
 }
 async function upload() {
@@ -1076,10 +1090,21 @@ onBeforeUnmount(() => {
                 :accept="ATTACHMENT_ACCEPT"
                 aria-label="选择报关资料文件"
                 @change="chooseFiles"
+                @paste="pasteFiles"
               />
               <Space wrap>
-                <span class="customs-muted">已选择 {{ pendingFiles.length }} 个文件，单个不超过 20
-                  MB</span><Button
+                <span
+                  v-if="storageEnabled"
+                  :tabindex="saving || uploading ? undefined : 0"
+                  class="customs-muted"
+                  @paste="pasteFiles"
+                >
+                  {{ FILE_PASTE_HINT }}
+                </span>
+                <span class="customs-muted">
+                  已选择 {{ pendingFiles.length }} 个文件，单个不超过 20 MB
+                </span>
+                <Button
                   type="primary"
                   :loading="uploading"
                   :disabled="!storageEnabled || !pendingFiles.length || saving"

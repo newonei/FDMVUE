@@ -129,14 +129,22 @@ async function pick(host: HTMLElement, files: File[]) {
   input.dispatchEvent(new Event('change'));
   await settle();
 }
-async function drop(host: HTMLElement, files: File[]) {
-  const event = new Event('drop', { bubbles: true, cancelable: true });
-  Object.defineProperty(event, 'dataTransfer', {
-    value: { files },
-  });
+async function dropOrPaste(
+  host: HTMLElement,
+  files: File[],
+  method: 'drop' | 'paste' = 'drop',
+) {
+  const event = new Event(method, { bubbles: true, cancelable: true });
+  Object.defineProperty(
+    event,
+    method === 'paste' ? 'clipboardData' : 'dataTransfer',
+    {
+      value: { files },
+    },
+  );
   host.querySelector('.dropzone')!.dispatchEvent(event);
-  expect(event.defaultPrevented).toBe(true);
   await settle();
+  return event;
 }
 function button(host: HTMLElement, label: string) {
   const result = [...host.querySelectorAll('button')].find((item) =>
@@ -203,32 +211,39 @@ describe('独立采购单附件上传队列', () => {
     expect(click).toHaveBeenCalledOnce();
   });
 
-  it('拖放追加文件并跳过与待上传队列或同批重复的文件', async () => {
-    const { host } = await mount();
-    const first = file('报价.pdf');
-    const second = file('图纸.ai');
-    await pick(host, [first]);
-    await drop(host, [first, second, second]);
-    expect(host.textContent).toContain('待上传 2 个文件');
-    expect(host.textContent).toContain('已跳过 2 个重复文件');
-    expect(host.querySelectorAll('.queued-file')).toHaveLength(2);
-    expect(mocks.upload).not.toHaveBeenCalled();
-    await upload(host);
-    expect(mocks.upload).toHaveBeenCalledTimes(2);
-  });
+  it.each(['drop', 'paste'] as const)(
+    '通过 %s 追加文件并跳过与待上传队列或同批重复的文件',
+    async (method) => {
+      const { host } = await mount();
+      const first = file('报价.pdf');
+      const second = file('图纸.ai');
+      await pick(host, [first]);
+      const event = await dropOrPaste(host, [first, second, second], method);
+      expect(event.defaultPrevented).toBe(true);
+      expect(host.textContent).toContain('待上传 2 个文件');
+      expect(host.textContent).toContain('已跳过 2 个重复文件');
+      expect(host.querySelectorAll('.queued-file')).toHaveLength(2);
+      expect(mocks.upload).not.toHaveBeenCalled();
+      await upload(host);
+      expect(mocks.upload).toHaveBeenCalledTimes(2);
+    },
+  );
 
-  it('无上传权限时拖放不添加文件', async () => {
-    mocks.files.mockResolvedValue({
-      enabled: true,
-      canUpload: false,
-      items: [],
-    });
-    const { host } = await mount();
-    await drop(host, [file('图纸.ai')]);
-    expect(host.querySelector('.queue')).toBeNull();
-    expect(button(host, '选择文件').disabled).toBe(true);
-    expect(mocks.upload).not.toHaveBeenCalled();
-  });
+  it.each(['drop', 'paste'] as const)(
+    '无上传权限时 %s 不添加文件',
+    async (method) => {
+      mocks.files.mockResolvedValue({
+        enabled: true,
+        canUpload: false,
+        items: [],
+      });
+      const { host } = await mount();
+      await dropOrPaste(host, [file('图纸.ai')], method);
+      expect(host.querySelector('.queue')).toBeNull();
+      expect(button(host, '选择文件').disabled).toBe(true);
+      expect(mocks.upload).not.toHaveBeenCalled();
+    },
+  );
 
   it('允许多选 AI、PLT，明确显示数量、名称、大小和已上传数量，上传前可移除', async () => {
     const { host } = await mount();
@@ -429,7 +444,7 @@ describe('独立采购单附件上传队列', () => {
     // Parent navigation protection must observe the change in the same turn.
     expect(busy.at(-1)).toBe(true);
     await settle();
-    await drop(host, [file('第三.ai')]);
+    await dropOrPaste(host, [file('第三.ai')]);
     expect(host.querySelectorAll('.queued-file')).toHaveLength(2);
     unmount();
     expect(busy.at(-1)).toBe(false);

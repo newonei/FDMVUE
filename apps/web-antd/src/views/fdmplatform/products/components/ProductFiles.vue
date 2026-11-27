@@ -22,6 +22,10 @@ import {
   getProductAttachments,
   uploadProductAttachment,
 } from '#/api/fdmplatform/products';
+import {
+  FILE_PASTE_HINT,
+  takePastedFiles,
+} from '#/components/upload/clipboard-files';
 
 import FilePreviewButton from '../../components/FilePreviewButton.vue';
 import { errorText } from '../../data';
@@ -63,8 +67,23 @@ async function load() {
   }
 }
 function chooseFile(event: Event) {
-  selectedFile.value = (event.target as HTMLInputElement).files?.[0];
+  selectFile((event.target as HTMLInputElement).files?.[0]);
+}
+function pasteFile(event: ClipboardEvent) {
+  if (uploading.value || !view.value?.enabled || !view.value.canUpload) return;
+  const files = takePastedFiles(event);
+  if (files.length > 1) {
+    panelError.value = '每次请粘贴一个产品标准资料文件';
+    return;
+  }
+  if (!files[0]) return;
+  if (fileInput.value) fileInput.value.value = '';
+  selectFile(files[0]);
+}
+function selectFile(file?: File) {
+  selectedFile.value = file;
   uploadKey.value = newIdempotencyKey();
+  panelError.value = '';
 }
 async function upload() {
   if (!selectedFile.value) return;
@@ -145,14 +164,23 @@ async function download(file: ProductAttachment) {
           aria-label="选择产品标准资料"
           :disabled="uploading"
           @change="chooseFile"
-        /><Button
-          :loading="uploading"
-          :disabled="!selectedFile"
-          @click="upload"
+          @paste="pasteFile"
+        />
+        <span
+          :tabindex="uploading ? undefined : 0"
+          class="text-muted-foreground text-xs"
+          @paste="pasteFile"
         >
+          {{ FILE_PASTE_HINT }}
+        </span>
+        <span v-if="selectedFile && !fileInput?.files?.length">
+          已选择 {{ selectedFile.name }}
+        </span>
+        <Button :loading="uploading" :disabled="!selectedFile" @click="upload">
           上传标准资料
         </Button>
-</template><Button :loading="loading" @click="load">刷新资料</Button>
+      </template>
+      <Button :loading="loading" @click="load">刷新资料</Button>
     </Space>
     <Table
       :data-source="view?.items ?? []"

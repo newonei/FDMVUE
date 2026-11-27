@@ -9,7 +9,7 @@ import { IconifyIcon } from '@vben/icons';
 import { useAccessStore, useUserStore } from '@vben/stores';
 import { downloadFileFromBlobPart } from '@vben/utils';
 
-import { Button, message, Tag } from 'ant-design-vue';
+import { Button, message, Modal, Tag } from 'ant-design-vue';
 import dayjs from 'dayjs';
 
 import { ACTION_ICON, TableAction, useVbenVxeGrid } from '#/adapter/vxe-table';
@@ -20,6 +20,7 @@ import {
   getEcInvoiceApplyPage,
   uploadEcInvoiceApplyPdf,
 } from '#/api/fdmdata/ecinvoiceapply';
+import { FileDropZone } from '#/components/upload-task';
 import { $t } from '#/locales';
 
 import { formatInvoiceStatus, useGridColumns, useGridFormSchema } from './data';
@@ -113,8 +114,8 @@ const selectedRows = ref<FdmdataEcInvoiceApplyApi.EcInvoiceApply[]>([]);
 const exportLoading = ref(false);
 const attachmentDownloadLoading = ref(false);
 const uploadingInvoiceIds = ref<Set<number>>(new Set());
+const invoiceUploadId = ref<number>();
 
-const MAX_INVOICE_PDF_SIZE = 20 * 1024 * 1024;
 const MAX_BATCH_ATTACHMENT_COUNT = 100;
 
 const selectedAttachmentRows = computed(() =>
@@ -217,39 +218,31 @@ function setInvoicePdfUploading(id: number, uploading: boolean) {
   uploadingInvoiceIds.value = next;
 }
 
-function handleUploadInvoicePdf(row: FdmdataEcInvoiceApplyApi.EcInvoiceApply) {
-  if (!row.id || isInvoicePdfUploading(row.id)) return;
+function openInvoiceUpload(row: FdmdataEcInvoiceApplyApi.EcInvoiceApply) {
+  if (row.id && !isInvoicePdfUploading(row.id)) invoiceUploadId.value = row.id;
+}
 
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = '.pdf,application/pdf';
-  input.addEventListener('change', async () => {
-    const file = input.files?.[0];
-    if (!file) return;
-    if (!file.name.toLowerCase().endsWith('.pdf')) {
-      message.error('请选择 PDF 格式的发票文件');
-      return;
-    }
-    if (file.size > MAX_INVOICE_PDF_SIZE) {
-      message.error('发票 PDF 不能超过 20 MB');
-      return;
-    }
-
-    setInvoicePdfUploading(row.id!, true);
-    const hideLoading = message.loading({
-      content: `正在上传 ${file.name}`,
-      duration: 0,
-    });
-    try {
-      await uploadEcInvoiceApplyPdf(row.id!, file);
-      message.success('发票 PDF 上传成功，已标记为已开票');
-      await gridApi.query();
-    } finally {
-      hideLoading();
-      setInvoicePdfUploading(row.id!, false);
-    }
+async function handleUploadInvoicePdf([file]: File[]) {
+  const id = invoiceUploadId.value;
+  if (!id || !file || isInvoicePdfUploading(id)) return;
+  if (!file.name.toLowerCase().endsWith('.pdf')) {
+    message.error('请选择 PDF 格式的发票文件');
+    return;
+  }
+  setInvoicePdfUploading(id, true);
+  const hideLoading = message.loading({
+    content: `正在上传 ${file.name}`,
+    duration: 0,
   });
-  input.click();
+  try {
+    await uploadEcInvoiceApplyPdf(id, file);
+    if (invoiceUploadId.value === id) invoiceUploadId.value = undefined;
+    message.success('发票 PDF 上传成功，已标记为已开票');
+    await gridApi.query();
+  } finally {
+    hideLoading();
+    setInvoicePdfUploading(id, false);
+  }
 }
 
 function sanitizeAttachmentFileName(value: string) {
@@ -416,6 +409,22 @@ const [Grid, gridApi] = useVbenVxeGrid({
 <template>
   <Page auto-content-height>
     <FormModal @success="gridApi.query()" />
+    <Modal
+      :open="invoiceUploadId !== undefined"
+      :footer="null"
+      title="上传发票 PDF"
+      @cancel="invoiceUploadId = undefined"
+    >
+      <FileDropZone
+        v-if="invoiceUploadId !== undefined"
+        :key="invoiceUploadId"
+        :accept="['pdf']"
+        :disabled="isInvoicePdfUploading(invoiceUploadId)"
+        :max-size-mb="20"
+        :multiple="false"
+        @select="handleUploadInvoicePdf"
+      />
+    </Modal>
 
     <div>
       <Grid
@@ -504,7 +513,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
                 loading: isInvoicePdfUploading(row.id),
                 disabled: isInvoicePdfUploading(row.id),
                 auth: ['fdmdata:ecinvoiceapply:update'],
-                onClick: handleUploadInvoicePdf.bind(null, row),
+                onClick: openInvoiceUpload.bind(null, row),
               },
               {
                 label: $t('common.edit'),

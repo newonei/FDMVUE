@@ -37,6 +37,10 @@ import {
   attachmentSize,
   submissionFilesError,
 } from '#/api/fdmplatform/submission-files';
+import {
+  FILE_PASTE_HINT,
+  takePastedFiles,
+} from '#/components/upload/clipboard-files';
 
 import { errorText } from '../data';
 import { personLabel } from '../directory';
@@ -189,6 +193,12 @@ const dragging = ref(false);
 function dropFile(event: DragEvent) {
   dragging.value = false;
   addFiles([...(event.dataTransfer?.files ?? [])]);
+}
+function pasteFiles(event: ClipboardEvent) {
+  if (uploading.value || !props.view?.enabled || props.categories.length === 0)
+    return;
+  const files = takePastedFiles(event);
+  if (files.length > 0) addFiles(files);
 }
 async function upload() {
   if (
@@ -391,6 +401,7 @@ function transferLabel(item: ContractAttachment) {
         @dragover.prevent="dragging = !uploading"
         @dragleave.prevent="dragging = false"
         @drop.prevent="dropFile"
+        @paste="pasteFiles"
       >
         <Upload class="size-6" aria-hidden="true" />
         <strong>{{
@@ -401,6 +412,13 @@ function transferLabel(item: ContractAttachment) {
           GB
         </span>
       </button>
+      <span
+        :tabindex="uploading ? undefined : 0"
+        class="text-muted-foreground text-xs"
+        @paste="pasteFiles"
+      >
+        {{ FILE_PASTE_HINT }}
+      </span>
       <div class="purchase-upload-actions">
         <label class="purchase-category">
           <span>资料分类</span>
@@ -457,7 +475,11 @@ function transferLabel(item: ContractAttachment) {
           :disabled="uploading"
           @change="changeCategory"
         />
-        <Button :disabled="uploading" @click="fileInput?.click()">
+        <Button
+          :disabled="uploading"
+          @click="fileInput?.click()"
+          @paste="pasteFiles"
+        >
           <template #icon>
             <Upload class="mr-1 inline-block size-4" aria-hidden="true" />
           </template>
@@ -473,6 +495,13 @@ function transferLabel(item: ContractAttachment) {
               ? `待上传 ${selectedFiles.length} 个文件，共 ${attachmentSize(selectedBytes)}`
               : '可多选文件，也可将文件拖到这里'
           }}
+        </span>
+        <span
+          :tabindex="uploading ? undefined : 0"
+          class="text-muted-foreground text-xs"
+          @paste="pasteFiles"
+        >
+          {{ FILE_PASTE_HINT }}
         </span>
         <Button
           type="primary"

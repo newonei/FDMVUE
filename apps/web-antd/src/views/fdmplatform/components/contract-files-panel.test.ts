@@ -157,10 +157,22 @@ async function choose(host: HTMLElement, files: File[]) {
   await settle();
 }
 
-async function drop(host: HTMLElement, files: File[]) {
-  const event = new Event('drop', { bubbles: true, cancelable: true });
-  Object.defineProperty(event, 'dataTransfer', { value: { files } });
-  host.querySelector('.upload-row')!.dispatchEvent(event);
+async function dropOrPaste(
+  host: HTMLElement,
+  files: File[],
+  method: 'drop' | 'paste' = 'drop',
+) {
+  const event = new Event(method, { bubbles: true, cancelable: true });
+  Object.defineProperty(
+    event,
+    method === 'paste' ? 'clipboardData' : 'dataTransfer',
+    { value: { files } },
+  );
+  host
+    .querySelector(
+      method === 'paste' ? '.upload-row span[tabindex="0"]' : '.upload-row',
+    )!
+    .dispatchEvent(event);
   await settle();
   expect(event.defaultPrevented).toBe(true);
 }
@@ -207,22 +219,31 @@ describe('contract attachment additions', () => {
     ]);
   });
 
-  it('accumulates chosen and dropped files, deduplicates them and removes only the requested file', async () => {
-    const { host } = await mount();
-    await choose(host, [file('合同.pdf'), file('原稿.ai')]);
-    await choose(host, [file('合同.pdf')]);
-    await drop(host, [file('原稿.ai'), file('裁切.plt'), file('裁切.plt')]);
-    expect(host.querySelectorAll('.attachment-pending > li')).toHaveLength(3);
-    expect(button(host, '继续添加附件')).toBeDefined();
-    host
-      .querySelector<HTMLButtonElement>('button[aria-label="移除 原稿.ai"]')!
-      .click();
-    await settle();
-    expect(host.querySelectorAll('.attachment-pending > li')).toHaveLength(2);
-    expect(host.textContent).toContain('合同.pdf');
-    expect(host.textContent).toContain('裁切.plt');
-    expect(host.querySelector('button[aria-label="移除 原稿.ai"]')).toBeNull();
-  });
+  it.each(['drop', 'paste'] as const)(
+    'accumulates files from %s, deduplicates them and removes only the requested file',
+    async (method) => {
+      const { host } = await mount();
+      await choose(host, [file('合同.pdf'), file('原稿.ai')]);
+      await choose(host, [file('合同.pdf')]);
+      await dropOrPaste(
+        host,
+        [file('原稿.ai'), file('裁切.plt'), file('裁切.plt')],
+        method,
+      );
+      expect(host.querySelectorAll('.attachment-pending > li')).toHaveLength(3);
+      expect(button(host, '继续添加附件')).toBeDefined();
+      host
+        .querySelector<HTMLButtonElement>('button[aria-label="移除 原稿.ai"]')!
+        .click();
+      await settle();
+      expect(host.querySelectorAll('.attachment-pending > li')).toHaveLength(2);
+      expect(host.textContent).toContain('合同.pdf');
+      expect(host.textContent).toContain('裁切.plt');
+      expect(
+        host.querySelector('button[aria-label="移除 原稿.ai"]'),
+      ).toBeNull();
+    },
+  );
 
   it('validates the cumulative file count, aggregate size and unsupported formats without losing queued files', async () => {
     const { host } = await mount();
@@ -233,7 +254,7 @@ describe('contract attachment additions', () => {
     );
     expect(host.textContent).toContain('每次最多添加 10 个附件');
     expect(host.querySelectorAll('.attachment-pending > li')).toHaveLength(1);
-    await drop(host, [file('大文件.zip', 1024 * 1024 * 1024)]);
+    await dropOrPaste(host, [file('大文件.zip', 1024 * 1024 * 1024)]);
     expect(host.textContent).toContain('本次附件总大小不能超过 1 GB');
     expect(host.querySelectorAll('.attachment-pending > li')).toHaveLength(1);
     await choose(host, [file('不支持.exe')]);

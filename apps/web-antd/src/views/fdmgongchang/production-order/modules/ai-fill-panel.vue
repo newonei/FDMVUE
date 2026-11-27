@@ -8,6 +8,10 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { Alert, Button, Input, Upload } from 'ant-design-vue';
 
 import { getDefaultFillPrompt, getDemandFill, submitDemandFill } from '#/api/fdmgongchang/production-order';
+import {
+  FILE_PASTE_HINT,
+  takePastedFiles,
+} from '#/components/upload/clipboard-files';
 
 /**
  * 提生产需求的「AI 识别」：上传附件（Excel、Word、PDF、图片、文本）或粘贴聊天文字，连同提示词交给 AI，
@@ -19,6 +23,7 @@ const emit = defineEmits<{ filled: [result: NonNullable<Api.Fill['result']>] }>(
 const MAX_FILES = 5;
 const MAX_MB = 20;
 const ACCEPT = '.xlsx,.xlsm,.xls,.docx,.doc,.pdf,.png,.jpg,.jpeg,.webp,.csv,.txt';
+const ACCEPTED_EXTENSIONS = ACCEPT.split(',');
 
 const files = ref<File[]>([]);
 const text = ref('');
@@ -53,17 +58,35 @@ watch(
   { immediate: true },
 );
 
-const beforeUpload: UploadProps['beforeUpload'] = (file) => {
+function addFiles(selected: File[]) {
   error.value = '';
-  if (files.value.length >= MAX_FILES) {
-    error.value = `一次最多上传 ${MAX_FILES} 个附件`;
-  } else if (file.size > MAX_MB * 1024 * 1024) {
-    error.value = `「${file.name}」超过 ${MAX_MB}MB`;
-  } else {
-    files.value = [...files.value, file as File];
+  const next = [...files.value];
+  for (const file of selected) {
+    if (next.length >= MAX_FILES) {
+      error.value = `一次最多上传 ${MAX_FILES} 个附件`;
+      break;
+    }
+    const name = file.name.toLowerCase();
+    if (!ACCEPTED_EXTENSIONS.some((extension) => name.endsWith(extension))) {
+      error.value = `「${file.name}」不支持，请上传 Excel、Word、PDF、图片或文本文件`;
+    } else if (file.size > MAX_MB * 1024 * 1024) {
+      error.value = `「${file.name}」超过 ${MAX_MB}MB`;
+    } else {
+      next.push(file);
+    }
   }
+  files.value = next;
+}
+
+const beforeUpload: UploadProps['beforeUpload'] = (file) => {
+  addFiles([file]);
   return false;
 };
+
+function pasteFiles(event: ClipboardEvent) {
+  const selected = takePastedFiles(event);
+  if (selected.length > 0) addFiles(selected);
+}
 
 function removeFile(file: { uid: string }) {
   const index = Number(file.uid.split('-')[0]);
@@ -143,17 +166,26 @@ defineExpose({ reset });
     <h3 class="m-0 text-sm font-semibold">
       AI 识别<span class="ml-2 text-xs font-normal text-muted-foreground">上传客户订单、Excel、截图，或粘贴聊天文字，AI 帮你填到下面，核对后再提交</span>
     </h3>
-    <Upload.Dragger
-      :accept="ACCEPT"
-      :before-upload="beforeUpload"
-      :file-list="fileList"
-      :multiple="true"
-      @remove="removeFile"
+    <div
+      class="rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+      role="group"
+      aria-label="AI 识别附件"
+      tabindex="0"
+      @paste="pasteFiles"
     >
-      <p class="m-0 py-1 text-xs text-muted-foreground">
-        点击或拖进来（最多 {{ MAX_FILES }} 个，每个不超过 {{ MAX_MB }}MB；Excel、Word、PDF、图片、文本）
-      </p>
-    </Upload.Dragger>
+      <Upload.Dragger
+        :accept="ACCEPT"
+        :before-upload="beforeUpload"
+        :file-list="fileList"
+        :multiple="true"
+        @remove="removeFile"
+      >
+        <p class="m-0 py-1 text-xs text-muted-foreground">
+          点击或拖进来（最多 {{ MAX_FILES }} 个，每个不超过 {{ MAX_MB }}MB；Excel、Word、PDF、图片、文本）
+        </p>
+      </Upload.Dragger>
+      <p class="m-0 py-1 text-xs text-muted-foreground">{{ FILE_PASTE_HINT }}</p>
+    </div>
     <Input.TextArea
       id="po-ai-text"
       v-model:value="text"

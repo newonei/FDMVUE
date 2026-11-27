@@ -5,6 +5,8 @@ import { IconifyIcon } from '@vben/icons';
 
 import { message } from 'ant-design-vue';
 
+import { FILE_PASTE_HINT, takePastedFiles } from '#/components/upload/clipboard-files';
+
 import {
   describeRejectedFiles,
   pickFiles,
@@ -74,6 +76,12 @@ async function handleClick() {
   });
   if (files.length > 0) emitValidFiles(files);
 }
+
+function handlePaste(event: ClipboardEvent) {
+  if (props.disabled) return;
+  const files = takePastedFiles(event);
+  if (files.length > 0) emitValidFiles(files);
+}
 </script>
 
 <template>
@@ -81,11 +89,12 @@ async function handleClick() {
     class="file-drop-zone"
     :class="{ 'is-active': active, 'is-compact': compact, 'is-disabled': disabled }"
     role="button"
-    tabindex="0"
+    :tabindex="disabled ? undefined : 0"
     v-on="droppable ? handlers : {}"
     @click="handleClick"
     @keydown.enter.prevent="handleClick"
     @keydown.space.prevent="handleClick"
+    @paste="handlePaste"
   >
     <IconifyIcon class="file-drop-zone__icon" icon="lucide:cloud-upload" />
     <div class="file-drop-zone__body">
@@ -97,6 +106,9 @@ async function handleClick() {
         </template>
       </div>
       <div v-if="hint" class="file-drop-zone__hint">{{ hint }}</div>
+      <div v-if="!disabled" class="file-drop-zone__hint" @click.stop>
+        {{ FILE_PASTE_HINT }}
+      </div>
     </div>
   </div>
 </template>
@@ -122,7 +134,7 @@ async function handleClick() {
 }
 
 .file-drop-zone:hover,
-.file-drop-zone:focus-visible,
+.file-drop-zone:focus,
 .file-drop-zone.is-active {
   background: hsl(var(--primary) / 6%);
   border-color: hsl(var(--primary));

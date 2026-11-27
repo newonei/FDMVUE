@@ -14,6 +14,10 @@ import {
   recognizePurchaseInvoice,
   updatePurchaseInvoice,
 } from '#/api/fdmplatform/procurement';
+import {
+  FILE_PASTE_HINT,
+  takePastedFiles,
+} from '#/components/upload/clipboard-files';
 
 import FilePreviewButton from '../../../components/FilePreviewButton.vue';
 import { errorText } from '../../../data';
@@ -65,6 +69,7 @@ const input = ref<HTMLInputElement>();
 const recognizing = ref(false);
 const hint = ref('');
 const saving = ref(false);
+const canPickFile = computed(() => !recognizing.value && !saving.value);
 const error = ref('');
 const form = ref(blank());
 let key = crypto.randomUUID();
@@ -158,11 +163,33 @@ function removeFile() {
   kept.value = false;
 }
 
-async function pick(event: Event) {
+function pick(event: Event) {
   const target = event.target as HTMLInputElement;
   const chosen = target.files?.[0];
   target.value = '';
+  if (chosen) void selectFile(chosen);
+}
+
+function pasteFile(event: ClipboardEvent) {
+  if (!canPickFile.value) return;
+  const [chosen, ...otherFiles] = takePastedFiles(event);
   if (!chosen) return;
+  if (otherFiles.length > 0) {
+    error.value = '一次只能添加一个发票文件';
+    return;
+  }
+  void selectFile(chosen);
+}
+
+async function selectFile(chosen: File) {
+  if (!canPickFile.value) return;
+  const extension = chosen.name
+    .slice(chosen.name.lastIndexOf('.'))
+    .toLowerCase();
+  if (!ACCEPT.split(',').includes(extension)) {
+    error.value = '请选择 PDF、OFD、XML 或 PNG、JPG、JPEG、WebP 图片';
+    return;
+  }
   file.value = chosen;
   error.value = '';
   hint.value = '';
@@ -272,11 +299,23 @@ async function submit(chosen: File | undefined) {
 <template>
   <section class="upload" aria-label="上传付款发票">
     <Alert v-if="error" type="error" :message="error" show-icon />
-    <div class="picker">
-      <input ref="input" type="file" :accept="ACCEPT" hidden @change="pick" />
-      <Button :loading="recognizing" @click="input?.click()">
+    <div
+      class="picker"
+      :tabindex="canPickFile ? 0 : undefined"
+      @paste="pasteFile"
+    >
+      <input
+        ref="input"
+        type="file"
+        :accept="ACCEPT"
+        :disabled="!canPickFile"
+        hidden
+        @change="pick"
+      />
+      <Button :disabled="saving" :loading="recognizing" @click="input?.click()">
         {{ file || kept ? '重新选择发票' : '上传发票文件' }}
       </Button>
+      <span class="muted">{{ FILE_PASTE_HINT }}</span>
       <span v-if="file || kept" class="attachment">
         <span class="name">{{ file?.name ?? invoice?.file?.name }}</span>
         <FilePreviewButton

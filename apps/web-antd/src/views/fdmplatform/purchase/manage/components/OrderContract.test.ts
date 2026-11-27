@@ -188,6 +188,13 @@ async function pick(
   return file;
 }
 
+function paste(host: HTMLElement, files: File[]) {
+  const event = new Event('paste', { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'clipboardData', { value: { files } });
+  host.querySelector('.signed-upload span[tabindex="0"]')!.dispatchEvent(event);
+  return event;
+}
+
 describe('采购单文件分组', () => {
   it('导出版本号优先于创建时间，盖章上传时间不改变最新导出', () => {
     const older = exported('older', 1, { createdAt: '2026-11-17T04:00:00Z' });
@@ -311,6 +318,23 @@ describe('采购单文件归档与盖章上传', () => {
     expect(host.querySelector('select')).toBeNull();
     const file = await pick(host);
     expect(onSigned).toHaveBeenCalledExactlyOnceWith(file, confirmed.id);
+  });
+
+  it('粘贴盖章文件使用当前选择的导出版本，每次只允许一个文件', async () => {
+    const old = exported('old', 1);
+    const latest = exported('latest', 2);
+    const { host, onSigned } = await mount(order([old, latest]));
+    await chooseVersion(host, old.id);
+    const signedFile = new File(['盖章内容'], '供应商盖章.pdf');
+    const screenshot = new File(['截图'], 'image.png', { type: 'image/png' });
+
+    expect(paste(host, [signedFile, screenshot]).defaultPrevented).toBe(true);
+    await settle();
+    expect(host.textContent).toContain('每次请粘贴一个供应商盖章件');
+    expect(onSigned).not.toHaveBeenCalled();
+
+    paste(host, [signedFile]);
+    expect(onSigned).toHaveBeenCalledExactlyOnceWith(signedFile, old.id);
   });
 
   it('选择旧版上传使用其 ID，收到盖章上传结果或新增导出后保留主动选择', async () => {

@@ -10,6 +10,7 @@ import { useRoute } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
+import { isImage } from '@vben/utils';
 
 import {
   Alert,
@@ -53,6 +54,10 @@ import {
   listPrintPrepPrompts,
   updatePrintPrepPrompt,
 } from '#/api/fdmdata/print-prep-prompt';
+import {
+  FILE_PASTE_HINT,
+  takePastedFiles,
+} from '#/components/upload/clipboard-files';
 
 defineOptions({ name: 'FdmdataPrintPrep' });
 
@@ -252,6 +257,7 @@ const promptDeletingId = ref<number>();
 const selectedPromptId = ref<number>();
 
 const selectedFile = ref<File | null>(null);
+const customerImageInput = ref<HTMLInputElement>();
 const originalPreviewUrl = ref('');
 const latestPlacementPreviewBlob = ref<Blob | null>(null);
 const baseResult = ref<null | PrintPrepApi.PrintPrepResult>(null);
@@ -1180,9 +1186,7 @@ function updateProductDefaults() {
   refreshAiPreprocessPromptForProduct();
 }
 
-function onFileChange(event: Event) {
-  const input = event.target as HTMLInputElement;
-  const file = input.files?.[0] || null;
+function selectCustomerImage(file: File | null) {
   selectedFile.value = file;
   baseResult.value = null;
   finalResult.value = null;
@@ -1194,6 +1198,23 @@ function onFileChange(event: Event) {
   previewLoading.value = false;
   if (originalPreviewUrl.value) URL.revokeObjectURL(originalPreviewUrl.value);
   originalPreviewUrl.value = file ? URL.createObjectURL(file) : '';
+}
+
+function onFileChange(event: Event) {
+  const input = event.target as HTMLInputElement;
+  selectCustomerImage(input.files?.[0] ?? null);
+  input.value = '';
+}
+
+function pasteCustomerImage(event: ClipboardEvent) {
+  if (isBusy.value) return;
+  const [file] = takePastedFiles(event);
+  if (!file) return;
+  if (file.type ? !file.type.startsWith('image/') : !isImage(file.name)) {
+    message.warning('请粘贴图片文件');
+    return;
+  }
+  selectCustomerImage(file);
 }
 
 function appendBaseFields(form: FormData) {
@@ -1617,13 +1638,29 @@ onBeforeUnmount(() => {
           <Form layout="vertical">
             <div class="form-grid">
               <FormItem label="客户图片" class="full">
-                <input
-                  class="file-input"
-                  type="file"
-                  accept="image/*"
-                  :disabled="isBusy"
-                  @change="onFileChange"
-                />
+                <div
+                  class="customer-image-upload"
+                  role="group"
+                  aria-label="选择客户图片"
+                  :tabindex="isBusy ? undefined : 0"
+                  @paste="pasteCustomerImage"
+                >
+                  <input
+                    ref="customerImageInput"
+                    type="file"
+                    accept="image/*"
+                    hidden
+                    :disabled="isBusy"
+                    @change="onFileChange"
+                  />
+                  <Button :disabled="isBusy" @click="customerImageInput?.click()">
+                    选择图片
+                  </Button>
+                  <span v-if="selectedFile" class="break-all">
+                    {{ selectedFile.name }}
+                  </span>
+                  <span class="text-xs text-muted-foreground">{{ FILE_PASTE_HINT }}</span>
+                </div>
               </FormItem>
 
               <FormItem :label="isMousePadStandalone ? '鼠标垫类型' : '产品类型'">
@@ -2382,9 +2419,11 @@ onBeforeUnmount(() => {
   grid-column: 1 / -1;
 }
 
-.file-input {
-  width: 100%;
-  min-height: 36px;
+.customer-image-upload {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
   padding: 6px 10px;
   background: #fff;
   border: 1px solid #d9d9d9;

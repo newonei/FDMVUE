@@ -720,6 +720,38 @@ describe('purchase attachment panel', () => {
     ]);
   });
 
+  it('stages a pasted screenshot for the current purchase order', async () => {
+    const { host } = await mount(purchaseOptions);
+    const screenshot = new File(['image'], 'image.png', { type: 'image/png' });
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: { files: [screenshot] },
+    });
+    host
+      .querySelector('.purchase-upload span[tabindex="0"]')!
+      .dispatchEvent(event);
+    await settle();
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(host.querySelector('.attachment-pending')?.textContent).toContain(
+      'image.png',
+    );
+    expect(mocks.upload).not.toHaveBeenCalled();
+
+    uploadButton(host).click();
+    await settle();
+    expect(mocks.upload).toHaveBeenCalledOnce();
+    expect(mocks.upload.mock.calls[0]![1]).toMatchObject({
+      name: screenshot.name,
+      size: screenshot.size,
+      type: screenshot.type,
+    });
+    expect(mocks.upload.mock.calls[0]![4]).toEqual({
+      targetKind: 'purchaseOrders',
+      targetId: 'order-1',
+    });
+  });
+
   it('keeps only failed purchase files and retries with the same category, target and idempotency key', async () => {
     mocks.upload
       .mockResolvedValueOnce({})

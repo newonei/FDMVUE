@@ -43,6 +43,10 @@ import { getProcurementSettings } from '#/api/fdmplatform/procurement';
 import { attachmentSize } from '#/api/fdmplatform/submission-files';
 import { businessDocumentActionWithAttachments } from '#/api/fdmplatform/submissions';
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
+import {
+  FILE_PASTE_HINT,
+  takePastedFiles,
+} from '#/components/upload/clipboard-files';
 import AiCheckPanel from '#/views/fdmaicheck/components/AiCheckPanel.vue';
 
 import ActionDialog from '../components/ActionDialog.vue';
@@ -281,10 +285,27 @@ async function saveRename(name: string) {
   message.success('文件名称已修改');
   await loadFiles();
 }
-async function upload(event: Event) {
+function chooseFile(event: Event) {
   const file = (event.target as HTMLInputElement).files?.[0];
+  if (file) void upload(file);
+}
+function pasteFile(event: ClipboardEvent) {
+  if (
+    saving.value ||
+    !attachments.value?.canUpload ||
+    !attachments.value.enabled
+  )
+    return;
+  const files = takePastedFiles(event);
+  if (files.length > 1) {
+    fileError.value = '每次请粘贴一个单据附件';
+    return;
+  }
+  if (files[0]) void upload(files[0]);
+}
+async function upload(file: File) {
   const current = view.value;
-  if (!file || !current) return;
+  if (!current) return;
   saving.value = true;
   fileError.value = '';
   try {
@@ -719,9 +740,20 @@ async function submit(
               v-if="attachments?.canUpload"
               :disabled="saving || !attachments.enabled"
               @click="fileInput?.click()"
+              @paste="pasteFile"
             >
               上传附件
-</Button><input ref="fileInput" type="file" hidden @change="upload" /><Table
+            </Button>
+            <span
+              v-if="attachments?.canUpload && attachments.enabled"
+              :tabindex="saving ? undefined : 0"
+              class="ml-2 text-muted-foreground text-xs"
+              @paste="pasteFile"
+            >
+              {{ FILE_PASTE_HINT }}
+            </span>
+            <input ref="fileInput" type="file" hidden @change="chooseFile" />
+            <Table
               :data-source="attachments?.items ?? []"
               row-key="id"
               size="small"

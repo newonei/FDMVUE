@@ -59,7 +59,7 @@ vi.mock('ant-design-vue', () => {
 const cleanup: (() => void)[] = [];
 afterEach(() => cleanup.splice(0).forEach((dispose) => dispose()));
 
-async function mount(initialFiles: File[] = []) {
+async function mount(initialFiles: File[] = [], disabled = false) {
   const files = ref(initialFiles);
   const update = vi.fn((next: File[]) => {
     files.value = next;
@@ -69,6 +69,7 @@ async function mount(initialFiles: File[] = []) {
   const app = createApp({
     render: () =>
       h(CreationAttachments, {
+        disabled,
         files: files.value,
         'onUpdate:files': update,
       }),
@@ -82,19 +83,34 @@ async function mount(initialFiles: File[] = []) {
   return { files, host, update };
 }
 
+function paste(
+  host: HTMLElement,
+  clipboardData: {
+    files: File[];
+    items?: Pick<DataTransferItem, 'getAsFile' | 'kind'>[];
+  },
+) {
+  const event = new Event('paste', { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'clipboardData', { value: clipboardData });
+  host.querySelector('.attachment-drop')!.dispatchEvent(event);
+  return event;
+}
+
 async function addFiles(
   host: HTMLElement,
   files: File[],
-  method: 'choose' | 'drop',
+  method: 'choose' | 'drop' | 'paste',
 ) {
   if (method === 'choose') {
     const input = host.querySelector<HTMLInputElement>('input[type=file]')!;
     Object.defineProperty(input, 'files', { configurable: true, value: files });
     input.dispatchEvent(new Event('change'));
-  } else {
+  } else if (method === 'drop') {
     const event = new Event('drop', { bubbles: true, cancelable: true });
     Object.defineProperty(event, 'dataTransfer', { value: { files } });
     host.querySelector('.attachment-drop')!.dispatchEvent(event);
+  } else {
+    paste(host, { files });
   }
   await nextTick();
 }
@@ -129,7 +145,7 @@ describe('creation attachment formats', () => {
     },
   );
 
-  it.each(['choose', 'drop'] as const)(
+  it.each(['choose', 'drop', 'paste'] as const)(
     'rejects a disguised executable via %s and retains the previously selected file',
     async (method) => {
       const existing = new File(['data'], '已选原稿.ai');
@@ -147,4 +163,62 @@ describe('creation attachment formats', () => {
       ).toEqual([existing.name]);
     },
   );
+});
+
+describe('creation attachment clipboard paste', () => {
+  it('appends a screenshot and a named file from the focused upload area', async () => {
+    const existing = new File(['data'], '原稿.ai');
+    const { files, host, update } = await mount([existing]);
+    const dropArea = host.querySelector<HTMLElement>('.attachment-drop')!;
+    const screenshot = new File(['data'], 'image.png', { type: 'image/png' });
+    const contractFile = new File(['data'], '合同.pdf', {
+      type: 'application/pdf',
+    });
+
+    expect(dropArea.tabIndex).toBe(0);
+    const parentPaste = vi.fn();
+    host.addEventListener('paste', parentPaste);
+    dropArea.focus();
+    expect(document.activeElement).toBe(dropArea);
+    const event = paste(host, { files: [screenshot, contractFile] });
+    await nextTick();
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(parentPaste).not.toHaveBeenCalled();
+    expect(update).toHaveBeenCalledOnce();
+    expect(files.value).toEqual([existing, screenshot, contractFile]);
+  });
+
+  it('leaves a plain text paste untouched', async () => {
+    const { host, update } = await mount();
+
+    const event = paste(host, {
+      files: [],
+      items: [{ getAsFile: () => null, kind: 'string' }],
+    });
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('reads file items when the clipboard file list is empty', async () => {
+    const { files, host } = await mount();
+    const screenshot = new File(['data'], 'image.png', { type: 'image/png' });
+
+    paste(host, {
+      files: [],
+      items: [{ getAsFile: () => screenshot, kind: 'file' }],
+    });
+    await nextTick();
+
+    expect(files.value).toEqual([screenshot]);
+  });
+
+  it('ignores file paste when the upload area is disabled', async () => {
+    const { host, update } = await mount([], true);
+    const screenshot = new File(['data'], 'image.png', { type: 'image/png' });
+
+    expect(paste(host, { files: [screenshot] }).defaultPrevented).toBe(false);
+    expect(update).not.toHaveBeenCalled();
+  });
 });

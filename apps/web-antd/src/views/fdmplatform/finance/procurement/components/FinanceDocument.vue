@@ -39,6 +39,10 @@ import {
   procurementFinanceActionWithAttachments,
 } from '#/api/fdmplatform/submissions';
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
+import {
+  FILE_PASTE_HINT,
+  takePastedFiles,
+} from '#/components/upload/clipboard-files';
 import AiCheckPanel from '#/views/fdmaicheck/components/AiCheckPanel.vue';
 
 import ActionDialog from '../../../components/ActionDialog.vue';
@@ -639,13 +643,28 @@ async function execute(
     saving.value = false;
   }
 }
-async function upload(event: Event) {
-  const file = (event.target as HTMLInputElement).files?.[0];
-  if (!file || !record.value) return;
-  if (editable.value && formRef.value) {
-    const saved = await save(formRef.value.payload());
-    if (!saved) return;
+const canSelectFile = computed(
+  () => !editable.value && canUpload.value && enabled.value && !saving.value,
+);
+function chooseFile(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (file) void upload(file);
+}
+function pasteFile(event: ClipboardEvent) {
+  if (!canSelectFile.value) return;
+  const [file, ...otherFiles] = takePastedFiles(event);
+  if (!file) return;
+  if (otherFiles.length > 0) {
+    pageError.value = '一次只能上传一个凭证文件';
+    return;
   }
+  void upload(file);
+}
+async function upload(file: File) {
+  if (!canSelectFile.value || !record.value) return;
+  pageError.value = '';
   saving.value = true;
   try {
     await uploadProcurementFinanceFile(record.value.id, file, {
@@ -665,7 +684,6 @@ async function upload(event: Event) {
     pageError.value = errorText(error);
   } finally {
     saving.value = false;
-    if (fileInput.value) fileInput.value.value = '';
   }
 }
 async function download(file: ProcurementFinanceFile) {
@@ -1121,15 +1139,22 @@ const drawerTitle = computed(() => {
           :title="paymentView ? '银行回单 / 凭证' : '凭证附件'"
           size="small"
         >
-          <Space>
-            <Button
-              v-if="!editable"
-              :disabled="!canUpload || !enabled || saving"
-              @click="fileInput?.click()"
-            >
+          <div
+            v-if="!editable"
+            class="mb-2 flex flex-wrap items-center gap-2"
+            :tabindex="canSelectFile ? 0 : undefined"
+            @paste="pasteFile"
+          >
+            <Button :disabled="!canSelectFile" @click="fileInput?.click()">
               上传凭证
-</Button><span v-if="!enabled">附件存储未启用</span>
-</Space><input ref="fileInput" type="file" hidden @change="upload" /><Table
+            </Button>
+            <span v-if="canSelectFile" class="text-xs text-muted-foreground">
+              {{ FILE_PASTE_HINT }}
+            </span>
+            <input ref="fileInput" type="file" hidden @change="chooseFile" />
+          </div>
+          <span v-if="!enabled">附件存储未启用</span>
+          <Table
             :data-source="files"
             row-key="id"
             :columns="[

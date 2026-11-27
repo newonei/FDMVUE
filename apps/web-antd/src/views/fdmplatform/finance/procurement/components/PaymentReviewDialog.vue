@@ -19,6 +19,10 @@ import {
   procurementFinanceAction,
   uploadProcurementFinanceFile,
 } from '#/api/fdmplatform/procurement-finance';
+import {
+  FILE_PASTE_HINT,
+  takePastedFiles,
+} from '#/components/upload/clipboard-files';
 import PostingMatchField from '#/views/fdmcaiwu/bank-account/modules/posting-match-field.vue';
 
 import FilePreviewButton from '../../../components/FilePreviewButton.vue';
@@ -114,6 +118,11 @@ function pickFiles(event: Event) {
   const input = event.target as HTMLInputElement;
   files.value = [...files.value, ...(input.files ?? [])];
   input.value = '';
+}
+function pasteFiles(event: ClipboardEvent) {
+  if (saving.value) return;
+  const selected = takePastedFiles(event);
+  if (selected.length > 0) files.value = [...files.value, ...selected];
 }
 
 async function confirm() {
@@ -257,13 +266,14 @@ async function confirm() {
         </div>
         <div class="full files">
           <span>银行回单（选填，也可以之后补传）</span>
-          <div>
+          <div :tabindex="saving ? undefined : 0" @paste="pasteFiles">
             <input
               type="file"
               multiple
               :disabled="saving"
               @change="pickFiles"
             />
+            <p class="text-xs text-muted-foreground">{{ FILE_PASTE_HINT }}</p>
             <ul v-if="files.length > 0">
               <li v-for="(file, index) in files" :key="`${file.name}-${index}`">
                 {{ file.name }}

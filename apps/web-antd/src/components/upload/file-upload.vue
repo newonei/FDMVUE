@@ -22,6 +22,7 @@ import { Button, message, Modal, Upload } from 'ant-design-vue';
 
 import { FilePreview } from '#/components/file-preview';
 
+import { FILE_PASTE_HINT, takePastedFiles } from './clipboard-files';
 import { UploadResultStatus } from './typing';
 import { useUpload, useUploadType } from './use-upload';
 
@@ -73,6 +74,13 @@ const isUsingModelValue = computed(() => {
 });
 
 const fileList = ref<UploadProps['fileList']>([]);
+const uploadRoot = ref<HTMLElement>();
+const remainingFiles = computed(
+  () => props.maxNumber - (fileList.value?.length ?? 0),
+);
+const canPaste = computed(
+  () => !props.disabled && !props.returnText && remainingFiles.value > 0,
+);
 const isLtMsg = ref<boolean>(true); // 文件大小错误提示
 const isActMsg = ref<boolean>(true); // 文件类型错误提示
 const isFirstRender = ref<boolean>(true); // 是否第一次渲染
@@ -168,6 +176,26 @@ function handlePreview(file: UploadFile) {
 /** 处理文件数量超限 */
 function handleExceed() {
   message.error($t('ui.upload.maxNumber', [maxNumber.value]));
+}
+
+function handlePaste(event: ClipboardEvent) {
+  if (!canPaste.value) return;
+  const input = uploadRoot.value?.querySelector<HTMLInputElement>('input[type="file"]');
+  if (!input) return;
+
+  const files = takePastedFiles(event);
+  if (files.length === 0) return;
+  const selection = props.multiple ? files : files.slice(0, 1);
+  if (selection.length > remainingFiles.value) {
+    handleExceed();
+    return;
+  }
+
+  // 交给 Upload 的原生选择入口，复用校验、请求、进度和表单更新。
+  const transfer = new DataTransfer();
+  for (const file of selection) transfer.items.add(file);
+  input.files = transfer.files;
+  input.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
 /** 处理上传错误 */
@@ -318,7 +346,12 @@ function getValue() {
 </script>
 
 <template>
-  <div>
+  <div
+    ref="uploadRoot"
+    class="file-upload"
+    :tabindex="canPaste ? 0 : undefined"
+    @paste="handlePaste"
+  >
     <Upload
       v-bind="$attrs"
       v-model:file-list="fileList"
@@ -378,6 +411,7 @@ function getValue() {
         格式文件
       </div>
     </Upload>
+    <p v-if="canPaste" class="file-upload-paste-hint">{{ FILE_PASTE_HINT }}</p>
     <Modal
       v-model:open="previewOpen"
       :title="previewName"
@@ -398,6 +432,17 @@ function getValue() {
 </template>
 
 <style scoped>
+.file-upload:focus {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
+}
+
+.file-upload-paste-hint {
+  margin-top: 4px;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+}
+
 .upload-drag-area {
   padding: 20px;
   text-align: center;

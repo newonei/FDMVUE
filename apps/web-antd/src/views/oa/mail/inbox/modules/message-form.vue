@@ -16,22 +16,31 @@ import {
   sendMailMessage,
 } from '#/api/oa/mail/message';
 import { Tinymce } from '#/components/tinymce';
+import {
+  FILE_PASTE_HINT,
+  takePastedFiles,
+} from '#/components/upload/clipboard-files';
 import MailAddressSelect from '#/views/oa/mail/account/components/address-select.vue';
 
 /** 写信表单 */
 defineOptions({ name: 'OaMailMessageForm' });
 
 const props = defineProps<{ data: OaMailMessageApi.MailMessage }>();
+
 const emit = defineEmits(['success', 'close']);
+
+type MailAttachment = UploadFile & { pastedFile?: File };
+
 const formLoading = ref(false); // 表单提交中
-const fileList = ref<UploadFile[]>([]); // 本次新增附件
+const fileList = ref<MailAttachment[]>([]); // 本次新增附件
 const formData = ref<OaMailMessageApi.MailMessage>({ ...props.data }); // 表单数据
+let pastedAttachmentSequence = 0;
 
 // 正文字数（不计空白字符）
 const wordCount = computed(() => {
   const element = document.createElement('div');
   element.innerHTML = formData.value.content || '';
-  return Array.from((element.textContent || '').replace(/\s/g, '')).length;
+  return [...(element.textContent || '').replaceAll(/\s/g, '')].length;
 });
 
 /** 移除草稿或转发邮件中不再保留的附件 */
@@ -43,6 +52,22 @@ function removeAttachment(part: string) {
     formData.value.attachments?.map((item) => item.part) || [];
 }
 
+function pasteAttachments(event: ClipboardEvent) {
+  if (formLoading.value) return;
+  const files = takePastedFiles(event);
+  if (files.length === 0) return;
+  fileList.value = [
+    ...fileList.value,
+    ...files.map((file) => ({
+      name: file.name,
+      pastedFile: file,
+      size: file.size,
+      type: file.type,
+      uid: `pasted-attachment-${++pastedAttachmentSequence}`,
+    })),
+  ];
+}
+
 /** 正文与本次选择的文件一起提交，不预先上传到公共附件库 */
 function buildFormData() {
   const data = new FormData();
@@ -50,10 +75,9 @@ function buildFormData() {
     'data',
     new Blob([JSON.stringify(formData.value)], { type: 'application/json' }),
   );
-  for (const file of fileList.value) {
-    if (file.originFileObj) {
-      data.append('files', file.originFileObj, file.name);
-    }
+  for (const attachment of fileList.value) {
+    const file = attachment.pastedFile ?? attachment.originFileObj;
+    if (file) data.append('files', file, attachment.name);
   }
   return data;
 }
@@ -156,7 +180,11 @@ async function handleClose() {
         />
       </FormItem>
       <FormItem label="附件">
-        <div class="w-full">
+        <div
+          class="w-full"
+          :tabindex="formLoading ? undefined : 0"
+          @paste="pasteAttachments"
+        >
           <div
             v-for="attachment in formData.attachments"
             :key="attachment.part"
@@ -182,7 +210,7 @@ async function handleClose() {
             <Button :disabled="formLoading">添加附件</Button>
           </Upload>
           <div class="text-muted-foreground mt-1 text-xs">
-            单个文件不超过 16 MB，总请求不超过 32 MB
+            {{ FILE_PASTE_HINT }}。单个文件不超过 16 MB，总请求不超过 32 MB
           </div>
         </div>
       </FormItem>

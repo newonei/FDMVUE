@@ -18,6 +18,10 @@ import {
   uploadSelfScoreAttachment,
 } from '#/api/fdmperformance';
 import { FilePreview } from '#/components/file-preview';
+import {
+  FILE_PASTE_HINT,
+  takePastedFiles,
+} from '#/components/upload/clipboard-files';
 
 type UploadTaskStatus = 'error' | 'uploading';
 
@@ -300,8 +304,7 @@ async function performUpload(task: UploadTask, request?: UploadRequestOption) {
   }
 }
 
-function customRequest(request: UploadRequestOption) {
-  const file = request.file as File;
+function startUpload(file: File, request?: UploadRequestOption) {
   reservedUploadCount = Math.max(0, reservedUploadCount - 1);
   reservedUploadBytes = Math.max(0, reservedUploadBytes - file.size);
   const task: UploadTask = {
@@ -312,6 +315,17 @@ function customRequest(request: UploadRequestOption) {
   };
   uploadTasks.value.push(task);
   void performUpload(task, request);
+}
+
+function customRequest(request: UploadRequestOption) {
+  startUpload(request.file as File, request);
+}
+
+function pasteFiles(event: ClipboardEvent) {
+  if (!canUpload.value || remainingCount.value === 0) return;
+  for (const file of takePastedFiles(event)) {
+    if (beforeUpload(file) === true) startUpload(file);
+  }
 }
 
 function retryUpload(task: UploadTask) {
@@ -435,23 +449,32 @@ async function downloadAttachment(attachment: JixiaoApi.SelfScoreAttachment) {
       </Tag>
     </div>
 
-    <Upload.Dragger
+    <div
       v-if="editable"
-      :accept="ACCEPT"
-      :before-upload="beforeUpload"
-      :custom-request="customRequest"
-      :disabled="!canUpload || remainingCount === 0"
-      multiple
-      :show-upload-list="false"
+      class="rounded-md"
+      :tabindex="canUpload && remainingCount > 0 ? 0 : undefined"
+      @paste="pasteFiles"
     >
-      <p class="ant-upload-drag-icon">
-        <IconifyIcon icon="lucide:cloud-upload" />
+      <Upload.Dragger
+        :accept="ACCEPT"
+        :before-upload="beforeUpload"
+        :custom-request="customRequest"
+        :disabled="!canUpload || remainingCount === 0"
+        multiple
+        :show-upload-list="false"
+      >
+        <p class="ant-upload-drag-icon">
+          <IconifyIcon icon="lucide:cloud-upload" />
+        </p>
+        <p class="ant-upload-text">点击或拖拽上传自评佐证材料</p>
+        <p class="ant-upload-hint">
+          最多 20 个，单个不超过 20 MB、合计不超过 100 MB；{{ ATTACHMENT_FORMAT_TEXT }}
+        </p>
+      </Upload.Dragger>
+      <p class="mt-1 text-xs text-muted-foreground">
+        {{ FILE_PASTE_HINT }}
       </p>
-      <p class="ant-upload-text">点击或拖拽上传自评佐证材料</p>
-      <p class="ant-upload-hint">
-        最多 20 个，单个不超过 20 MB、合计不超过 100 MB；{{ ATTACHMENT_FORMAT_TEXT }}
-      </p>
-    </Upload.Dragger>
+    </div>
 
     <div v-if="editable" class="self-score-attachments__summary">
       <span>已上传 {{ attachments.length }} / {{ MAX_ATTACHMENT_COUNT }}</span>

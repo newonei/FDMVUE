@@ -472,13 +472,29 @@ describe('production order page', () => {
     await flush();
     button('＋提生产需求').click();
     await flush();
+    const uploadArea = document.querySelector<HTMLElement>(
+      '[aria-label="AI 识别附件"]',
+    )!;
+    const screenshot = new File(['screenshot'], '截图.png', { type: 'image/png' });
+    const paste = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(paste, 'clipboardData', {
+      value: { files: [screenshot] },
+    });
+    uploadArea.focus();
+    uploadArea.dispatchEvent(paste);
+    expect(paste.defaultPrevented).toBe(true);
     const text = document.querySelector<HTMLTextAreaElement>('#po-ai-text')!;
     text.value = '183*61*0.6 米白 500 条';
     text.dispatchEvent(new Event('input', { bubbles: true }));
     await flush();
     button('AI识别并回填').click();
     await flush();
-    expect(mocks.fillSubmit).toHaveBeenCalledWith({ factoryId: 1, files: [], prompt: undefined, text: '183*61*0.6 米白 500 条' });
+    expect(mocks.fillSubmit).toHaveBeenCalledWith({
+      factoryId: 1,
+      files: [screenshot],
+      prompt: undefined,
+      text: '183*61*0.6 米白 500 条',
+    });
     expect(mocks.fillGet).toHaveBeenCalledWith(5);
     const body = () => document.body.textContent ?? '';
     expect(body()).toContain('AI 回填了 3 行：1 行对上产品中心，2 行是新规格');

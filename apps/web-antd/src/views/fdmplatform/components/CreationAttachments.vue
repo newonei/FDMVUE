@@ -12,6 +12,10 @@ import {
   attachmentSize,
   submissionFilesError,
 } from '#/api/fdmplatform/submission-files';
+import {
+  FILE_PASTE_HINT,
+  takePastedFiles,
+} from '#/components/upload/clipboard-files';
 
 import { previewMimeType } from './attachment-preview';
 import AttachmentPreview from './AttachmentPreview.vue';
@@ -50,6 +54,11 @@ function choose(event: Event) {
 function drop(event: DragEvent) {
   dragging.value = false;
   add([...(event.dataTransfer?.files ?? [])]);
+}
+function paste(event: ClipboardEvent) {
+  if (props.disabled) return;
+  const files = takePastedFiles(event);
+  if (files.length > 0) add(files);
 }
 const preview = ref<InstanceType<typeof AttachmentPreview>>();
 const previewing = ref<File>();
@@ -93,9 +102,11 @@ function remove(index: number) {
     <div
       class="attachment-drop"
       :class="{ dragging: dragging && !disabled }"
+      :tabindex="disabled ? undefined : 0"
       @dragover.prevent="dragging = true"
       @dragleave.prevent="dragging = false"
       @drop.prevent="drop"
+      @paste="paste"
     >
       <input
         ref="input"
@@ -108,7 +119,7 @@ function remove(index: number) {
         @change="choose"
       />
       <Button :disabled="disabled" @click="input?.click()">选择附件</Button>
-      <span>支持多选，也可将文件拖到这里</span>
+      <span>支持多选、拖拽<span v-if="!disabled">，{{ FILE_PASTE_HINT }}</span></span>
     </div>
     <p class="attachment-hint">
       {{ ATTACHMENT_FORMAT_TEXT }}。最多 10 个，单个和总计都不超过
@@ -212,6 +223,11 @@ function remove(index: number) {
 .attachment-drop.dragging {
   background: #e6f4ff;
   border-color: #1677ff;
+}
+
+.attachment-drop:focus {
+  outline: 2px solid #1677ff;
+  outline-offset: 2px;
 }
 
 .file-input {
