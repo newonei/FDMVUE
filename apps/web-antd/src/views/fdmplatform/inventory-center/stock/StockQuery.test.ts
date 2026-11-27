@@ -6,9 +6,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import StockQuery from './StockQuery.vue';
 
 const mocks = vi.hoisted(() => ({
+  hasAccessByCodes: vi.fn(),
   stocks: vi.fn(),
   txns: vi.fn(),
   warehouses: vi.fn(),
+}));
+vi.mock('@vben/access', () => ({
+  useAccess: () => ({ hasAccessByCodes: mocks.hasAccessByCodes }),
 }));
 vi.mock('#/api/fdmplatform/warehouse', () => ({
   getInventoryWarehouses: mocks.warehouses,
@@ -47,7 +51,10 @@ async function flush() {
 async function mount() {
   const router = createRouter({
     history: createMemoryHistory(),
-    routes: [{ path: '/fdmstock/inventory-stock', component: StockQuery }],
+    routes: [
+      { path: '/fdmstock/inventory-stock', component: StockQuery },
+      { path: '/fdmproducts/catalog', component: { render: () => null } },
+    ],
   });
   await router.push('/fdmstock/inventory-stock');
   const host = document.createElement('div');
@@ -56,7 +63,7 @@ async function mount() {
   app.use(router);
   app.mount(host);
   await flush();
-  return { router, host };
+  return { router, host, unmount: () => app.unmount() };
 }
 
 const text = (element: Element | null) =>
@@ -70,7 +77,7 @@ function button(label: string) {
 
 describe('库存查询', () => {
   afterEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     document.body.innerHTML = '';
   });
 
@@ -131,7 +138,7 @@ describe('库存查询', () => {
         onHand: '5',
       }),
     ]);
-    const { host } = await mount();
+    const { host, unmount } = await mount();
     expect(
       host.querySelectorAll('.ant-table-tbody tr.ant-table-row'),
     ).toHaveLength(2);
@@ -145,5 +152,60 @@ describe('库存查询', () => {
     expect(rows).toHaveLength(1);
     expect(text(rows[0] ?? null)).toContain('15');
     expect(text(rows[0] ?? null)).toContain('上海仓');
+
+    button('详情').click();
+    await flush();
+    const warehouses = host.querySelector('.stock-details .warehouse-table');
+    expect(text(warehouses)).toContain('武汉仓');
+    expect(text(warehouses)).toContain('上海仓');
+    expect(host.querySelector('.stock-details a')).toBeNull();
+    unmount();
+  });
+
+  it('分列显示库存快照并在原行下展开，旧规格保留原文', async () => {
+    mocks.hasAccessByCodes.mockReturnValue(true);
+    mocks.warehouses.mockResolvedValue([]);
+    mocks.stocks.mockResolvedValue([
+      row({ specification: '型号：灰 / 粉\r\n规格：183×61×0.6 cm' }),
+      row({
+        id: 's2',
+        skuId: undefined,
+        productCode: 'CB-02',
+        specification: '同批旧款 10cm',
+      }),
+    ]);
+    const { host, unmount } = await mount();
+    const stockRows = host.querySelectorAll(
+      '.ant-table-tbody tr.ant-table-row',
+    );
+    expect(
+      Array.from(stockRows[0]!.querySelectorAll('td'), text).slice(0, 4),
+    ).toEqual(['杯垫', 'CB-01', '灰/粉', '183×61×0.6cm']);
+    expect(
+      Array.from(stockRows[1]!.querySelectorAll('td'), text).slice(0, 4),
+    ).toEqual(['杯垫', 'CB-02', '—', '同批旧款10cm']);
+
+    button('详情').click();
+    await flush();
+    const details = host.querySelector('.stock-details');
+    expect(text(details)).toContain(
+      '库存规格原文型号：灰/粉规格：183×61×0.6cm',
+    );
+    expect(details?.querySelector('a')?.getAttribute('href')).toBe(
+      '/fdmproducts/catalog?productId=sku-a',
+    );
+    expect(mocks.hasAccessByCodes).toHaveBeenCalledWith([
+      'fdmplatform:products:query',
+    ]);
+
+    stockRows[1]!.querySelector<HTMLButtonElement>('[aria-expanded]')!.click();
+    await flush();
+    expect(host.querySelectorAll('.stock-details')).toHaveLength(1);
+    expect(text(host.querySelector('.stock-details'))).toContain('CB-02');
+    expect(host.querySelector('.stock-details a')).toBeNull();
+    button('收起').click();
+    await flush();
+    expect(host.querySelector('.stock-details')).toBeNull();
+    unmount();
   });
 });

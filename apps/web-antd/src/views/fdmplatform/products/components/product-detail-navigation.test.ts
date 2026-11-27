@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   getProduct: vi.fn(),
   getProducts: vi.fn(),
   getProductActivity: vi.fn(),
+  getStockPage: vi.fn(),
+  hasAccessByCodes: vi.fn(),
   getProductCategories: vi.fn(
     async (_params: {
       productStage?: string;
@@ -26,6 +28,9 @@ const mocks = vi.hoisted(() => ({
   ),
 }));
 vi.mock('@vben/icons', () => ({ IconifyIcon: () => h('span') }));
+vi.mock('@vben/access', () => ({
+  useAccess: () => ({ hasAccessByCodes: mocks.hasAccessByCodes }),
+}));
 vi.mock('#/api/fdmplatform', () => ({
   newIdempotencyKey: () => 'test-product-operation',
 }));
@@ -45,6 +50,12 @@ vi.mock('#/api/fdmplatform/products', () => ({
 }));
 vi.mock('#/api/fdmplatform/product-activity', () => ({
   getProductActivity: mocks.getProductActivity,
+}));
+vi.mock('#/api/fdmplatform/stock', () => ({
+  getStockPage: mocks.getStockPage,
+}));
+vi.mock('#/api/fdmgongchang/stage-stock', () => ({
+  getCenterStockPage: vi.fn(async () => ({ list: [], total: 0 })),
 }));
 vi.mock('@vben/common-ui', () => ({
   Page: defineComponent({
@@ -155,6 +166,10 @@ vi.mock('ant-design-vue', () => {
         type: Array as PropType<Record<string, unknown>[]>,
         default: () => [],
       },
+      expandedRowKeys: {
+        type: Array as PropType<unknown[]>,
+        default: () => [],
+      },
       columns: {
         type: Array as PropType<
           {
@@ -206,7 +221,7 @@ vi.mock('ant-design-vue', () => {
                 : h('span', column.title),
             ),
           ),
-          ...props.dataSource.map((record) =>
+          ...props.dataSource.flatMap((record) => [
             h(
               'div',
               { 'data-table-row': record.id },
@@ -224,7 +239,10 @@ vi.mock('ant-design-vue', () => {
                 ),
               ),
             ),
-          ),
+            props.expandedRowKeys.includes(record.id)
+              ? ctx.slots.expandedRowRender?.({ record })
+              : null,
+          ]),
           h(
             'button',
             {
@@ -428,6 +446,8 @@ function deferred<T>() {
 const dispose: (() => void)[] = [];
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.hasAccessByCodes.mockReturnValue(false);
+  mocks.getStockPage.mockResolvedValue({ list: [], total: 0 });
   mocks.getProductCategories.mockResolvedValue({
     total: 0,
     items: [],
@@ -519,7 +539,10 @@ describe('actual product detail and edit route integration', () => {
       expect(host.querySelectorAll('.product-detail-link')).toHaveLength(2),
     );
     const row = host.querySelector('[data-table-row="A"]')!;
-    expect(row.textContent).not.toContain('对照型号');
+    expect(row.querySelector('[data-table-column="model"]')?.textContent).toBe(
+      '对照型号',
+    );
+    expect(row.textContent).not.toContain('定制说明样例');
     const requestCount = mocks.getProducts.mock.calls.length;
     clickText(host, '展开扩展列');
     await nextTick();
@@ -533,6 +556,73 @@ describe('actual product detail and edit route integration', () => {
     await nextTick();
     expect(host.textContent).toContain('产品A');
     expect(host.textContent).toContain('删除后');
+  });
+
+  it('expands maintained product fields below one SKU without opening the full archive', async () => {
+    mocks.getProducts.mockResolvedValue({
+      list: [
+        {
+          ...product('A'),
+          name: '同名产品',
+          model: '板材型号 A',
+          specification: '型号：板材型号 A\n规格：183 × 61 × 0.6 cm',
+          lengthMm: 1830,
+          widthMm: 610,
+          finishedThicknessMm: 6,
+          colorMode: 'DUAL',
+          frontColorLabel: '7528 U 灰',
+          backColorLabel: '2312 U 蓝',
+          textureFront: 'NONE',
+          patternMode: 'LASER',
+          patternCode: 'PAT-01',
+          patternVersion: 'V2',
+          packaging: '卷装',
+        },
+        { ...product('B'), name: '同名产品', model: '板材型号 B' },
+      ],
+      total: 2,
+    });
+    mocks.hasAccessByCodes.mockImplementation((codes: string[]) =>
+      codes.includes('fdmplatform:inventory:query'),
+    );
+    const { host, router } = await mountCenter();
+    await vi.waitFor(() =>
+      expect(host.querySelectorAll('[data-table-row]')).toHaveLength(2),
+    );
+    const first = host.querySelector('[data-table-row="A"]')!;
+    const second = host.querySelector('[data-table-row="B"]')!;
+    clickText(first, '详情');
+    await nextTick();
+    const details = host.querySelector('.catalog-details')!;
+    expect(first.querySelector('[aria-expanded="true"]')).not.toBeNull();
+    expect(details.textContent).toContain('1830 × 610 × 6 mm');
+    expect(details.textContent).toContain('183 × 61 × 0.6 cm');
+    expect(details.textContent).toContain('7528 U 灰');
+    expect(details.textContent).toContain('2312 U 蓝');
+    expect(details.textContent).toContain('无纹路');
+    expect(details.textContent).toContain('激光雕刻 · PAT-01 · V2');
+    expect(details.textContent).toContain('卷装');
+    expect(router.currentRoute.value.query.productId).toBeUndefined();
+    expect(mocks.getProduct).not.toHaveBeenCalled();
+    expect(mocks.getStockPage).not.toHaveBeenCalled();
+    clickText(details, '库存');
+    await vi.waitFor(() =>
+      expect(mocks.getStockPage).toHaveBeenCalledWith({
+        skuId: 'A',
+        pageNo: 1,
+        pageSize: 10,
+      }),
+    );
+    clickText(second, '详情');
+    await nextTick();
+    expect(host.querySelectorAll('.catalog-details')).toHaveLength(1);
+    expect(host.querySelector('.catalog-details')?.textContent).toContain(
+      '板材型号 B',
+    );
+    expect(first.querySelector('[aria-expanded="true"]')).toBeNull();
+    clickText(second, '收起');
+    await nextTick();
+    expect(host.querySelector('.catalog-details')).toBeNull();
   });
 
   it('filters by each catalog level and preserves the selected group when navigating to a product', async () => {

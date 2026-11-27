@@ -7,10 +7,11 @@ import type {
   ProductQuery,
 } from '#/api/fdmplatform/products';
 
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 
 import { IconifyIcon } from '@vben/icons';
 
+import { useMediaQuery } from '@vueuse/core';
 import {
   Button,
   Dropdown,
@@ -23,15 +24,11 @@ import {
 
 import FdmColorPreview from '#/components/fdm-color-preview/fdm-color-preview.vue';
 
-import { productProcessText, productStageText } from '../attributes';
+import { productStageText } from '../attributes';
 import { productCatalogColors } from '../color-preview';
-import {
-  colorModeText,
-  constructionText,
-  productDimensionsText,
-  productSliceThicknessText,
-} from '../manufacturing';
+import { productDimensionsText } from '../manufacturing';
 import { missingProductFields } from '../model';
+import ProductCatalogDetails from './ProductCatalogDetails.vue';
 import ProductCategoryPanel from './ProductCategoryPanel.vue';
 import ProductStageSelect from './ProductStageSelect.vue';
 
@@ -77,6 +74,11 @@ const keyword = defineModel<string>('keyword', { required: true });
 const active = defineModel<string>('active');
 const productStage = defineModel<string>('productStage');
 const expandedColumns = ref(false);
+const expandedProductId = ref<string>();
+const expandedRowKeys = computed(() =>
+  expandedProductId.value ? [expandedProductId.value] : [],
+);
+const compactLayout = useMediaQuery('(max-width: 760px)');
 const compactCategoriesOpen = ref(false);
 const imageErrors = ref(new Set<string>());
 const categoryFilters = computed(() => ({
@@ -86,6 +88,20 @@ function changeKeyword(value: string) {
   keyword.value = value;
   if (!value && props.appliedKeyword) emit('search');
 }
+function toggleDetails(id: string) {
+  expandedProductId.value = expandedProductId.value === id ? undefined : id;
+}
+watch(
+  () => props.products,
+  (products) => {
+    if (
+      expandedProductId.value &&
+      !products.some(({ id }) => id === expandedProductId.value)
+    ) {
+      expandedProductId.value = undefined;
+    }
+  },
+);
 const statusOptions = [
   { label: '已启用', value: 'true' },
   { label: '未启用', value: 'false' },
@@ -96,70 +112,46 @@ const columns = computed<TableColumnsType<Product>>(() => {
     {
       title: '产品名称',
       key: 'product',
-      width: expandedColumns.value ? 300 : '28%',
+      width: compactLayout.value ? '34%' : 192,
     },
     {
       title: '产品编号',
       key: 'code',
       dataIndex: 'code',
-      width: 150,
+      width: compactLayout.value ? undefined : 192,
       sorter: true,
       sortOrder: props.codeSortOrder,
       sortDirections: ['descend', 'ascend'],
     },
-    {
-      title: '规格 / 材质',
-      key: 'specification',
-      width: expandedColumns.value ? 210 : '19%',
-    },
-    { title: '颜色 / 工艺', key: 'process' },
   ];
-  if (expandedColumns.value) {
+  if (!compactLayout.value) {
     result.push(
-      { title: '产品型号', key: 'model', dataIndex: 'model', width: 175 },
-      { title: '定制说明', key: 'printing', dataIndex: 'printing', width: 175 },
+      { title: '型号', key: 'model', dataIndex: 'model', width: 136 },
+      { title: '规格', key: 'specification', width: 168 },
+      { title: '材质', key: 'material', width: 90 },
+      { title: '颜色', key: 'color' },
+      { title: '生产阶段', key: 'stage', width: 106 },
+      { title: '状态', key: 'state', width: 94 },
     );
+    if (expandedColumns.value) {
+      result.push({ title: '定制说明', key: 'printing', width: 175 });
+    }
   }
-  result.push(
-    { title: '状态', key: 'state', width: 106 },
-    { title: '操作', key: 'action', width: 128, fixed: 'right' },
-  );
+  result.push({
+    title: '操作',
+    key: 'action',
+    width: compactLayout.value ? 84 : 152,
+    fixed: compactLayout.value ? undefined : 'right',
+  });
   return result;
 });
 const rows = computed(() =>
   props.products.map((product) => {
+    const { size } = product;
     const colors = productCatalogColors(product);
-    const machining = productProcessText(product);
     const stage = productStageText(product);
-    const construction =
-      product.constructionType && product.constructionType !== 'UNKNOWN'
-        ? constructionText(product)
-        : '';
-    const frontTexture = product.textureFrontLabel || product.textureFront;
-    const backTexture = product.textureBackLabel || product.textureBack;
-    const textures = [
-      frontTexture &&
-        `正面 ${frontTexture === 'NONE' ? '无纹路' : frontTexture}`,
-      backTexture && `反面 ${backTexture === 'NONE' ? '无纹路' : backTexture}`,
-    ]
-      .filter(Boolean)
-      .join(' / ');
-    const process = [stage, textures || construction]
-      .filter(Boolean)
-      .join(' · ');
-    const { size: legacySize } = product;
-    const specification =
-      productDimensionsText(product) ||
-      legacySize ||
-      product.spec ||
-      product.specification;
-    const materials = [
-      product.material,
-      product.weight,
-      product.unit && `单位 ${product.unit}`,
-    ]
-      .filter(Boolean)
-      .join(' · ');
+    const dimensions = productDimensionsText(product) || size;
+    const specification = dimensions || product.spec || product.specification;
     let state = { label: '未启用', style: 'disabled' };
     if (product.selectable) state = { label: '可选用', style: 'ready' };
     else if (product.active) state = { label: '待补资料', style: 'pending' };
@@ -167,20 +159,9 @@ const rows = computed(() =>
       ...product,
       catalog: {
         colors,
-        process: process || machining,
-        processTitle: [
-          `颜色方式：${colorModeText(product)}`,
-          colors
-            .map(({ label, side }) => (side ? `${side} ${label}` : label))
-            .join(' / '),
-          construction,
-          machining,
-          productSliceThicknessText(product),
-        ]
-          .filter(Boolean)
-          .join(' · '),
+        dimensions,
         specification,
-        materials,
+        stage,
         state,
       },
     };
@@ -300,6 +281,7 @@ const rows = computed(() =>
           </div>
           <div class="catalog-table-tools">
             <Button
+              v-if="!compactLayout"
               size="small"
               type="text"
               :aria-pressed="expandedColumns"
@@ -331,7 +313,11 @@ const rows = computed(() =>
           :columns="columns"
           row-key="id"
           :loading="loading"
-          :scroll="{ x: expandedColumns ? 1470 : 990 }"
+          :expanded-row-keys="expandedRowKeys"
+          :show-expand-column="false"
+          :scroll="
+            compactLayout ? undefined : { x: expandedColumns ? 1470 : 1295 }
+          "
           :pagination="{
             current: pageNo,
             pageSize,
@@ -362,9 +348,23 @@ const rows = computed(() =>
               </Button>
             </Empty>
           </template>
+          <template #expandedRowRender="{ record }">
+            <ProductCatalogDetails
+              v-if="expandedProductId === record.id"
+              :key="record.id"
+              :id="`catalog-details-${record.id}`"
+              :product="record"
+              @activity="emit('detail', record.id)"
+              @files="emit('files', record)"
+            />
+          </template>
           <template #bodyCell="{ column, record }">
             <div v-if="column.key === 'product'" class="catalog-product">
-              <div class="catalog-thumbnail" aria-hidden="true">
+              <div
+                v-if="!compactLayout"
+                class="catalog-thumbnail"
+                aria-hidden="true"
+              >
                 <img
                   v-if="record.imageUrl && !imageErrors.has(record.imageUrl)"
                   :src="record.imageUrl"
@@ -388,25 +388,33 @@ const rows = computed(() =>
                 </span>
               </div>
             </div>
-            <span
-              v-else-if="column.key === 'code'"
-              class="cell-line sku-code"
-              :title="record.code"
-              >{{ record.code || '—' }}</span>
-            <div v-else-if="column.key === 'specification'">
-              <span class="cell-line" :title="record.catalog.specification">
-                {{ record.catalog.specification || '—' }}
-              </span>
+            <div v-else-if="column.key === 'code'">
+              <span class="catalog-value sku-code">{{
+                record.code || '—'
+              }}</span>
               <span
-                v-if="record.catalog.materials"
-                class="cell-line secondary"
-                :title="record.catalog.materials"
-                >{{ record.catalog.materials }}</span>
+                v-if="
+                  compactLayout && (record.model || record.catalog.dimensions)
+                "
+                class="catalog-value secondary"
+              >
+                {{
+                  [record.model, record.catalog.dimensions]
+                    .filter(Boolean)
+                    .join(' · ')
+                }}
+              </span>
             </div>
-            <div
-              v-else-if="column.key === 'process'"
-              :title="record.catalog.processTitle"
+            <span
+              v-else-if="column.key === 'specification'"
+              class="catalog-value"
             >
+              {{ record.catalog.specification || '—' }}
+            </span>
+            <span v-else-if="column.key === 'stage'" class="catalog-value">
+              {{ record.catalog.stage || '—' }}
+            </span>
+            <div v-else-if="column.key === 'color'">
               <div v-if="record.catalog.colors.length" class="catalog-colors">
                 <span
                   v-for="color in record.catalog.colors"
@@ -421,26 +429,21 @@ const rows = computed(() =>
                     :color="color.sample"
                     size="small"
                   />
-                  <span class="cell-line" :title="color.label">{{
-                    color.label
-                  }}</span>
+                  <span class="catalog-value">{{ color.label }}</span>
                 </span>
               </div>
-              <span
-                v-if="record.catalog.process"
-                class="cell-line"
-                :class="{ secondary: record.catalog.colors.length }"
-                >{{ record.catalog.process }}</span>
-              <span
-                v-if="!record.catalog.colors.length && !record.catalog.process"
-                class="secondary"
-                >未维护</span>
+              <span v-else class="secondary">—</span>
             </div>
             <span
-              v-else-if="column.key === 'model' || column.key === 'printing'"
-              class="cell-line"
-              :title="record[column.key]"
-              >{{ record[column.key] || '—' }}</span>
+              v-else-if="
+                column.key === 'material' ||
+                column.key === 'model' ||
+                column.key === 'printing'
+              "
+              class="catalog-value"
+            >
+              {{ record[column.key] || '—' }}
+            </span>
             <span
               v-else-if="column.key === 'state'"
               class="catalog-state"
@@ -458,7 +461,21 @@ const rows = computed(() =>
               class="catalog-row-actions"
             >
               <Button
-                v-if="record.canManage"
+                type="link"
+                size="small"
+                :aria-expanded="expandedProductId === record.id"
+                :aria-controls="
+                  expandedProductId === record.id
+                    ? `catalog-details-${record.id}`
+                    : undefined
+                "
+                :aria-label="`${expandedProductId === record.id ? '收起' : '查看'} ${record.code || record.name} 详情`"
+                @click="toggleDetails(record.id)"
+              >
+                {{ expandedProductId === record.id ? '收起' : '详情' }}
+              </Button>
+              <Button
+                v-if="record.canManage && !compactLayout"
                 type="link"
                 size="small"
                 @click="emit('edit', record as Product)"
@@ -466,7 +483,7 @@ const rows = computed(() =>
                 维护档案
               </Button>
               <Dropdown
-                v-if="record.canManage"
+                v-if="record.canManage || compactLayout"
                 :trigger="['click']"
                 placement="bottomRight"
               >
@@ -483,13 +500,21 @@ const rows = computed(() =>
                 <template #overlay>
                   <Menu>
                     <Menu.Item
+                      v-if="record.canManage && compactLayout"
+                      key="edit"
+                      @click="emit('edit', record as Product)"
+                    >
+                      维护档案
+                    </Menu.Item>
+                    <Menu.Item
                       key="files"
                       @click="emit('files', record as Product)"
                     >
                       标准资料
                     </Menu.Item>
-                    <Menu.Divider />
+                    <Menu.Divider v-if="record.canManage" />
                     <Menu.Item
+                      v-if="record.canManage"
                       key="delete"
                       danger
                       @click="emit('remove', record as Product)"
@@ -754,6 +779,14 @@ const rows = computed(() =>
 
 .sku-code {
   font-variant-numeric: tabular-nums;
+  user-select: all;
+}
+
+.catalog-value {
+  display: block;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
 }
 
 .catalog-state {
@@ -847,6 +880,16 @@ const rows = computed(() =>
 
   .catalog-category-chevron {
     margin-left: auto;
+  }
+
+  .catalog-table :deep(.ant-table.ant-table-small .ant-table-thead > tr > th),
+  .catalog-table :deep(.ant-table.ant-table-small .ant-table-tbody > tr > td) {
+    padding-inline: 6px;
+  }
+
+  .product-detail-link {
+    overflow-wrap: anywhere;
+    white-space: normal;
   }
 }
 

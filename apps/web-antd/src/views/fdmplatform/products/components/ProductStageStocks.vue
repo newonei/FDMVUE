@@ -5,7 +5,7 @@ import { ref, watch } from 'vue';
 
 import { useAccess } from '@vben/access';
 
-import { Table } from 'ant-design-vue';
+import { Spin, Table } from 'ant-design-vue';
 
 import { getCenterStockPage } from '#/api/fdmgongchang/stage-stock';
 import { stockUnit } from '#/views/fdmgongchang/stage-stock/model';
@@ -14,17 +14,25 @@ import { stageOf } from '../../inventory-center/components/model';
 import { qty } from '../../purchase/warehouse/model';
 
 /** 这个产品在各工厂的工序库存；没有库存或没有查看权限时不显示。 */
-const props = defineProps<{ productId: string }>();
+const props = defineProps<{ productId: string; showEmpty?: boolean }>();
 
 const { hasAccessByCodes } = useAccess();
 const rows = ref<Api.Stock[]>([]);
 const total = ref(0);
+const loading = ref(false);
+const failed = ref(false);
 
 watch(
   () => props.productId,
-  async (productId) => {
+  async (productId, _, onCleanup) => {
+    let current = true;
+    onCleanup(() => {
+      current = false;
+    });
     rows.value = [];
     total.value = 0;
+    failed.value = false;
+    loading.value = false;
     if (
       !hasAccessByCodes([
         'fdmgongchang:stage-stock:query',
@@ -32,17 +40,20 @@ watch(
       ])
     )
       return;
+    loading.value = true;
     try {
       const page = await getCenterStockPage({
         pageNo: 1,
         pageSize: 50,
         productId,
       });
-      if (productId !== props.productId) return;
+      if (!current) return;
       rows.value = page.list;
       total.value = page.total;
     } catch {
-      // 只影响这一块显示，产品详情照常可看
+      if (current) failed.value = true;
+    } finally {
+      if (current) loading.value = false;
     }
   },
   { immediate: true },
@@ -53,7 +64,9 @@ watch(
   <div v-if="rows.length > 0" style="margin-top: 16px">
     <h4>
       工厂库存（原料仓 / 半成品仓）
-      <span v-if="total > rows.length">（显示前 {{ rows.length }} 行，共 {{ total }} 行）</span>
+      <span v-if="total > rows.length">
+        （显示前 {{ rows.length }} 行，共 {{ total }} 行）
+      </span>
     </h4>
     <Table
       size="small"
@@ -81,4 +94,9 @@ watch(
       </template>
     </Table>
   </div>
+  <template v-else-if="showEmpty">
+    <Spin v-if="loading" size="small" aria-label="加载工厂库存" />
+    <p v-else-if="failed" role="alert">工厂库存加载失败</p>
+    <p v-else>暂无关联工厂库存</p>
+  </template>
 </template>

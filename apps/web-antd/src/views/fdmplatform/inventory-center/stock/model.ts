@@ -114,6 +114,15 @@ export function matchesKeyword(stock: StockBalance, keyword: string) {
   ].some((value) => (value ?? '').toLowerCase().includes(needle));
 }
 
+/** The product center combines model and specification in a single stock snapshot. */
+export function stockSpecification(snapshot?: string) {
+  const match = snapshot?.match(/^型号：([\s\S]*?)\r?\n规格：([\s\S]*)$/);
+  return {
+    model: match?.[1]?.trim(),
+    specification: match ? match[2]?.trim() : snapshot?.trim(),
+  };
+}
+
 export interface StockOverview {
   /** 有库存（含负数）的库存行 */
   items: number;

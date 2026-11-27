@@ -11,6 +11,7 @@ import { useRoute, useRouter } from 'vue-router';
 
 import { downloadFileFromBlobPart, formatDate } from '@vben/utils';
 
+import { useElementSize } from '@vueuse/core';
 import {
   Alert,
   Button,
@@ -45,6 +46,8 @@ import {
   warehouseGroups,
 } from './model';
 import StockFlowDrawer from './StockFlowDrawer.vue';
+import StockProductCell from './StockProductCell.vue';
+import StockProductDetails from './StockProductDetails.vue';
 
 import '../../purchase/warehouse/warehouse-pages.css';
 
@@ -66,6 +69,15 @@ const warehouses = ref<InventoryWarehouse[]>([]);
 const loading = ref(false);
 const error = ref('');
 const selected = ref<StockBalance[]>([]);
+const main = ref<HTMLElement>();
+const { width: tableWidth } = useElementSize(main);
+const compactProductColumns = computed(
+  () => tableWidth.value > 0 && tableWidth.value < 1040,
+);
+const expandedKey = ref<string>();
+const expandedRowKeys = computed(() =>
+  expandedKey.value ? [expandedKey.value] : [],
+);
 
 const queryText = (key: string) =>
   typeof route.query[key] === 'string' ? (route.query[key] as string) : '';
@@ -79,6 +91,10 @@ const status = ref<StockStatus>(
 );
 const keyword = ref(queryText('keyword'));
 const search = ref(keyword.value);
+
+watch(view, () => {
+  expandedKey.value = undefined;
+});
 
 // 页面会被缓存：离开本页后不再改地址栏
 const ownPath = route.path;
@@ -162,15 +178,36 @@ const cards = computed(() => [
   },
 ]);
 
-const detailColumns = computed(() => [
+const productIdentityColumns = computed(() => [
   {
-    title: '产品 / 规格',
+    title: '产品名称',
     key: 'product',
-    width: 280,
-    fixed: 'left' as const,
-    sorter: (a: StockBalance, b: StockBalance) =>
+    width: 155,
+    fixed: compactProductColumns.value ? undefined : ('left' as const),
+    sorter: (a: ProductStock | StockBalance, b: ProductStock | StockBalance) =>
       compareText(a.productName, b.productName),
   },
+  { title: '产品编号（SKU）', key: 'code', width: 176 },
+  ...(compactProductColumns.value
+    ? [{ title: '型号 / 规格', key: 'modelAndSpec', width: 160 }]
+    : [
+        { title: '型号', key: 'model', width: 165 },
+        { title: '规格', key: 'specification', width: 140 },
+      ]),
+]);
+const productCellKeys = computed(
+  () => new Set(productIdentityColumns.value.map((column) => column.key)),
+);
+
+const actionColumn = {
+  title: '操作',
+  key: 'action',
+  width: 112,
+  fixed: 'right' as const,
+};
+
+const detailColumns = computed(() => [
+  ...productIdentityColumns.value,
   ...(warehouseId.value
     ? []
     : [
@@ -185,16 +222,16 @@ const detailColumns = computed(() => [
   {
     title: '现存',
     key: 'onHand',
-    width: 130,
+    width: 96,
     align: 'right' as const,
     sorter: (a: StockBalance, b: StockBalance) =>
       compareDecimal(a.onHand, b.onHand),
   },
-  { title: '平均成本', key: 'cost', width: 110, align: 'right' as const },
+  { title: '平均成本', key: 'cost', width: 96, align: 'right' as const },
   {
     title: '库存金额',
     key: 'amount',
-    width: 170,
+    width: 130,
     align: 'right' as const,
     sorter: (a: StockBalance, b: StockBalance) =>
       compareDecimal(
@@ -205,43 +242,36 @@ const detailColumns = computed(() => [
   {
     title: '最近入库',
     key: 'lastIn',
-    width: 110,
+    width: 107,
     sorter: (a: StockBalance, b: StockBalance) =>
       compareText(a.lastInDate, b.lastInDate),
   },
   {
     title: '最近出库',
     key: 'lastOut',
-    width: 130,
+    width: 117,
     sorter: (a: StockBalance, b: StockBalance) =>
       compareText(a.lastOutDate, b.lastOutDate),
   },
-  { title: '', key: 'action', width: 70, fixed: 'right' as const },
+  actionColumn,
 ]);
 
-const productColumns = [
-  {
-    title: '产品 / 规格',
-    key: 'product',
-    width: 280,
-    fixed: 'left' as const,
-    sorter: (a: ProductStock, b: ProductStock) =>
-      compareText(a.productName, b.productName),
-  },
-  { title: '仓库分布', key: 'spread', width: 300 },
+const productColumns = computed(() => [
+  ...productIdentityColumns.value,
+  { title: '仓库分布', key: 'spread', width: 210 },
   {
     title: '合计现存',
     key: 'onHand',
-    width: 130,
+    width: 96,
     align: 'right' as const,
     sorter: (a: ProductStock, b: ProductStock) =>
       compareDecimal(a.onHand, b.onHand),
   },
-  { title: '平均成本', key: 'cost', width: 110, align: 'right' as const },
+  { title: '平均成本', key: 'cost', width: 96, align: 'right' as const },
   {
     title: '库存金额',
     key: 'amount',
-    width: 170,
+    width: 130,
     align: 'right' as const,
     sorter: (a: ProductStock, b: ProductStock) =>
       compareDecimal(a.costAmount, b.costAmount),
@@ -249,12 +279,19 @@ const productColumns = [
   {
     title: '最近出库',
     key: 'lastOut',
-    width: 130,
+    width: 117,
     sorter: (a: ProductStock, b: ProductStock) =>
       compareText(a.lastOutDate, b.lastOutDate),
   },
-  { title: '', key: 'action', width: 70, fixed: 'right' as const },
-];
+  actionColumn,
+]);
+
+const scroll = computed(() => ({
+  x: (view.value === 'detail'
+    ? detailColumns.value
+    : productColumns.value
+  ).reduce((total, column) => total + column.width, 0),
+}));
 
 const pagination = {
   defaultPageSize: 50,
@@ -290,6 +327,10 @@ function pickWarehouse(id?: string) {
 
 function pickCard(key: StockStatus) {
   status.value = status.value === key && key !== 'IN_STOCK' ? 'IN_STOCK' : key;
+}
+
+function toggleDetails(key: string) {
+  expandedKey.value = expandedKey.value === key ? undefined : key;
 }
 
 function resetFilters() {
@@ -381,7 +422,7 @@ onMounted(load);
         </div>
       </nav>
 
-      <main class="main">
+      <main ref="main" class="main">
         <div class="toolbar">
           <Radio.Group v-model:value="view" button-style="solid">
             <Radio.Button value="detail">按仓库明细</Radio.Button>
@@ -430,8 +471,10 @@ onMounted(load);
           :data-source="filtered"
           :loading="loading"
           :pagination="pagination"
-          :scroll="{ x: 1100 }"
+          :scroll="scroll"
           :columns="detailColumns"
+          :expanded-row-keys="expandedRowKeys"
+          :show-expand-column="false"
           :row-class-name="
             (record: StockBalance) =>
               stockFlags(record, today).negative ? 'negative' : ''
@@ -444,15 +487,18 @@ onMounted(load);
                 : '当前筛选下没有库存'
             }}
           </template>
+          <template #expandedRowRender="{ expanded, record }">
+            <StockProductDetails
+              v-if="expanded"
+              :product="record as StockBalance"
+            />
+          </template>
           <template #bodyCell="{ column, record }">
-            <div v-if="column.key === 'product'" class="cell">
-              <span class="ellipsis name">
-                {{ record.productName || '产品未注明' }}
-              </span>
-              <span class="muted ellipsis">
-                {{ record.productCode }} {{ record.specification }}
-              </span>
-            </div>
+            <StockProductCell
+              v-if="productCellKeys.has(String(column.key))"
+              :column="String(column.key)"
+              :product="record as StockBalance"
+            />
             <span v-else-if="column.key === 'warehouse'" class="ellipsis">
               {{ record.warehouseName }}
             </span>
@@ -504,14 +550,23 @@ onMounted(load);
                 {{ idleText(record as StockBalance) }}
               </span>
             </div>
-            <Button
-              v-else-if="column.key === 'action'"
-              type="link"
-              size="small"
-              @click="selected = [record as StockBalance]"
-            >
-              流水
-            </Button>
+            <div v-else-if="column.key === 'action'" class="row-actions">
+              <Button
+                type="link"
+                size="small"
+                :aria-expanded="expandedKey === record.id"
+                @click="toggleDetails(record.id)"
+              >
+                {{ expandedKey === record.id ? '收起' : '详情' }}
+              </Button>
+              <Button
+                type="link"
+                size="small"
+                @click="selected = [record as StockBalance]"
+              >
+                流水
+              </Button>
+            </div>
           </template>
         </Table>
 
@@ -524,19 +579,24 @@ onMounted(load);
           :data-source="products"
           :loading="loading"
           :pagination="pagination"
-          :scroll="{ x: 1200 }"
+          :scroll="scroll"
           :columns="productColumns"
+          :expanded-row-keys="expandedRowKeys"
+          :show-expand-column="false"
         >
           <template #emptyText>当前筛选下没有库存</template>
+          <template #expandedRowRender="{ expanded, record }">
+            <StockProductDetails
+              v-if="expanded"
+              :product="record as ProductStock"
+            />
+          </template>
           <template #bodyCell="{ column, record }">
-            <div v-if="column.key === 'product'" class="cell">
-              <span class="ellipsis name">
-                {{ record.productName || '产品未注明' }}
-              </span>
-              <span class="muted ellipsis">
-                {{ record.productCode }} {{ record.specification }}
-              </span>
-            </div>
+            <StockProductCell
+              v-if="productCellKeys.has(String(column.key))"
+              :column="String(column.key)"
+              :product="record as ProductStock"
+            />
             <div v-else-if="column.key === 'spread'" class="chips">
               <Tooltip
                 v-for="row in record.stocks.slice(0, 3)"
@@ -582,14 +642,23 @@ onMounted(load);
               <span class="num">{{ record.lastOutDate ?? '—' }}</span>
               <span class="muted">{{ idleText(record as ProductStock) }}</span>
             </div>
-            <Button
-              v-else-if="column.key === 'action'"
-              type="link"
-              size="small"
-              @click="selected = (record as ProductStock).stocks"
-            >
-              流水
-            </Button>
+            <div v-else-if="column.key === 'action'" class="row-actions">
+              <Button
+                type="link"
+                size="small"
+                :aria-expanded="expandedKey === record.key"
+                @click="toggleDetails(record.key)"
+              >
+                {{ expandedKey === record.key ? '收起' : '详情' }}
+              </Button>
+              <Button
+                type="link"
+                size="small"
+                @click="selected = (record as ProductStock).stocks"
+              >
+                流水
+              </Button>
+            </div>
           </template>
         </Table>
       </main>
@@ -759,8 +828,10 @@ onMounted(load);
   align-items: flex-end;
 }
 
-.cell .name {
-  font-weight: 500;
+.row-actions {
+  display: flex;
+  justify-content: flex-end;
+  white-space: nowrap;
 }
 
 .warn {
