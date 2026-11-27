@@ -73,12 +73,7 @@ function submit() {
 </script>
 
 <template>
-  <form :aria-label="`${orderLabel} 报工`" class="flex flex-col gap-2 px-3 py-3 sm:px-4" @submit.prevent="submit">
-    <div class="flex flex-wrap items-baseline justify-between gap-x-2">
-      <b v-if="draft" class="text-base">{{ draft.process.label }} · {{ draft.process.outputLabel }}<span v-if="draft.process.outputUnit" class="text-sm font-normal">（{{ draft.process.outputUnit }}）</span></b>
-      <span class="text-sm text-muted-foreground">{{ orderLabel }}</span>
-    </div>
-
+  <form :aria-label="`${orderLabel} 报工`" class="flex flex-col gap-2" @submit.prevent="submit">
     <template v-if="draft">
       <div v-for="line in draft.outputs" :key="line.key" class="flex flex-col gap-1">
         <button

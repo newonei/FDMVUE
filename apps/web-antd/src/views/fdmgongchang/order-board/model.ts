@@ -26,6 +26,7 @@ function summarizeStep(code: string, label: string, items: Api.Item[]): Stage {
   const detail = steps.map((step) => [
     `${step.label}：${num(step.goodQuantity)}${step.unit || ''}良品`,
     `${step.orderCount}张工序单`,
+    step.inProgressCount ? `${step.inProgressCount}张在制` : '',
     step.taskCount ? `${step.completedTaskCount || 0}/${step.taskCount}个任务达标` : '',
     step.sharedTaskCount ? `${step.sharedTaskCount}个合并生产任务，产量不重复分摊` : '',
   ].filter(Boolean).join('，')).join('；');
@@ -97,7 +98,7 @@ export function stageDetails(order: Api.Order, selected: Stage, itemId?: number)
   };
 }
 
-export function orderStages(order: Api.Order): Stage[] {
+export function orderStages(order: Pick<Api.Order, 'items'>): Stage[] {
   const items = order.items.filter((item) => num(item.quantity) > 0);
   const stages = PROCESS_CHAIN.map(([code, label]) => summarizeStep(code, label, items));
   const known = new Set<string>(PROCESS_CHAIN.map(([code]) => code));

@@ -69,7 +69,6 @@ const configOpen = ref(false);
 const configOrderId = ref<number>();
 const configItemId = ref<number>();
 const materialPlan = ref<InstanceType<typeof MaterialPlan>>();
-const materialOrderId = ref<number>();
 const materialSaving = ref(false);
 const refreshError = ref(false);
 let version = 0;
@@ -121,14 +120,11 @@ const previewOrders = computed(() => loadedOrders.value.filter((order) => previe
 const materialOrders = computed(() => {
   const ids = new Set(selectedIds.value);
   return loadedOrders.value.filter((order) => ids.has(order.id)).map((order) => ({
-    label: order.orderNo,
-    value: order.id,
+    orderId: order.id,
     itemIds: order.items.filter((item) => item.processes?.includes('MIX')
       && num(item.quantity) > num(item.completedQuantity)).map((item) => item.id),
   })).filter((order) => order.itemIds.length > 0);
 });
-const materialOrder = computed(() => materialOrders.value.find((order) => order.value === materialOrderId.value)
-  ?? materialOrders.value[0]);
 
 function stopAdviceRequest() {
   adviceRequest?.abort();
@@ -231,10 +227,6 @@ async function refreshOrder(orderId: number, current: number) {
   emit('changed', fresh);
 }
 
-function reloadMaterialPlan(orderId: number) {
-  if (materialOrder.value?.value === orderId) void materialPlan.value?.reload();
-}
-
 watch(() => props.deliveredStock?.revision, async () => {
   const received = props.deliveredStock;
   if (!open.value || !received) return;
@@ -248,7 +240,7 @@ watch(() => props.deliveredStock?.revision, async () => {
   try {
     await refreshOrder(order.id, current).catch(() => undefined);
     if (current !== version || !open.value) return;
-    reloadMaterialPlan(order.id);
+    void materialPlan.value?.reload(order.id);
   } finally {
     if (current === version) {
       previewing.value = false;
@@ -279,7 +271,7 @@ async function onConfigSaved() {
   try {
     await refreshOrder(orderId, current);
     if (current !== version || !open.value) return;
-    reloadMaterialPlan(orderId);
+    void materialPlan.value?.reload(orderId);
   } catch {
     if (current === version) refreshError.value = true;
     return;
@@ -290,18 +282,18 @@ async function onConfigSaved() {
 }
 
 async function onMaterialSaved(itemIds: number[]) {
-  const orderId = materialOrder.value?.value;
-  if (!open.value || !orderId || itemIds.length === 0) return;
+  if (!open.value || itemIds.length === 0) return;
 
+  const savedIds = new Set(itemIds);
+  const orders = loadedOrders.value.filter((order) => order.items.some((item) => savedIds.has(item.id)));
   const shouldPreview = !!preview.value;
   const current = ++version;
   invalidatePreview();
   refreshError.value = false;
   previewing.value = true;
   try {
-    await refreshOrder(orderId, current);
-  } catch {
-    if (current === version) refreshError.value = true;
+    const results = await Promise.allSettled(orders.map((order) => refreshOrder(order.id, current)));
+    if (current === version) refreshError.value = results.some((result) => result.status === 'rejected');
   } finally {
     if (current === version) previewing.value = false;
   }
@@ -384,7 +376,6 @@ watch(open, (value) => {
   page.value = 1;
   previewPage.value = 1;
   selectedItemId.value = undefined;
-  materialOrderId.value = undefined;
   materialSaving.value = false;
   previewing.value = false;
   void loadOrders();
@@ -535,17 +526,9 @@ async function release() {
           </template>
         </Table>
       </template>
-      <section v-if="open && canEdit && materialOrder && selectedIds.length <= MAX" aria-label="配方与发泡模具" class="space-y-2 rounded-md border border-border px-3 py-2">
-        <div v-if="materialOrders.length > 1" class="flex flex-wrap items-center gap-2">
-          <label for="split-material-order" class="text-xs text-muted-foreground">配置订单</label>
-          <Select
-            id="split-material-order" :value="materialOrder.value" :options="materialOrders"
-            :disabled="previewing || submitting || configBusy" class="min-w-48" option-filter-prop="label"
-            show-search size="small" @change="(value) => materialOrderId = Number(value)"
-          />
-        </div>
+      <section v-if="open && canEdit && materialOrders.length > 0 && selectedIds.length <= MAX" aria-label="配方与发泡模具" class="rounded-md border border-border px-3 py-2">
         <MaterialPlan
-          ref="materialPlan" compact editable :order-id="materialOrder.value" :item-ids="materialOrder.itemIds"
+          ref="materialPlan" editable :orders="materialOrders"
           :disabled="previewing || submitting || configOpen" @saving="materialSaving = $event" @saved="onMaterialSaved"
         />
       </section>

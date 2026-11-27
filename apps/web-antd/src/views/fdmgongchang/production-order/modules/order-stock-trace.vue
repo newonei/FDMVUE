@@ -48,9 +48,6 @@ function toggle(event: Event) {
   if (opened.value && !trace.value && !loading.value) void load();
 }
 
-function stockLocation(line: { aggregated: boolean; batchNo?: null | string; location?: null | string }) {
-  return [line.location, line.aggregated ? '按仓库汇总' : line.batchNo].filter(Boolean).join(' · ');
-}
 </script>
 
 <template>
@@ -62,36 +59,99 @@ function stockLocation(line: { aggregated: boolean; batchNo?: null | string; loc
       </Alert>
       <Spin :spinning="loading">
         <div v-if="trace" class="flex flex-col gap-4">
-          <section>
-            <h4 class="m-0 text-xs font-semibold">拆分下发时选用</h4>
+          <section class="min-w-0">
+            <h4 id="planned-stock-trace" class="m-0 text-xs font-semibold">拆分下发时选用</h4>
             <p v-if="!trace.planned.length" class="mb-0 mt-1 text-xs text-muted-foreground">暂无拆分选用记录。</p>
-            <ul v-else class="mb-0 mt-2 grid list-none gap-2 p-0 text-xs">
-              <li v-for="(line, index) in trace.planned" :key="`${line.scheduleNo}:${line.itemId}:${line.stockId}:${index}`" class="rounded-md border border-border p-2">
-                <p class="m-0 font-medium">{{ productNames.get(line.itemId) || line.itemId }} · {{ line.stageLabel }} · {{ line.itemCode }}</p>
-                <p class="mb-0 mt-1 text-muted-foreground">{{ stockLocation(line) }} · 排单 {{ line.scheduleNo }}</p>
-                <p class="mb-0 mt-1">
-                  计划使用 <b>{{ formatQuantity(line.quantity) }} {{ line.unit }}</b>
-                  <span v-if="line.startProcessLabel"> · 从「{{ line.startProcessLabel }}」接做</span>
-                </p>
-              </li>
-            </ul>
+            <div v-else class="mt-2 overflow-x-auto" role="region" aria-labelledby="planned-stock-trace" tabindex="0">
+              <table class="trace-table w-full min-w-[760px]" aria-labelledby="planned-stock-trace">
+                <thead>
+                  <tr>
+                    <th scope="col">订单产品</th>
+                    <th scope="col">库存阶段</th>
+                    <th scope="col">物料编码</th>
+                    <th scope="col">库位</th>
+                    <th scope="col">库存批次</th>
+                    <th scope="col">排单号</th>
+                    <th scope="col" class="number-cell">计划使用</th>
+                    <th scope="col">接续工序</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(line, index) in trace.planned" :key="`${line.scheduleNo}:${line.itemId}:${line.stockId}:${index}`">
+                    <th scope="row">{{ productNames.get(line.itemId) || line.itemId }}</th>
+                    <td>{{ line.stageLabel }}</td>
+                    <td>{{ line.itemCode }}</td>
+                    <td>{{ line.location || '—' }}</td>
+                    <td>{{ line.aggregated ? '按仓库汇总' : line.batchNo || '—' }}</td>
+                    <td>{{ line.scheduleNo || '—' }}</td>
+                    <td class="number-cell">{{ formatQuantity(line.quantity) }} {{ line.unit }}</td>
+                    <td>{{ line.startProcessLabel || '—' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </section>
-          <section>
+          <section class="min-w-0">
             <div class="flex items-center justify-between gap-2">
-              <h4 class="m-0 text-xs font-semibold">实际领料、入库与交货</h4>
+              <h4 id="actual-stock-trace" class="m-0 text-xs font-semibold">实际领料、入库与交货</h4>
               <Button size="small" type="link" @click="load">刷新记录</Button>
             </div>
             <p v-if="!trace.actual.length" class="mb-0 mt-1 text-xs text-muted-foreground">暂无实际库存领用记录。</p>
-            <ul v-else class="mb-0 mt-2 grid list-none gap-2 p-0 text-xs">
-              <li v-for="(line, index) in trace.actual" :key="`${line.itemId}:${line.stockId}:${line.activity}:${index}`" class="rounded-md border border-border p-2">
-                <p class="m-0 font-medium">{{ productNames.get(line.itemId) || line.itemId }} · {{ line.activity }} · {{ line.itemCode }}</p>
-                <p class="mb-0 mt-1 text-muted-foreground">{{ line.stageLabel }} · {{ stockLocation(line) }}</p>
-                <p class="mb-0 mt-1">实际净用 <b>{{ formatQuantity(line.quantity) }} {{ line.unit }}</b> · {{ line.documentNos.join('、') }}</p>
-              </li>
-            </ul>
+            <div v-else class="mt-2 overflow-x-auto" role="region" aria-labelledby="actual-stock-trace" tabindex="0">
+              <table class="trace-table w-full min-w-[760px]" aria-labelledby="actual-stock-trace">
+                <thead>
+                  <tr>
+                    <th scope="col">订单产品</th>
+                    <th scope="col">业务</th>
+                    <th scope="col">物料编码</th>
+                    <th scope="col">库存阶段</th>
+                    <th scope="col">库位</th>
+                    <th scope="col">库存批次</th>
+                    <th scope="col" class="number-cell">实际净用</th>
+                    <th scope="col">关联单号</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(line, index) in trace.actual" :key="`${line.itemId}:${line.stockId}:${line.activity}:${index}`">
+                    <th scope="row">{{ productNames.get(line.itemId) || line.itemId }}</th>
+                    <td>{{ line.activity }}</td>
+                    <td>{{ line.itemCode }}</td>
+                    <td>{{ line.stageLabel }}</td>
+                    <td>{{ line.location || '—' }}</td>
+                    <td>{{ line.aggregated ? '按仓库汇总' : line.batchNo || '—' }}</td>
+                    <td class="number-cell">{{ formatQuantity(line.quantity) }} {{ line.unit }}</td>
+                    <td>{{ line.documentNos.join('、') || '—' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </section>
         </div>
       </Spin>
     </div>
   </details>
 </template>
+
+<style scoped>
+.trace-table th,
+.trace-table td {
+  padding: 7px 10px;
+  font-size: 12px;
+  vertical-align: top;
+  text-align: left;
+  overflow-wrap: anywhere;
+  border: 1px solid hsl(var(--border));
+}
+
+.trace-table thead th {
+  font-weight: 600;
+  white-space: nowrap;
+  background: hsl(var(--muted) / 55%);
+}
+
+.trace-table .number-cell {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+</style>

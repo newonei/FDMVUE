@@ -447,14 +447,25 @@ async function onChanged() {
   }
 }
 
-const pinActions = useMediaQuery('(min-width: 768px)');
+const pinColumns = useMediaQuery('(min-width: 768px)');
 const columns = computed(() => [
-  { key: 'orderNo', title: '生产订单', width: 190 },
-  { key: 'source', title: '采购来源', width: 246 },
-  { key: 'items', title: '产品与工艺' },
-  { key: 'progress', title: '交期与进度', width: 164 },
-  { fixed: pinActions.value ? ('right' as const) : undefined, key: 'actions', title: '操作', width: 118 },
+  { fixed: pinColumns.value ? ('left' as const) : undefined, key: 'orderNo', title: '生产订单', width: 154 },
+  { key: 'status', title: '订单状态', width: 136 },
+  { key: 'items', title: '产品明细', width: 208 },
+  { align: 'right' as const, key: 'quantity', title: '首项数量', width: 104 },
+  { key: 'due', title: '交期', width: 124 },
+  { key: 'progress', title: '交货 / 入库进度', width: 148 },
+  { key: 'source', title: '采购主题 / 用途', width: 182 },
+  { key: 'purchase', title: '采购单号', width: 140 },
+  { dataIndex: 'sourceContractName', key: 'contractName', title: '合同内部单号', width: 124 },
+  { dataIndex: 'sourceContractCode', key: 'contractCode', title: '合同编号', width: 124 },
+  { dataIndex: 'customerName', key: 'customer', title: '客户', width: 124 },
+  { key: 'processes', title: '首项工艺', width: 168 },
+  { key: 'requester', title: tab.value === 'mine' ? '工厂' : '下单人 / 部门', width: 130 },
+  { key: 'created', title: '下单时间', width: 150 },
+  { fixed: pinColumns.value ? ('right' as const) : undefined, key: 'actions', title: '操作', width: 118 },
 ]);
+const tableWidth = computed(() => columns.value.reduce((width, column) => width + column.width, 80));
 
 function deliveryHint(order: Api.Order) {
   if (!['ACCEPTED', 'SUBMITTED'].includes(order.status)) return '';
@@ -617,11 +628,13 @@ function progressPercent(o: Api.Order) {
             :loading="loading"
             :pagination="{ current: pageNo, pageSize, showSizeChanger: true, total }"
             :row-selection="rowSelection"
-            :scroll="{ x: 1016 }"
+            :scroll="{ x: tableWidth }"
             :row-class-name="orderRowClass"
+            bordered
             class="production-orders-table"
             row-key="id"
             size="small"
+            sticky
             @change="(p) => ((pageNo = p.current ?? 1), (pageSize = p.pageSize ?? 20), loadRows())"
           >
             <template #emptyText>
@@ -632,68 +645,74 @@ function progressPercent(o: Api.Order) {
               </div>
             </template>
             <template #expandedRowRender="{ record }"><OrderItemsTable :items="record.items" :editable="tab === 'factory' && canHandle && ['SUBMITTED', 'ACCEPTED'].includes(record.status)" @edit="editItem(record.id, $event)" /></template>
-            <template #bodyCell="{ column, record }">
+            <template #bodyCell="{ column, record, text }">
               <template v-if="column.key === 'orderNo'">
+                <button class="order-number" type="button" @click="openOrder(record.id)">{{ record.orderNo }}</button>
+              </template>
+              <template v-else-if="column.key === 'status'">
                 <div class="order-cell">
-                  <button class="order-number" type="button" @click="openOrder(record.id)">{{ record.orderNo }}</button>
                   <div class="flex flex-wrap items-center gap-1">
                     <Tag :color="ORDER_STATUS[record.status as Api.Status]?.color" class="m-0">{{ record.statusLabel }}</Tag>
                     <Tag v-if="record.sourceChanged" class="m-0" color="orange">采购有变更</Tag>
                   </div>
                   <span class="order-meta" :title="statusHint(record as Api.Order)">{{ statusHint(record as Api.Order) }}</span>
-                  <span class="order-meta">
-                    {{ (tab === 'mine' ? record.factoryName : [record.requesterName, record.requesterDeptName].filter(Boolean).join(' · ')) || '—' }}
-                  </span>
-                  <span v-if="record.createTime" class="order-meta">{{ timeText(record.createTime) }}</span>
                 </div>
               </template>
+              <template v-else-if="column.key === 'requester'">
+                {{ (tab === 'mine' ? record.factoryName : [record.requesterName, record.requesterDeptName].filter(Boolean).join(' · ')) || '—' }}
+              </template>
+              <template v-else-if="column.key === 'created'">
+                <span class="tabular-nums">{{ timeText(record.createTime) || '—' }}</span>
+              </template>
               <template v-else-if="column.key === 'source'">
-                <div v-if="record.sourceType === 'PURCHASE_ORDER'" class="order-cell">
-                  <span class="order-subject" :title="record.sourceOrderSubject || undefined">{{ record.sourceOrderSubject || '未填写采购主题' }}</span>
-                  <dl v-if="record.sourceContractId || record.sourceContractName || record.sourceContractCode || record.customerName" class="order-source-meta">
-                    <div v-if="record.sourceContractId || record.sourceContractName || record.sourceContractCode">
-                      <dt>合同内部单号</dt>
-                      <dd class="font-medium text-foreground">{{ record.sourceContractName || '—' }}</dd>
-                    </div>
-                    <div v-if="record.sourceContractCode">
-                      <dt>合同编号</dt>
-                      <dd>{{ record.sourceContractCode }}</dd>
-                    </div>
-                    <div v-if="record.customerName">
-                      <dt>客户</dt>
-                      <dd>{{ record.customerName }}</dd>
-                    </div>
-                  </dl>
-                  <SourcePurchaseLink v-if="record.sourceOrderCode" class="self-start text-left text-xs" :order="record" />
-                </div>
+                <span v-if="record.sourceType === 'PURCHASE_ORDER'" class="order-subject" :title="record.sourceOrderSubject || undefined">{{ record.sourceOrderSubject || '未填写采购主题' }}</span>
                 <div v-else class="order-cell">
                   <span class="order-subject">{{ record.sourceType === 'RESTOCK' ? '补库' : '部门需求' }}</span>
                   <span v-if="record.purpose" class="order-meta" :title="record.purpose">{{ record.purpose }}</span>
                 </div>
               </template>
+              <template v-else-if="column.key === 'purchase'">
+                <SourcePurchaseLink v-if="record.sourceOrderCode" :order="record" code-only />
+                <span v-else>—</span>
+              </template>
+              <template v-else-if="column.key === 'contractName' || column.key === 'contractCode' || column.key === 'customer'">
+                {{ text || '—' }}
+              </template>
               <template v-else-if="column.key === 'items'">
                 <div v-for="item in record.items.slice(0, 1)" :key="item.id" class="order-cell">
-                  <div class="order-item-title">
-                    <span class="order-subject" :title="item.productName">{{ item.productName }}</span>
-                    <span class="shrink-0 text-xs tabular-nums"><b>{{ num(item.quantity).toLocaleString() }}</b> {{ item.unit }}</span>
-                  </div>
+                  <span class="order-subject" :title="item.productName">{{ item.productName }}</span>
                   <span class="order-meta" :title="[item.productCode, specText(item)].filter(Boolean).join(' · ')">{{ [item.productCode, specText(item)].filter(Boolean).join(' · ') }}</span>
-                  <span class="text-xs" :class="item.processes?.length ? 'text-muted-foreground' : 'text-warning'">{{ item.processes?.length ? item.processes.map((code: string) => PROCESS_LABELS[code] || code).join(' → ') : '待确认工艺' }}</span>
                   <button v-if="record.items.length > 1" type="button" class="order-text-action" :aria-expanded="expandedOrderIds.includes(record.id)" @click="toggleOrderItems(record.id)">
                     {{ expandedOrderIds.includes(record.id) ? '收起产品明细' : `全部 ${record.items.length} 项产品` }}
                   </button>
                 </div>
                 <span v-if="record.items.length === 0" class="text-xs text-muted-foreground">暂无产品明细</span>
               </template>
-              <template v-else-if="column.key === 'progress'">
+              <template v-else-if="column.key === 'quantity'">
+                <span class="tabular-nums">{{ record.items[0] ? `${num(record.items[0].quantity).toLocaleString()} ${record.items[0].unit || ''}` : '—' }}</span>
+              </template>
+              <template v-else-if="column.key === 'processes'">
+                <span
+                  v-if="record.items[0]"
+                  class="text-xs"
+                  :class="record.items[0].processes?.length ? 'text-muted-foreground' : 'text-warning'"
+                >{{ record.items[0].processes?.length ? record.items[0].processes.map((code: string) => PROCESS_LABELS[code] || code).join(' → ') : '待确认工艺' }}</span>
+                <span v-else>—</span>
+              </template>
+              <template v-else-if="column.key === 'due'">
                 <div class="order-cell">
                   <time class="font-medium tabular-nums" :datetime="dateText(record.promisedDate) || dateText(record.requiredDate) || undefined">{{ dateText(record.promisedDate) || dateText(record.requiredDate) || '未填写交期' }}</time>
                   <span v-if="record.promisedDate || record.requiredDate" class="text-xs text-muted-foreground">{{ record.promisedDate ? '工厂交期' : record.sourceType === 'PURCHASE_ORDER' ? '采购单交期' : '希望交货' }}</span>
                   <span v-if="deliveryHint(record as Api.Order)" class="text-xs font-medium" :class="deliveryHint(record as Api.Order).startsWith('已逾期') ? 'text-destructive' : 'text-warning'">{{ deliveryHint(record as Api.Order) }}</span>
+                </div>
+              </template>
+              <template v-else-if="column.key === 'progress'">
+                <div class="order-cell">
                   <div v-if="record.status === 'ACCEPTED' || record.status === 'COMPLETED'" class="order-progress">
                     <Progress :percent="progressPercent(record as Api.Order)" :show-info="false" size="small" />
                     <span class="text-xs text-muted-foreground tabular-nums">{{ record.sourceType === 'PURCHASE_ORDER' ? '入库' : '交货' }} {{ num(record.completedQuantity).toLocaleString() }} / {{ num(record.totalQuantity).toLocaleString() }}</span>
                   </div>
+                  <span v-else>—</span>
                   <button
                     v-if="shortfallItemCounts.get(record.id)"
                     class="self-start rounded-md border border-warning/30 bg-warning/10 px-2 py-1 text-left text-xs font-medium text-warning hover:bg-warning/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-warning"
@@ -968,32 +987,6 @@ function progressPercent(o: Api.Order) {
   display: none;
 }
 
-.order-source-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 2px 0 0;
-  font-size: 12px;
-  color: hsl(var(--muted-foreground));
-}
-
-.order-source-meta > div {
-  display: grid;
-  grid-template-columns: 72px minmax(0, 1fr);
-  gap: 6px;
-}
-
-.order-source-meta dd {
-  margin: 0;
-}
-
-.order-item-title {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-  justify-content: space-between;
-}
-
 .order-progress {
   display: flex;
   flex-direction: column;
@@ -1034,6 +1027,7 @@ function progressPercent(o: Api.Order) {
 
 .production-orders-table :deep(.ant-table-cell) {
   vertical-align: top;
+  overflow-wrap: anywhere;
 }
 
 .production-orders-table :deep(.order-row--pending > td) {

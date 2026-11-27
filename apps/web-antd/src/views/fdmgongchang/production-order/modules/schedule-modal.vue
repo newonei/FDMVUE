@@ -67,19 +67,28 @@ async function submit() {
         只把这几张单交给 AI 排（其他订单这次不排），AI 参考库存、原料、人员和产能排出未来几天发泡的先后；确认下发时，开片以后由系统按工序生成任务包。
         出方案后在「AI 排单」里调整、确认下发。
       </p>
-      <ul class="m-0 flex max-h-48 list-none flex-col divide-y divide-border overflow-auto rounded-md border border-border p-0">
-        <li v-for="o in orders" :key="o.id" class="flex items-center justify-between gap-3 px-3 py-1.5">
-          <span class="flex min-w-0 flex-col">
-            <span class="font-mono text-xs">{{ o.orderNo }}</span>
-            <span class="truncate text-xs text-muted-foreground">
-              {{ o.items[0]?.productName }}<template v-if="o.items.length > 1"> 等 {{ o.items.length }} 个产品</template>
-            </span>
-          </span>
-          <span class="shrink-0 text-right text-xs text-muted-foreground">
-            待做 {{ num(o.totalQuantity) - num(o.completedQuantity) }} · 交期 {{ dateText(o.promisedDate) || dateText(o.requiredDate) }}
-          </span>
-        </li>
-      </ul>
+      <div class="max-h-48 overflow-auto rounded-md border border-border" role="region" aria-label="AI 排单订单表格" tabindex="0">
+        <table aria-label="待排单订单" class="w-full min-w-[440px] border-collapse text-left text-xs">
+          <thead class="sticky top-0 bg-muted">
+            <tr class="[&>th]:px-3 [&>th]:py-2">
+              <th scope="col">订单号</th>
+              <th scope="col">产品</th>
+              <th scope="col" class="text-right whitespace-nowrap">待做数量</th>
+              <th scope="col" class="whitespace-nowrap">交期</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="order in orders" :key="order.id" class="border-t border-border [&>td]:border-r [&>td]:border-border [&>td]:px-3 [&>td]:py-2 [&>td:last-child]:border-r-0">
+              <th scope="row" class="border-r border-border px-3 py-2 font-mono font-medium whitespace-nowrap">{{ order.orderNo }}</th>
+              <td :title="order.items.map((item) => item.productName).join('、')">
+                {{ order.items[0]?.productName || '—' }}<template v-if="order.items.length > 1"> 等 {{ order.items.length }} 个产品</template>
+              </td>
+              <td class="text-right tabular-nums">{{ num(order.totalQuantity) - num(order.completedQuantity) }}</td>
+              <td class="tabular-nums whitespace-nowrap">{{ dateText(order.promisedDate) || dateText(order.requiredDate) || '—' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label for="po-schedule-start" class="flex flex-col gap-1 text-xs text-muted-foreground">
           从哪天开始

@@ -1066,7 +1066,7 @@ describe('workbench page', () => {
     expect(mocks.stock).not.toHaveBeenCalled();
   });
 
-  it('reports board output and finishes a foaming order from its card without another report', async () => {
+  it('reports board output and finishes a foaming order from its row without another report', async () => {
     const mix = { code: 'MIX', label: '发泡', outputLabel: '板材', outputStage: 'BOARD', outputUnit: '张', sources: ['RAW'] };
     const attrs = { ...plannedAttrs, recipeCode: 'REC-001' };
     const task = { ...my.tasks[0]!, id: 41, process: 'MIX', quantity: 8, unit: '张', output: { stage: 'BOARD', attrs, recipeBatches: 2 } };
@@ -1144,7 +1144,7 @@ describe('workbench page', () => {
   it('issues material without an optional voucher and reports the planned intermediate output without issuing twice', async () => {
     await mount();
     const taskList = document.querySelector('[aria-label="任务列表"]')!;
-    expect(taskList.querySelector('li')?.textContent).toContain('计划 400 片');
+    expect(taskList.querySelector<HTMLTableRowElement>('tbody tr')?.cells[5]?.textContent).toBe('400 片');
     expect(taskList.textContent).not.toContain('预计领料');
     expect(taskList.textContent).not.toContain('1900×1300×48 mm');
     expect(taskList.textContent).not.toContain('关联订单产品');

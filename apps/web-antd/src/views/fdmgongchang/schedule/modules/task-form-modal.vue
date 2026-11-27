@@ -80,11 +80,14 @@ let initializing = false;
 const dates = computed(() => {
   const start = new Date(`${dateText(props.schedule.startDate)  }T00:00:00`);
   const pad = (n: number) => String(n).padStart(2, '0');
-  return Array.from({ length: props.schedule.days }, (_, i) => {
+  const range = Array.from({ length: props.schedule.days }, (_, i) => {
     const d = new Date(start);
     d.setDate(d.getDate() + i);
     return [d.getFullYear(), pad(d.getMonth() + 1), pad(d.getDate())].join('-');
   });
+  const currentDate = props.existingTaskId ? props.initial?.date : undefined;
+  if (currentDate && !range.includes(currentDate)) range.push(currentDate);
+  return range.toSorted();
 });
 const dateOptions = computed(() => dates.value.map((d) => ({ label: dayLabel(d), value: d })));
 const processOptions = computed(() => (props.options?.processes ?? []).map((p) => ({ label: p.label, value: p.code })));

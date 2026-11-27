@@ -56,13 +56,24 @@ describe('workshop plan rows', () => {
       { ...task, id: 3, workDate: '2026-11-25' },
       merged,
       { ...task, id: 4, sequence: 1, undated: true, workDate: '2026-11-24' },
-    ]);
+    ], undefined, '2026-11-27');
     expect(rows.map((row) => row.task.id)).toEqual([3, 1, 4, 5]);
     expect(rows[1]).toMatchObject({
       customer: '张三', date: '2026-11-26', due: '2026-12-01、2026-12-02',
       order: 'FDM-1、FDM-2', orderQuantity: '260 条', product: '双色垫', size: '1830×610×6 mm',
     });
     expect(rows[2]).toMatchObject({ date: '', order: '备货任务 · 排单 #2', orderQuantity: '', size: '' });
+  });
+
+  it('puts today first, keeps same-day tasks in sequence and leaves undated tasks at the end', () => {
+    const rows = buildWorkshopPlanRows([
+      { ...task, id: 1, sequence: 4, workDate: '2026-11-27' },
+      { ...task, id: 2, sequence: 1, workDate: '2026-11-28' },
+      { ...task, id: 3, sequence: 2, workDate: '2026-11-26' },
+      { ...task, id: 4, sequence: 1, undated: true, workDate: '2026-11-27' },
+      { ...task, id: 5, sequence: 1, undated: false, workDate: '2026-11-27' },
+    ], undefined, '2026-11-27');
+    expect(rows.map((row) => row.task.id)).toEqual([5, 1, 3, 2, 4]);
   });
 
   it('calculates good rate from actual output and keeps supplemental credit in plan progress', () => {

@@ -101,6 +101,8 @@ export namespace FdmgongchangProductionOrderApi {
     productName: string;
     quantity: number | string;
     remark?: null | string;
+    /** 待接单明细的生产参数问题；空数组表示基础参数齐全。 */
+    productionConfigProblems?: string[];
     /** 要走的工序编码，按生产链顺序；旧单为空。 */
     processes?: string[];
     routeId?: null | number;

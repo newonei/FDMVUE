@@ -10,7 +10,7 @@ import { useAccess } from '@vben/access';
 import { Page } from '@vben/common-ui';
 
 import { useFullscreen } from '@vueuse/core';
-import { Button, Empty, message, Progress, Result, Segmented, Spin, Tag } from 'ant-design-vue';
+import { Button, Empty, message, Progress, Result, Segmented, Spin, Table, Tag } from 'ant-design-vue';
 import dayjs from 'dayjs';
 
 import { getFactoryDashboard } from '#/api/fdmgongchang/dashboard';
@@ -138,6 +138,15 @@ const orders = computed(() =>
     };
   }),
 );
+const deliveryColumns = [
+  { key: 'type', title: '类型', width: 96 },
+  { dataIndex: 'orderNo', key: 'orderNo', title: '单号', width: 145 },
+  { dataIndex: 'party', key: 'party', title: '客户 / 部门', width: 105 },
+  { dataIndex: 'product', key: 'product', title: '产品', width: 120 },
+  { key: 'due', title: '交期', width: 130 },
+  { key: 'progress', title: '交付进度', width: 140 },
+  { key: 'status', title: '状态', width: 85 },
+];
 
 /** 没有产出、在制和库存的工序、库存段先收起来，避免一屏都是 0。 */
 const showIdle = ref(false);
@@ -279,32 +288,37 @@ const alerts = computed(() => {
                 <button class="text-xs text-primary hover:underline" type="button" @click="go(FACTORY_ROUTES.productionOrder)">全部订单</button>
               </div>
               <Empty v-if="orders.length === 0" description="没有待交付的订单" />
-              <ul v-else class="m-0 grid list-none grid-cols-1 gap-2 p-0 md:grid-cols-2">
-                <li
-                  v-for="o in orders.slice(0, 10)"
-                  :key="`${o.type}-${o.orderNo}-${o.product}`"
-                  class="flex flex-col gap-1.5 rounded-lg border px-3 py-2" :class="[o.tone === 'danger' ? 'border-destructive/40 bg-destructive/5' : 'border-border']"
-                >
-                  <div class="flex items-center justify-between gap-2">
-                    <span class="flex min-w-0 items-center gap-2">
-                      <Tag :color="o.type === 'FACTORY' ? 'blue' : 'purple'" class="m-0 shrink-0">{{ o.type === 'FACTORY' ? '工厂订单' : '合同' }}</Tag>
-                      <span class="truncate text-sm font-medium">{{ o.orderNo }}</span>
+              <Table
+                v-else
+                aria-label="订单交付"
+                bordered
+                :columns="deliveryColumns"
+                :data-source="orders.slice(0, 10)"
+                :pagination="false"
+                :row-key="(record) => `${record.type}-${record.orderNo}-${record.product}`"
+                :scroll="{ x: 821 }"
+                size="small"
+              >
+                <template #bodyCell="{ column, record }">
+                  <Tag v-if="column.key === 'type'" :color="record.type === 'FACTORY' ? 'blue' : 'purple'" class="m-0">
+                    {{ record.type === 'FACTORY' ? '工厂订单' : '合同' }}
+                  </Tag>
+                  <template v-else-if="column.key === 'due'">
+                    <span v-if="record.dueDate" class="whitespace-nowrap tabular-nums">{{ dateText(record.dueDate) }}</span>
+                    <span :class="record.tone === 'danger' ? 'text-destructive' : record.tone === 'warning' ? 'text-warning' : 'text-muted-foreground'" class="block whitespace-nowrap text-xs font-medium">
+                      <template v-if="record.left === null">没有交期</template>
+                      <template v-else-if="record.left < 0">逾期 {{ -record.left }} 天</template>
+                      <template v-else-if="record.left === 0">今天交</template>
+                      <template v-else>{{ record.left }} 天后交</template>
                     </span>
-                    <span :class="o.tone === 'danger' ? 'text-destructive' : o.tone === 'warning' ? 'text-warning' : 'text-muted-foreground'" class="shrink-0 text-xs font-medium">
-                      <template v-if="o.left === null">没有交期</template>
-                      <template v-else-if="o.left < 0">逾期 {{ -o.left }} 天</template>
-                      <template v-else-if="o.left === 0">今天交</template>
-                      <template v-else>{{ o.left }} 天后交</template>
-                    </span>
+                  </template>
+                  <div v-else-if="column.key === 'progress'" class="flex items-center gap-2">
+                    <Progress :percent="record.percent" :show-info="false" :status="record.tone === 'danger' ? 'exception' : 'normal'" class="m-0 flex-1" size="small" />
+                    <span class="shrink-0 whitespace-nowrap text-xs tabular-nums">{{ big(record.completed) }} / {{ big(record.quantity) }}{{ record.unit ?? '' }}</span>
                   </div>
-                  <span class="truncate text-xs text-muted-foreground">{{ o.party }} · {{ o.product }}</span>
-                  <div class="flex items-center gap-2">
-                    <Progress :percent="o.percent" :show-info="false" :status="o.tone === 'danger' ? 'exception' : 'normal'" class="m-0 flex-1" size="small" />
-                    <span class="shrink-0 text-xs tabular-nums">{{ big(o.completed) }} / {{ big(o.quantity) }}{{ o.unit ?? '' }}</span>
-                  </div>
-                  <span v-if="o.status === 'SUBMITTED'" class="text-xs text-warning">{{ o.statusLabel }}</span>
-                </li>
-              </ul>
+                  <span v-else-if="column.key === 'status'" :class="{ 'text-warning': record.status === 'SUBMITTED' }">{{ record.statusLabel || '—' }}</span>
+                </template>
+              </Table>
             </div>
 
             <div class="flex min-w-0 flex-col gap-4">

@@ -210,33 +210,39 @@ async function submit() {
       </div>
       <Spin :spinning="loading">
         <Empty v-if="rows.length === 0 && !loading" :description="`${item.deliveryStageLabel ?? ''}没有库存`" />
-        <ul v-else class="m-0 flex max-h-72 list-none flex-col overflow-auto rounded-md border border-border p-0">
-          <li
-            v-for="r in rows"
-            :key="r.stock.id"
-            class="grid grid-cols-1 items-center gap-2 border-b border-border px-3 py-2 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_auto]"
-            :class="(r.quantity ?? 0) > 0 ? 'bg-primary/5' : ''"
-          >
-            <span class="flex min-w-0 flex-col">
-              <span class="truncate font-mono text-xs">{{ r.stock.itemCode }}</span>
-              <span class="truncate text-xs text-muted-foreground">
-                批次 {{ r.stock.batchNo }} · {{ r.stock.location }} · 库存 {{ num(r.stock.quantity) }}{{ item.deliveryUnit }}
-              </span>
-            </span>
-            <label :for="`delivery-qty-${r.stock.id}`" class="flex items-center gap-1 text-xs text-muted-foreground">
-              交
-              <InputNumber
-                :id="`delivery-qty-${r.stock.id}`"
-                :max="Number(r.stock.quantity)"
-                :min="0"
-                :value="r.quantity ?? undefined"
-                :style="{ width: '7rem' }"
-                size="small"
-                @change="(v) => (r.quantity = (v as null | number | undefined) ?? null)"
-              />
-            </label>
-          </li>
-        </ul>
+        <div v-else class="max-h-72 overflow-auto rounded-md border border-border" role="region" aria-label="库存批次" tabindex="0">
+          <table class="delivery-stock-table w-full min-w-[560px] text-xs" aria-label="本次办理库存明细">
+            <thead class="sticky top-0 z-10 bg-muted">
+              <tr>
+                <th scope="col">物料编码</th>
+                <th scope="col">批次</th>
+                <th scope="col">库位</th>
+                <th scope="col" class="text-right">库存数量</th>
+                <th scope="col">{{ purchase ? '入库数量' : '交货数量' }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="r in rows" :key="r.stock.id" :class="{ 'bg-primary/5': (r.quantity ?? 0) > 0 }">
+                <td class="font-mono">{{ r.stock.itemCode }}</td>
+                <th scope="row">{{ r.stock.batchNo }}</th>
+                <td>{{ r.stock.location || '—' }}</td>
+                <td class="whitespace-nowrap text-right tabular-nums">{{ num(r.stock.quantity) }} {{ item.deliveryUnit }}</td>
+                <td>
+                  <InputNumber
+                    :id="`delivery-qty-${r.stock.id}`"
+                    :aria-label="`${r.stock.batchNo} ${purchase ? '入库数量' : '交货数量'}`"
+                    :max="Number(r.stock.quantity)"
+                    :min="0"
+                    :value="r.quantity ?? undefined"
+                    :style="{ width: '7rem' }"
+                    size="small"
+                    @change="(v) => (r.quantity = (v as null | number | undefined) ?? null)"
+                  />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </Spin>
       <label for="delivery-remark" class="flex flex-col gap-1 text-xs text-muted-foreground">
         备注
@@ -247,3 +253,15 @@ async function submit() {
     </div>
   </Modal>
 </template>
+
+<style scoped>
+.delivery-stock-table th,
+.delivery-stock-table td {
+  padding: 6px 10px;
+  border: 1px solid hsl(var(--border));
+}
+
+.delivery-stock-table th:not(.text-right) {
+  text-align: left;
+}
+</style>

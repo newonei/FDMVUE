@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getProductionOrder, getRouteOptions, getTargetOptions, saveItemProductionConfig, saveItemProductionConfigBatch } from '#/api/fdmgongchang/production-order';
 
-import { productionBatchConfig, productionConfigDraft, productionConfigProblems, productionConfigTarget, productionRouteProblems, productionThicknessRouteNotice, savedProductionConfigProblems, unfinishedProductionParameters } from './item-production-config';
+import { acceptanceProductionConfigProblems, productionBatchConfig, productionConfigDraft, productionConfigProblems, productionConfigTarget, productionRouteProblems, productionThicknessRouteNotice, unfinishedProductionParameters } from './item-production-config';
 import ConfigModal from './item-production-config-modal.vue';
 
 vi.mock('#/api/fdmgongchang/production-order', () => ({
@@ -143,10 +143,11 @@ describe('production configuration values', () => {
     expect(productionRouteProblems('SINGLE_LAYER', ['LAMINATE', 'PUNCH'])).toBe('单层产品不需要贴合，请取消贴合工序');
     expect(productionRouteProblems('DOUBLE_LAYER', ['LAMINATE', 'PUNCH'])).toBe('');
   });
-  it('does not accept unconfirmed suggested values and requires complete saved values at acceptance', () => {
-    expect(savedProductionConfigProblems(product())).toContain('请先人工确认并保存生产参数');
-    expect(savedProductionConfigProblems(product({ targetConfirmedAt: '2026-11-17' }))).toEqual([]);
-    expect(savedProductionConfigProblems(product({ targetMaterial: null, targetConfirmedAt: '2026-11-17', targetSuggested: { material: 'TPE' } }))).toContain('请选择材质');
+  it('uses the server acceptance result and checks actual fields for older responses', () => {
+    expect(acceptanceProductionConfigProblems(product({ productionConfigProblems: ['请选择正面颜色'] }))).toEqual(['请选择正面颜色']);
+    expect(acceptanceProductionConfigProblems(product({ productionConfigProblems: [], targetMaterial: null }))).toEqual([]);
+    expect(acceptanceProductionConfigProblems(product())).toEqual([]);
+    expect(acceptanceProductionConfigProblems(product({ targetMaterial: null, targetSuggested: { material: 'TPE' } }))).toEqual(['请选择材质']);
   });
   it('allows engraving from a drawing without requiring a pattern code', () => {
     const draft = productionConfigDraft(product());

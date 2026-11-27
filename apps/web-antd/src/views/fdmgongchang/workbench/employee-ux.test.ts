@@ -29,6 +29,7 @@ const task = (id: number): ScheduleApi.Task => ({
 const flush = async () => {
   for (let i = 0; i < 8; i++) { await Promise.resolve(); await nextTick(); }
 };
+const taskRows = () => document.querySelectorAll<HTMLTableRowElement>('table[aria-label="任务列表"] tbody tr');
 function click(text: string) {
   const button = [...document.querySelectorAll('button')].find((node) => node.textContent?.includes(text));
   if (!button) throw new Error(`missing button ${text}`);
@@ -70,35 +71,37 @@ describe('employee workbench navigation and explicit finishing', () => {
 
   it('pages long task lists and searches displayed color names across all pages', async () => {
     await mount(Home);
-    expect(document.querySelectorAll('[aria-label="任务列表"] > li')).toHaveLength(10);
+    expect(taskRows()).toHaveLength(10);
+    expect([...document.querySelectorAll('table[aria-label="任务列表"] thead th')].map((cell) => cell.textContent)).toEqual([
+      '选择', '任务编号', '关联订单', '工序', '产出规格', '计划产量', '剩余产量', '操作',
+    ]);
     expect(document.body.textContent).toContain('第 1 / 3 页');
     click('下一页'); await flush();
-    expect(document.body.textContent).toContain('任务 #11');
-    expect(document.body.textContent).not.toContain('任务 #1 ·');
+    expect(taskRows()[0]?.dataset.taskId).toBe('11');
     await search('紫色');
-    expect(document.querySelectorAll('[aria-label="任务列表"] > li')).toHaveLength(1);
+    expect(taskRows()).toHaveLength(1);
     expect(document.body.textContent).toContain('任务 #23');
-    expect(document.body.textContent).toContain('剩余 80 片');
+    expect(taskRows()[0]!.cells[6]!.textContent).toBe('80 片');
     await search('SO-7');
     expect(document.body.textContent).toContain('任务 #7');
     expect(document.body.textContent).not.toContain('任务 #23');
     unmount?.();
     await mount(Home);
     expect(document.querySelector<HTMLInputElement>('[aria-label="搜索我的任务"]')?.value).toBe('SO-7');
-    expect(document.querySelectorAll('[aria-label="任务列表"] > li')).toHaveLength(1);
+    expect(taskRows()).toHaveLength(1);
   });
 
   it('separates an already issued task from pending tasks and keeps recent completion distinct', async () => {
     job.my!.inProgress = [{ id: 88, orderNo: 'GX-88', process: 'CUT', scheduleTaskId: 1, outputStage: 'CUT', goodQuantity: 20, inputQuantity: 100, inputUnit: '片' } as Api.Order];
     job.my!.recentDone = [{ id: 89, orderNo: 'GX-DONE', process: 'CUT', outputStage: 'CUT', goodQuantity: 100 } as Api.Order];
     await mount(Home);
-    expect(document.querySelector('[data-order-id="88"]')?.textContent).toContain('任务 #1');
+    expect(taskRows()[0]?.dataset.orderId).toBe('88');
+    expect(taskRows()[0]?.textContent).toContain('任务 #1');
     expect(document.body.textContent).not.toContain('GX-DONE');
     click('待开工'); await flush();
-    expect(document.body.textContent).not.toContain('任务 #1 ·');
-    expect(document.body.textContent).toContain('任务 #2');
+    expect(taskRows()[0]?.dataset.taskId).toBe('2');
     click('最近完工'); await flush();
-    expect(document.body.textContent).toContain('GX-DONE');
+    expect(taskRows()[0]?.cells[0]?.textContent).toBe('GX-DONE');
     expect(document.body.textContent).toContain('最近 3 天');
     expect(document.body.textContent).not.toContain('报本工序产出');
   });
@@ -128,7 +131,7 @@ describe('employee workbench navigation and explicit finishing', () => {
     expect(document.body.textContent).toContain('折叠要求：八折');
     expect(document.body.textContent).toContain('折叠要求未确认，请联系主任');
     await search('八折');
-    expect(document.querySelectorAll('[aria-label="任务列表"] > li')).toHaveLength(1);
+    expect(taskRows()).toHaveLength(1);
     expect(document.body.textContent).toContain('任务 #1');
   });
 
@@ -163,8 +166,8 @@ describe('employee workbench navigation and explicit finishing', () => {
       expect(document.querySelector('[data-team-task-id="1179"]')).not.toBeNull();
       expect(document.querySelector('#team-tasks-panel')?.textContent).toContain('匹配 1 个');
     }
-    expect(document.querySelectorAll('[aria-label="任务列表"] > li')).toHaveLength(1);
-    expect(document.querySelector('[aria-label="任务列表"] > li')?.textContent).toContain('任务 #7');
+    expect(taskRows()).toHaveLength(1);
+    expect(taskRows()[0]?.textContent).toContain('任务 #7');
     document.querySelector<HTMLButtonElement>('[data-team-task-id="1179"] button')!.click();
     await flush();
     click('下一步');

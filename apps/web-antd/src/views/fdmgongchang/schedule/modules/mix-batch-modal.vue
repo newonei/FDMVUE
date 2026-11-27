@@ -376,39 +376,49 @@ const boardText = (row: MixBatchRow) =>
 </Checkbox>
             </div>
             <div class="batch-order-list">
-              <label
-                v-for="order in shownOrders"
-                :key="order.id"
-                class="batch-order"
-              >
-                <Checkbox
-                  :checked="checkedOrders.includes(order.id)"
-                  :disabled="busy"
-                  :aria-label="`发泡订单 ${order.orderNo}`"
-                  @change="
-                    (event) => toggleOrder(order.id, event.target.checked)
-                  "
-                />
-                <span><b>{{ order.orderNo }}</b><span v-if="order.customerName">
-                    · {{ order.customerName }}</span><small class="batch-order-products">{{
-                      order.items
-                        .slice(0, 2)
-                        .map((item) => item.productName)
-                        .join('、')
-                    }}<template v-if="order.items.length > 2">
-                      等 {{ order.items.length }} 个产品</template></small></span>
-                <small class="shrink-0">交期
-                  {{
-                    dateText(order.promisedDate) ||
-                    dateText(order.requiredDate) ||
-                    '未填写'
-                  }}</small>
-              </label>
               <Empty
                 v-if="!loading && !shownOrders.length"
                 :image="Empty.PRESENTED_IMAGE_SIMPLE"
                 description="没有匹配的已接单订单"
               />
+              <table v-else class="batch-table batch-order-table" aria-label="发泡订单">
+                <thead>
+                  <tr>
+                    <th scope="col" class="w-12">选择</th>
+                    <th scope="col">订单号</th>
+                    <th scope="col">合同号</th>
+                    <th scope="col">客户</th>
+                    <th scope="col">产品</th>
+                    <th scope="col">交期</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="order in shownOrders" :key="order.id" class="hover:bg-muted/50">
+                    <td>
+                      <Checkbox
+                        :id="`mix-batch-order-${order.id}`"
+                        :checked="checkedOrders.includes(order.id)"
+                        :disabled="busy"
+                        :aria-label="`发泡订单 ${order.orderNo}`"
+                        @change="(event) => toggleOrder(order.id, event.target.checked)"
+                      />
+                    </td>
+                    <td class="whitespace-nowrap font-mono">
+                      <label :for="`mix-batch-order-${order.id}`" class="cursor-pointer">{{ order.orderNo }}</label>
+                    </td>
+                    <td>{{ order.sourceContractCode || '—' }}</td>
+                    <td>{{ order.customerName || '—' }}</td>
+                    <td :title="order.items.map((item) => item.productName).join('、')">
+                      {{ order.items.slice(0, 2).map((item) => item.productName).join('、') || '—' }}<template v-if="order.items.length > 2">
+                        等 {{ order.items.length }} 个产品
+                      </template>
+                    </td>
+                    <td class="whitespace-nowrap tabular-nums">
+                      {{ dateText(order.promisedDate) || dateText(order.requiredDate) || '未填写' }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
             <p
               class="m-0 text-xs"
@@ -556,7 +566,7 @@ const boardText = (row: MixBatchRow) =>
           :message="`每批最多下发 ${MAX_TASKS} 项，当前已选 ${selected.length} 项。请取消部分勾选后提交；全部预览明细仍保留。`"
         />
         <div class="batch-table-wrap">
-          <table class="batch-table">
+          <table class="batch-table" aria-label="发泡任务预览">
             <thead>
               <tr>
                 <th>安排</th>
@@ -716,33 +726,6 @@ const boardText = (row: MixBatchRow) =>
   border-radius: 6px;
 }
 
-.batch-order {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  padding: 8px;
-  cursor: pointer;
-  border-bottom: 1px solid hsl(var(--border));
-}
-
-.batch-order > span {
-  flex: 1;
-  min-width: 0;
-}
-
-.batch-order small {
-  display: block;
-  color: hsl(var(--muted-foreground));
-}
-
-.batch-order .batch-order-products {
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-line-clamp: 2;
-  overflow-wrap: anywhere;
-  -webkit-box-orient: vertical;
-}
-
 .batch-common label {
   display: flex;
   flex-direction: column;
@@ -806,6 +789,17 @@ const boardText = (row: MixBatchRow) =>
 
 .batch-table small {
   color: hsl(var(--muted-foreground));
+}
+
+.batch-table.batch-order-table {
+  min-width: 580px;
+  text-align: left;
+}
+
+.batch-order-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
 
 @media (max-width: 720px) {

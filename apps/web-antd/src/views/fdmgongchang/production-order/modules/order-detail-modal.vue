@@ -35,7 +35,7 @@ import { dateText, num, ORDER_STATUS, routeProblem, specText, timeText } from '.
 import AuxPanel from './aux-panel.vue';
 import DeliveryModal from './delivery-modal.vue';
 import FulfillmentGuide from './fulfillment-guide.vue';
-import { productionConfigDraft, productionRouteProblems, savedProductionConfigProblems } from './item-production-config';
+import { acceptanceProductionConfigProblems, productionConfigDraft, productionRouteProblems } from './item-production-config';
 import ItemProductionConfigModal from './item-production-config-modal.vue';
 import MaterialPlan from './material-plan.vue';
 import OrderStockTrace from './order-stock-trace.vue';
@@ -120,7 +120,8 @@ const editingRoute = ref<number>();
 const batchDraft = ref<RouteDraft>({ steps: [] });
 const batchIds = ref<number[]>([]);
 const activeItems = computed(() => (order.value?.items ?? []).filter((i) => num(i.quantity) > 0));
-const incompleteItems = computed(() => activeItems.value.filter((item) => savedProductionConfigProblems(item).length > 0));
+const configProblemsByItem = computed(() => new Map(activeItems.value.map((item) => [item.id, acceptanceProductionConfigProblems(item)])));
+const incompleteItems = computed(() => activeItems.value.filter((item) => configProblemsByItem.value.get(item.id)?.length));
 const canCancel = computed(() => props.mode === 'mine' && order.value?.status === 'SUBMITTED' && !fromPurchase.value);
 const canHandle = computed(() => props.mode === 'factory' && canHandleOrder.value && order.value?.status === 'SUBMITTED');
 const canProgress = computed(() => props.mode === 'factory' && canHandleOrder.value && order.value?.status === 'ACCEPTED');
@@ -336,7 +337,7 @@ function accept() {
   }
   const incomplete = incompleteItems.value[0];
   if (incomplete) {
-    message.warning(`「${incomplete.productName}」：${savedProductionConfigProblems(incomplete).join('；')}。补齐并保存后才能接单`);
+    message.warning(`「${incomplete.productName}」：${configProblemsByItem.value.get(incomplete.id)!.join('；')}。请修改并保存后接单`);
     editProductionConfig(incomplete);
     return;
   }
@@ -506,31 +507,31 @@ function producedQty(item: Api.Item) {
             </Popconfirm>
           </template>
         </FulfillmentGuide>
-        <div id="po-detail-overview" class="detail-section grid gap-3" :class="{ 'detail-overview': fromPurchase && !canHandle }" tabindex="-1">
-          <section v-if="fromPurchase" aria-labelledby="po-purchase-source" class="min-w-0 rounded-lg border border-border bg-muted/30 px-4 py-3">
-            <h3 id="po-purchase-source" class="m-0 text-xs font-medium text-muted-foreground">采购来源</h3>
-            <dl class="mb-0 mt-2 grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
-              <div class="min-w-0 sm:col-span-2 lg:col-span-4">
-                <dt class="text-xs text-muted-foreground">采购主题</dt>
-                <dd class="m-0 break-words text-base font-semibold">{{ order.sourceOrderSubject || '未填写采购主题' }}</dd>
-              </div>
-              <div class="min-w-0">
-                <dt class="text-xs text-muted-foreground">合同内部单号</dt>
-                <dd class="m-0 break-words font-medium">{{ order.sourceContractName || '—' }}</dd>
-              </div>
-              <div class="min-w-0">
-                <dt class="text-xs text-muted-foreground">合同编号</dt>
-                <dd class="m-0 break-words">{{ order.sourceContractCode || '—' }}</dd>
-              </div>
-              <div class="min-w-0">
-                <dt class="text-xs text-muted-foreground">采购单号</dt>
-                <dd class="m-0 break-words"><SourcePurchaseLink v-if="order.sourceOrderCode" :order="order" code-only /><span v-else>—</span></dd>
-              </div>
-              <div class="min-w-0">
-                <dt class="text-xs text-muted-foreground">客户</dt>
-                <dd class="m-0 break-words">{{ order.customerName || '—' }}</dd>
-              </div>
-            </dl>
+        <div id="po-detail-overview" class="detail-section grid gap-3" tabindex="-1">
+          <section v-if="fromPurchase" aria-labelledby="po-purchase-source" class="min-w-0">
+            <h3 id="po-purchase-source" class="mb-2 text-base font-semibold">采购来源</h3>
+            <div class="overflow-x-auto" role="region" aria-labelledby="po-purchase-source" tabindex="0">
+              <table class="detail-table min-w-[620px]" aria-labelledby="po-purchase-source">
+                <thead>
+                  <tr>
+                    <th scope="col">采购主题</th>
+                    <th scope="col">合同内部单号</th>
+                    <th scope="col">合同编号</th>
+                    <th scope="col">采购单号</th>
+                    <th scope="col">客户</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>{{ order.sourceOrderSubject || '未填写采购主题' }}</td>
+                    <td>{{ order.sourceContractName || '—' }}</td>
+                    <td>{{ order.sourceContractCode || '—' }}</td>
+                    <td><SourcePurchaseLink v-if="order.sourceOrderCode" :order="order" code-only /><span v-else>—</span></td>
+                    <td>{{ order.customerName || '—' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </section>
           <div class="flex min-w-0 flex-col gap-3" :class="{ 'accept-overview': canHandle }">
             <Descriptions :column="{ xs: 1, sm: 2 }" size="small" bordered>
@@ -577,14 +578,14 @@ function producedQty(item: Api.Item) {
           </Button>
         </nav>
 
-        <section id="po-detail-items" v-show="!canHandle || acceptView === 'items'" aria-label="产品明细" class="detail-section grid gap-3" :class="{ 'accept-items-grid': canHandle }" tabindex="-1">
+        <section id="po-detail-items" v-show="!canHandle || acceptView === 'items'" aria-label="产品明细" class="detail-section grid min-w-0 gap-3" tabindex="-1">
           <h3 v-if="!canHandle" class="m-0 text-base font-semibold">产品明细（{{ order.items.length }}）</h3>
           <Alert
             v-if="canHandle && incompleteItems.length > 0"
             class="col-span-full"
             type="warning"
             show-icon
-            :message="`${incompleteItems.length} 个产品尚未完整确认生产参数，请补齐并保存后接单。`"
+            :message="`${incompleteItems.length} 个产品的生产参数需要补齐或修正，请保存后接单。`"
           />
           <div v-if="canBatchRoute" class="col-span-full flex flex-col gap-2 rounded-md bg-muted/40 p-3">
             <span class="text-xs font-semibold text-foreground">批量设置工序</span>
@@ -607,106 +608,127 @@ function producedQty(item: Api.Item) {
               <Button size="small" type="primary" @click="applyBatchRoute">套用到勾选的 {{ batchIds.length }} 个产品</Button>
             </span>
           </div>
-          <article v-for="i in order.items" :key="i.id" class="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-border p-4">
-            <div class="flex w-full min-w-0 flex-col sm:w-auto sm:flex-1">
-              <h4 class="m-0 break-words text-base font-semibold">{{ i.productName }}</h4>
-              <span class="text-xs text-muted-foreground">{{ i.productCode }} · {{ specText(i) }}</span>
-              <span class="flex flex-wrap gap-x-3">
-                <Button v-if="canPlan" class="!px-0" type="link" size="small" :disabled="targetRefreshing || targetRefreshError" @click="editProductionConfig(i)">修改参数与工艺</Button>
-                <Button
-                  v-if="canSupplementRoute && i.processes?.length && num(i.completedQuantity) < num(i.quantity)"
-                  class="!px-0" type="link" size="small" :disabled="targetRefreshing || targetRefreshError"
-                  @click="supplementRoute(i)"
-                >补工序</Button>
-              </span>
-              <span v-if="canHandle && savedProductionConfigProblems(i).length > 0" class="text-xs text-orange-600">{{ savedProductionConfigProblems(i).join('；') }}</span>
-              <RouteProductReference
-                v-if="canPlan && num(i.quantity) > 0"
-                class="my-1"
-                v-bind="routePurchaseReferenceProps(purchaseReference, i.sourceLineId)"
-                :product-id="canViewProductArchive ? i.productId : undefined"
-                :folding-type="i.suggestedFoldingType"
-              />
-              <div v-if="canHandle && i.targetConfirmedAt" class="my-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                <span>{{ colorModeText(i.targetColorMode) }} · 成品总厚 {{ thicknessText(i.targetThickness) }}</span>
-                <span>正面 {{ parameterText(i.targetFrontColor) }} · {{ thicknessText(i.targetFrontThickness) }} · {{ textureText(i, 'FRONT') }}</span>
-                <span v-if="i.targetConstructionType === 'DOUBLE_LAYER'">反面 {{ parameterText(i.targetBackColor) }} · {{ thicknessText(i.targetBackThickness) }} · {{ textureText(i, 'BACK') }}</span>
-              </div>
-              <span v-if="i.printing || i.packaging" class="text-xs text-muted-foreground">
-                <template v-if="i.printing">印花：{{ i.printing }}</template><template v-if="i.printing && i.packaging"> · </template><template v-if="i.packaging">包装：{{ i.packaging }}</template>
-              </span>
-              <span v-if="(i.auxUsages ?? []).length > 0" class="text-xs text-muted-foreground">
-                辅料：{{
-                  (i.auxUsages ?? [])
-                    .map((a) => `${a.productName} 每件 ${num(a.perUnit)}${a.unit ?? ''}`)
-                    .join('，')
-                }}
-              </span>
-              <span v-if="i.remark" class="text-xs text-warning">备注：{{ i.remark }}</span>
-              <span v-if="num(i.quantity) === 0" class="text-xs text-muted-foreground">采购单已取消这一行</span>
-              <div
-                v-else-if="factoryRoute && drafts[i.id] && (canHandle || (editingRoute === i.id && canProgress))"
-                class="mt-1 flex flex-col gap-1"
-              >
-                <RoutePicker
-                  :id="`po-item-${i.id}`"
-                  :model-value="drafts[i.id]!"
-                  :options="routeOptions"
-                  @update:model-value="(v: RouteDraft) => (drafts[i.id] = v)"
-                />
-                <span v-if="editingRoute === i.id" class="flex gap-2">
-                  <Button :loading="busy" :disabled="targetRefreshing || targetRefreshError" size="small" type="primary" @click="saveRoute(i)">保存工艺</Button>
-                  <Button size="small" @click="(editingRoute = undefined), loadRoutes()">取消</Button>
-                </span>
-              </div>
-              <span v-else-if="(i.processes ?? []).length === 0" class="text-xs text-muted-foreground">
-                {{ factoryRoute ? '工艺：工厂接单时定' : '工艺：旧单没有定工艺，从已包装成品交货' }}
-              </span>
-              <span v-else class="mt-1 flex flex-wrap items-center gap-1 text-xs">
-                <span class="text-muted-foreground">工艺 · {{ i.routeName || '自选工序' }}：</span>
-                <button
-                  v-if="factoryRoute && canProgress && !itemStarted(i) && editingRoute === undefined"
-                  class="text-primary hover:underline"
-                  type="button"
-                  @click="editingRoute = i.id"
-                >
-                  改工艺
-                </button>
-                <template v-for="(step, index) in plannedSteps(i)" :key="step.process">
-                  <span v-if="index > 0" class="text-muted-foreground" aria-hidden="true">›</span>
-                  <span
-                    class="rounded px-1.5 leading-5"
-                    :class="stepClass(step, index === plannedSteps(i).length - 1)"
-                    :title="stepTitle(step)"
-                  >
-                    {{ step.label }}
-                    <template v-if="order.status !== 'SUBMITTED'">
-                      <b class="tabular-nums">{{ num(step.goodQuantity) }}</b>{{ step.unit }}
-                    </template>
-                  </span>
-                </template>
-              </span>
-            </div>
-            <span class="flex w-full flex-col items-start gap-1 sm:w-auto sm:shrink-0 sm:items-end sm:text-right">
-              <span class="text-muted-foreground">应做 <b class="text-base tabular-nums text-foreground">{{ num(i.quantity) }}</b> {{ i.unit }}</span>
-              <span v-if="order.status !== 'SUBMITTED' && fromPurchase" class="text-xs text-muted-foreground">
-                已入库 <b class="text-foreground">{{ num(i.completedQuantity) }}</b>
-                <template v-if="num(i.shippedQuantity) > 0"> · 早期工厂出货 {{ num(i.shippedQuantity) }}</template>
-                <template v-if="producedQty(i) > 0"> · 最后一道已做 {{ producedQty(i) }}</template>
-              </span>
-              <span v-else-if="order.status !== 'SUBMITTED'" class="text-xs text-muted-foreground">
-                已交货 <b class="text-foreground">{{ num(i.completedQuantity) }}</b>
-                <template v-if="producedQty(i) > 0"> · 最后一道已做 {{ producedQty(i) }}</template>
-              </span>
-              <Button
-                v-if="canProgress && num(i.completedQuantity) < num(i.quantity)"
-                type="primary"
-                @click="openDelivery(i)"
-              >
-                {{ fromPurchase ? '生产入库' : '交货' }}
-              </Button>
-            </span>
-          </article>
+          <div v-if="order.items.length" class="overflow-x-auto" role="region" aria-label="产品明细表" tabindex="0">
+            <table class="detail-table min-w-[965px]" aria-label="产品明细">
+              <thead>
+                <tr>
+                  <th scope="col" class="min-w-36">产品</th>
+                  <th scope="col" class="min-w-28">编码 / 规格</th>
+                  <th scope="col" class="detail-number">应做</th>
+                  <th v-if="order.status !== 'SUBMITTED'" scope="col" class="detail-number">{{ fromPurchase ? '已入库' : '已交货' }}</th>
+                  <th v-if="order.status !== 'SUBMITTED' && fromPurchase" scope="col" class="detail-number">早期工厂出货</th>
+                  <th v-if="order.status !== 'SUBMITTED'" scope="col" class="detail-number">最后一道已做</th>
+                  <th scope="col" class="min-w-48">生产要求</th>
+                  <th scope="col" class="min-w-60">工艺与进度</th>
+                  <th scope="col" class="min-w-20">备注</th>
+                  <th v-if="canPlan || canSupplementRoute" scope="col" class="min-w-28">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="i in order.items" :key="i.id">
+                  <th scope="row">{{ i.productName }}</th>
+                  <td>{{ [i.productCode, specText(i)].filter(Boolean).join(' · ') || '—' }}</td>
+                  <td class="detail-number">{{ num(i.quantity) }} {{ i.unit }}</td>
+                  <td v-if="order.status !== 'SUBMITTED'" class="detail-number">{{ num(i.completedQuantity) }} {{ i.unit }}</td>
+                  <td v-if="order.status !== 'SUBMITTED' && fromPurchase" class="detail-number">{{ num(i.shippedQuantity) || '—' }}</td>
+                  <td v-if="order.status !== 'SUBMITTED'" class="detail-number">{{ producedQty(i) || '—' }}</td>
+                  <td>
+                    <div class="flex flex-col gap-1 text-xs">
+                      <RouteProductReference
+                        v-if="canPlan && num(i.quantity) > 0"
+                        v-bind="routePurchaseReferenceProps(purchaseReference, i.sourceLineId)"
+                        :product-id="canViewProductArchive ? i.productId : undefined"
+                        :folding-type="i.suggestedFoldingType"
+                      />
+                      <template v-if="canHandle && i.targetConfirmedAt">
+                        <span>{{ colorModeText(i.targetColorMode) }} · 成品总厚 {{ thicknessText(i.targetThickness) }}</span>
+                        <span>正面 {{ parameterText(i.targetFrontColor) }} · {{ thicknessText(i.targetFrontThickness) }} · {{ textureText(i, 'FRONT') }}</span>
+                        <span v-if="i.targetConstructionType === 'DOUBLE_LAYER'">反面 {{ parameterText(i.targetBackColor) }} · {{ thicknessText(i.targetBackThickness) }} · {{ textureText(i, 'BACK') }}</span>
+                      </template>
+                      <span v-if="i.printing">印花：{{ i.printing }}</span>
+                      <span v-if="i.packaging">包装：{{ i.packaging }}</span>
+                      <span v-if="i.auxUsages?.length">
+                        辅料：{{ i.auxUsages.map((a) => `${a.productName} 每件 ${num(a.perUnit)}${a.unit ?? ''}`).join('，') }}
+                      </span>
+                      <span v-if="canHandle && configProblemsByItem.get(i.id)?.length" class="text-warning">{{ configProblemsByItem.get(i.id)?.join('；') }}</span>
+                      <span v-if="!(canPlan && num(i.quantity) > 0) && !i.printing && !i.packaging && !i.auxUsages?.length">—</span>
+                    </div>
+                  </td>
+                  <td>
+                    <span v-if="num(i.quantity) === 0" class="text-xs text-muted-foreground">采购单已取消这一行</span>
+                    <div
+                      v-else-if="factoryRoute && drafts[i.id] && (canHandle || (editingRoute === i.id && canProgress))"
+                      class="flex flex-col gap-1"
+                    >
+                      <RoutePicker
+                        :id="`po-item-${i.id}`"
+                        :model-value="drafts[i.id]!"
+                        :options="routeOptions"
+                        @update:model-value="(v: RouteDraft) => (drafts[i.id] = v)"
+                      />
+                      <span v-if="editingRoute === i.id" class="flex gap-2">
+                        <Button :loading="busy" :disabled="targetRefreshing || targetRefreshError" size="small" type="primary" @click="saveRoute(i)">保存工艺</Button>
+                        <Button size="small" @click="(editingRoute = undefined), loadRoutes()">取消</Button>
+                      </span>
+                    </div>
+                    <span v-else-if="(i.processes ?? []).length === 0" class="text-xs text-muted-foreground">
+                      {{ factoryRoute ? '工艺：工厂接单时定' : '工艺：旧单没有定工艺，从已包装成品交货' }}
+                    </span>
+                    <div v-else class="flex flex-wrap items-center gap-1 text-xs">
+                      <span class="text-muted-foreground">工艺 · {{ i.routeName || '自选工序' }}：</span>
+                      <template v-for="(step, index) in plannedSteps(i)" :key="step.process">
+                        <span v-if="index > 0" class="text-muted-foreground" aria-hidden="true">›</span>
+                        <span
+                          class="rounded px-1.5 leading-5"
+                          :class="stepClass(step, index === plannedSteps(i).length - 1)"
+                          :title="stepTitle(step)"
+                        >
+                          {{ step.label }}
+                          <template v-if="order.status !== 'SUBMITTED'">
+                            <b class="tabular-nums">{{ num(step.goodQuantity) }}</b>{{ step.unit }}
+                          </template>
+                        </span>
+                      </template>
+                    </div>
+                  </td>
+                  <td class="whitespace-pre-wrap">{{ i.remark || '—' }}</td>
+                  <td v-if="canPlan || canSupplementRoute">
+                    <div class="flex flex-col items-start gap-1">
+                      <Button
+                        v-if="canPlan"
+                        type="link" size="small" class="!px-0" :disabled="targetRefreshing || targetRefreshError"
+                        @click="editProductionConfig(i)"
+                      >
+修改参数与工艺
+</Button>
+                      <Button
+                        v-if="num(i.quantity) > 0 && factoryRoute && canProgress && i.processes?.length && !itemStarted(i) && editingRoute === undefined"
+                        type="link" size="small" class="!px-0"
+                        @click="editingRoute = i.id"
+                      >
+改工艺
+</Button>
+                      <Button
+                        v-if="canSupplementRoute && i.processes?.length && num(i.completedQuantity) < num(i.quantity)"
+                        type="link" size="small" class="!px-0" :disabled="targetRefreshing || targetRefreshError"
+                        @click="supplementRoute(i)"
+                      >
+补工序
+</Button>
+                      <Button
+                        v-if="canProgress && num(i.completedQuantity) < num(i.quantity)"
+                        type="primary" size="small"
+                        @click="openDelivery(i)"
+                      >
+{{ fromPurchase ? '生产入库' : '交货' }}
+</Button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p v-else class="m-0 text-muted-foreground">暂无产品明细</p>
         </section>
 
         <div id="po-detail-purchase" v-if="fromPurchase" v-show="!canHandle || acceptView === 'purchase'" class="detail-section flex flex-col gap-4" tabindex="-1">
@@ -739,45 +761,52 @@ function producedQty(item: Api.Item) {
         </p>
 
         <section v-if="deliveries.length > 0" id="po-detail-deliveries" class="detail-section flex flex-col gap-2" tabindex="-1">
-          <h3 class="m-0 text-base font-semibold">
+          <h3 id="po-deliveries-title" class="m-0 text-base font-semibold">
             {{ fromPurchase ? '入库记录' : '交货记录' }}（{{ deliveries.filter((d) => d.status === 'DELIVERED').length }}）
           </h3>
-          <div
-            v-for="d in deliveries"
-            :key="d.id"
-            class="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3 py-2"
-            :class="d.status === 'VOIDED' ? 'opacity-60' : ''"
-          >
-            <span class="flex min-w-0 flex-col">
-              <span class="flex flex-wrap items-center gap-2">
-                <b>{{ d.deliveryNo }}</b>
-                <Tag v-if="d.status === 'VOIDED'" class="m-0">已作废</Tag>
-                <span class="text-xs text-muted-foreground">{{ dateText(d.deliveredDate) }} · {{ d.operatorName }}</span>
-              </span>
-              <span class="text-xs text-muted-foreground">
-                <template v-if="d.kind === 'FACTORY'">
-                  {{ d.productName }} {{ num(d.quantity) }}{{ d.unit }} 完工，留在{{ d.warehouseName || '工厂' }}
-                  <template v-if="d.stockInCode">（采购单到货 {{ d.stockInCode }}）</template>
-                </template>
-                <template v-else>
-                  {{ d.productName }} {{ num(d.quantity) }}{{ d.unit }} → {{ d.warehouseName || '仓库' }}
-                  <template v-if="d.stockInCode">（入库单 {{ d.stockInCode }}）</template>
-                </template>
-              </span>
-              <span class="text-xs text-muted-foreground">
-                {{ d.lines.map((l) => `${l.batchNo} × ${num(l.quantity)}`).join('，') }}
-                <template v-if="d.remark"> · {{ d.remark }}</template>
-                <template v-if="d.voidReason"> · 作废原因：{{ d.voidReason }}</template>
-              </span>
-            </span>
-            <button
-              v-if="canProgress && d.status === 'DELIVERED'"
-              class="text-xs text-destructive hover:underline"
-              type="button"
-              @click="askVoid(d)"
-            >
-              作废
-            </button>
+          <div class="overflow-x-auto" role="region" aria-labelledby="po-deliveries-title" tabindex="0">
+            <table class="detail-table min-w-[1010px]" aria-labelledby="po-deliveries-title">
+              <thead>
+                <tr>
+                  <th scope="col" class="min-w-28">单号</th>
+                  <th scope="col">状态</th>
+                  <th scope="col">日期</th>
+                  <th scope="col">经办人</th>
+                  <th scope="col" class="min-w-28">产品</th>
+                  <th scope="col" class="detail-number">数量</th>
+                  <th scope="col">货物去向</th>
+                  <th scope="col">关联单号</th>
+                  <th scope="col" class="min-w-24">批次</th>
+                  <th scope="col" class="min-w-24">备注</th>
+                  <th v-if="canProgress" scope="col">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="d in deliveries" :key="d.id" :class="{ 'text-muted-foreground': d.status === 'VOIDED' }">
+                  <th scope="row">{{ d.deliveryNo }}</th>
+                  <td><Tag :color="d.status === 'VOIDED' ? undefined : 'green'" class="m-0">{{ d.status === 'VOIDED' ? '已作废' : '有效' }}</Tag></td>
+                  <td class="whitespace-nowrap tabular-nums">{{ dateText(d.deliveredDate) || '—' }}</td>
+                  <td>{{ d.operatorName || '—' }}</td>
+                  <td>{{ d.productName || '—' }}</td>
+                  <td class="detail-number">{{ num(d.quantity) }} {{ d.unit }}</td>
+                  <td>{{ d.kind === 'FACTORY' ? `完工留厂 · ${d.warehouseName || '工厂'}` : d.warehouseName || '仓库' }}</td>
+                  <td>
+                    <template v-if="d.stockInCode">{{ d.stockInCode }}<small class="block text-muted-foreground">{{ d.kind === 'FACTORY' ? '采购单到货' : '入库单' }}</small></template>
+                    <span v-else>—</span>
+                  </td>
+                  <td>{{ d.lines.map((l) => `${l.batchNo} × ${num(l.quantity)}`).join('，') || '—' }}</td>
+                  <td class="whitespace-pre-wrap">
+                    <span v-if="d.remark">{{ d.remark }}</span>
+                    <span v-if="d.voidReason" class="block">作废原因：{{ d.voidReason }}</span>
+                    <span v-if="!d.remark && !d.voidReason">—</span>
+                  </td>
+                  <td v-if="canProgress">
+                    <button v-if="d.status === 'DELIVERED'" class="text-xs text-destructive hover:underline" type="button" @click="askVoid(d)">作废</button>
+                    <span v-else>—</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </section>
 
@@ -837,9 +866,8 @@ function producedQty(item: Api.Item) {
           <b class="block text-sm text-foreground">交期：{{ promisedDate?.format('YYYY-MM-DD') || '待填写' }}</b>
           <div v-if="targetRefreshError" class="text-destructive">请先重新加载已保存参数</div>
           <button v-else-if="incompleteItems.length > 0" type="button" class="text-left text-primary hover:underline disabled:opacity-50" :disabled="loading || loadError || materialSaving || targetRefreshing" @click="editProductionConfig(incompleteItems[0]!)">
-            {{ incompleteItems.length }} 个产品待确认生产参数 · 去补齐
+            {{ incompleteItems.length }} 个产品的生产参数待补齐 · 去补齐
           </button>
-          <span v-else>基础参数已确认，请核对产品工艺</span>
         </div>
         <Button :disabled="detailBusy" size="large" @click="open = false">关闭</Button>
         <Button :loading="busy" :disabled="loading || loadError || materialSaving || targetRefreshing || targetRefreshError" danger size="large" @click="reject">退回</Button>
@@ -886,6 +914,37 @@ function producedQty(item: Api.Item) {
   scroll-margin-top: 55px;
 }
 
+.detail-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.detail-table th,
+.detail-table td {
+  padding: 7px 10px;
+  vertical-align: top;
+  text-align: left;
+  overflow-wrap: anywhere;
+  border: 1px solid hsl(var(--border));
+}
+
+.detail-table thead th {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  background: hsl(var(--muted) / 55%);
+}
+
+.detail-table .detail-number {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.detail-table tbody tr:hover {
+  background: hsl(var(--muted) / 35%);
+}
+
 .accept-footer {
   display: flex;
   flex-wrap: wrap;
@@ -900,18 +959,9 @@ function producedQty(item: Api.Item) {
 }
 
 @media (min-width: 1050px) {
-  .detail-overview {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    align-items: start;
-  }
-
   .accept-overview {
     display: grid;
     grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
-  }
-
-  .accept-items-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

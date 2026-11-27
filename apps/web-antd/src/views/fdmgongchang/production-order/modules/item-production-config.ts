@@ -141,11 +141,9 @@ export function productionConfigProblems(input: ProductionConfigDraft) {
   return problems;
 }
 
-/** 接单只接受人工保存的参数，不能把未确认的建议值当成已填写。 */
-export function savedProductionConfigProblems(item: Api.Item) {
-  const problems = productionConfigProblems(productionConfigDraft({ ...item, targetSuggested: null }));
-  if (!item.targetConfirmedAt) problems.unshift('请先人工确认并保存生产参数');
-  return problems;
+/** 接单使用后端校验结果；旧响应只按订单目标字段检查。 */
+export function acceptanceProductionConfigProblems(item: Api.Item) {
+  return item.productionConfigProblems ?? productionConfigProblems(productionConfigDraft({ ...item, targetSuggested: null }));
 }
 
 export function productionRouteProblems(input: ProductionConfigDraft | ProductionConfigDraft['constructionType'], steps: string[]) {

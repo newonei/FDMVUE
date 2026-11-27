@@ -112,7 +112,11 @@ function actualGoodRate(task: Api.Task) {
   return total > 0 ? good / total : undefined;
 }
 
-export function buildWorkshopPlanRows(tasks: Api.Task[], options?: StockApi.Options): WorkshopPlanRow[] {
+export function buildWorkshopPlanRows(
+  tasks: Api.Task[],
+  options?: StockApi.Options,
+  today = factoryTodayText(),
+): WorkshopPlanRow[] {
   return uniqueTasks(tasks).map((task) => {
     const items = task.relatedOrderItems ?? [];
     const orderQuantity = finishedQuantity(items);
@@ -133,6 +137,7 @@ export function buildWorkshopPlanRows(tasks: Api.Task[], options?: StockApi.Opti
       size: uniqueText(items.map((item) => finishedSize(item)).filter((size) => size !== '未填写')).join('、'),
       task,
     };
-  }).toSorted((first, second) => (first.date || '9999').localeCompare(second.date || '9999')
+  }).toSorted((first, second) => Number(second.date === today) - Number(first.date === today)
+    || (first.date || '9999').localeCompare(second.date || '9999')
     || (first.task.sequence ?? Number.MAX_SAFE_INTEGER) - (second.task.sequence ?? Number.MAX_SAFE_INTEGER));
 }

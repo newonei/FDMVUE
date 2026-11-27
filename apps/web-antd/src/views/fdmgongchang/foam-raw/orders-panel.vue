@@ -45,11 +45,17 @@ const status = {
 const columns = [
   { dataIndex: 'orderNo', key: 'orderNo', title: '领料单号', width: 165 },
   { key: 'status', title: '状态', width: 115 },
-  { key: 'materials', title: '申请与实发', width: 330 },
+  { ellipsis: true, key: 'materials', title: '原料', width: 205 },
+  { align: 'right' as const, key: 'requested', title: '申请合计', width: 140 },
+  { align: 'right' as const, key: 'issued', title: '实发合计', width: 140 },
   { key: 'createdAt', title: '申请时间', width: 155 },
   { dataIndex: 'remark', key: 'remark', title: '备注', width: 170 },
   { key: 'actions', title: '操作', width: 170 },
 ];
+
+function orderQuantity(order: FoamRawOrder, field: 'issuedQuantity' | 'requestedQuantity') {
+  return formatKilograms(order.lines.reduce((total, line) => total + Number(line[field]), 0));
+}
 
 async function reload() {
   const version = ++loadVersion;
@@ -198,24 +204,26 @@ function closePending(order: FoamRawOrder) {
       <Button v-if="canApply" type="primary" @click="openApply()">申请领料</Button>
     </div>
     <Table
+      aria-label="发泡原料领料单"
+      bordered
       :columns="columns"
       :data-source="orders"
       :loading="loading"
       :pagination="{ current: pageNo, pageSize, total, showSizeChanger: false, onChange: (page: number) => pageNo = page }"
-      :row-expandable="(row: FoamRawOrder) => row.issues.length > 0"
-      :scroll="{ x: 1050 }"
+      :row-expandable="(row: FoamRawOrder) => row.lines.length > 0 || row.issues.length > 0"
+      :scroll="{ x: 1300 }"
       row-key="id"
-      size="middle"
+      size="small"
     >
       <template #bodyCell="{ column, record }">
         <Tag v-if="column.key === 'status'" :color="status[(record as FoamRawOrder).status]?.color">
           {{ status[(record as FoamRawOrder).status]?.label }}
         </Tag>
-        <div v-else-if="column.key === 'materials'" class="flex flex-col gap-1">
-          <div v-for="line in (record as FoamRawOrder).lines" :key="line.id" class="flex flex-wrap items-baseline gap-x-2">
-            <b>{{ line.materialName }}</b><span class="text-muted-foreground">申请 {{ formatKilograms(line.requestedQuantity) }} · 实发 {{ formatKilograms(line.issuedQuantity) }}</span>
-          </div>
-        </div>
+        <span v-else-if="column.key === 'materials'" :title="(record as FoamRawOrder).lines.map((line) => line.materialName).join('、')">
+          {{ (record as FoamRawOrder).lines.map((line) => line.materialName).join('、') || '—' }}
+        </span>
+        <span v-else-if="column.key === 'requested'" class="tabular-nums">{{ orderQuantity(record as FoamRawOrder, 'requestedQuantity') }}</span>
+        <span v-else-if="column.key === 'issued'" class="tabular-nums">{{ orderQuantity(record as FoamRawOrder, 'issuedQuantity') }}</span>
         <span v-else-if="column.key === 'createdAt'">{{ dayjs(record.createdAt).format('YYYY-MM-DD HH:mm') }}</span>
         <div v-else-if="column.key === 'actions' && canIssue && canClose(record as FoamRawOrder)" class="flex gap-2">
           <Button size="small" type="primary" @click="openIssue(record as FoamRawOrder)">确认实发</Button>
@@ -223,15 +231,52 @@ function closePending(order: FoamRawOrder) {
         </div>
       </template>
       <template #expandedRowRender="{ record }">
-        <ul class="m-0 flex list-none flex-col gap-2 px-0 py-1">
-          <li v-for="issue in (record as FoamRawOrder).issues" :key="issue.id" class="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <b>{{ issue.materialName }}</b>
-            <span>实发 {{ formatKilograms(issue.quantity) }}</span>
-            <span v-if="Number(issue.returnedQuantity) > 0">已退 {{ formatKilograms(issue.returnedQuantity) }}</span>
-            <span class="text-muted-foreground">{{ issue.occurredOn }} · {{ issue.warehouseDocNo ?? '生产领料' }}</span>
-            <Button v-if="canIssue && returnable(issue) > 0" size="small" @click="openReturn(issue)">退料</Button>
-          </li>
-        </ul>
+        <div class="flex flex-col gap-3">
+          <section v-if="record.lines.length" class="min-w-0 overflow-x-auto">
+            <h4 class="mb-1 text-sm font-semibold">申请明细</h4>
+            <table aria-label="领料申请明细" class="raw-order-table">
+              <thead>
+                <tr>
+                  <th scope="col">原料</th>
+                  <th scope="col" class="text-right">申请数量</th>
+                  <th scope="col" class="text-right">实发数量</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="line in (record as FoamRawOrder).lines" :key="line.id">
+                  <td>{{ line.materialName }}</td>
+                  <td class="whitespace-nowrap text-right tabular-nums">{{ formatKilograms(line.requestedQuantity) }}</td>
+                  <td class="whitespace-nowrap text-right tabular-nums">{{ formatKilograms(line.issuedQuantity) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+          <section v-if="record.issues.length" class="min-w-0 overflow-x-auto">
+            <h4 class="mb-1 text-sm font-semibold">发料记录</h4>
+            <table aria-label="发泡原料发料记录" class="raw-order-table">
+              <thead>
+                <tr>
+                  <th scope="col">原料</th>
+                  <th scope="col" class="text-right">实发数量</th>
+                  <th scope="col" class="text-right">已退数量</th>
+                  <th scope="col">发料日期</th>
+                  <th scope="col">仓库单号</th>
+                  <th v-if="canIssue" scope="col">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="issue in (record as FoamRawOrder).issues" :key="issue.id">
+                  <td>{{ issue.materialName }}</td>
+                  <td class="whitespace-nowrap text-right tabular-nums">{{ formatKilograms(issue.quantity) }}</td>
+                  <td class="whitespace-nowrap text-right tabular-nums">{{ formatKilograms(issue.returnedQuantity) }}</td>
+                  <td class="whitespace-nowrap tabular-nums">{{ issue.occurredOn }}</td>
+                  <td>{{ issue.warehouseDocNo ?? '生产领料' }}</td>
+                  <td v-if="canIssue"><Button v-if="returnable(issue) > 0" size="small" @click="openReturn(issue)">退料</Button></td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+        </div>
       </template>
     </Table>
     <Modal :open="!!draft" :confirm-loading="saving" :mask-closable="false" :title="title" :width="640" @cancel="!saving && (draft = undefined)" @ok="submit">
@@ -246,12 +291,25 @@ function closePending(order: FoamRawOrder) {
       </div>
       <div v-else-if="draft?.kind === 'issue'" class="flex flex-col gap-3 py-2">
         <label class="flex items-center gap-2">实发日期 <DatePicker v-model:value="draft.occurredOn" :allow-clear="false" value-format="YYYY-MM-DD" /></label>
-        <div v-for="line in draft.order.lines.filter((row) => pending(row) > 0)" :key="line.id" class="grid items-center gap-2 sm:grid-cols-2">
-          <div class="flex flex-col gap-1">
-            <span>{{ line.materialName }} · 待发 {{ formatKilograms(pending(line)) }}</span>
-            <span class="text-xs text-muted-foreground">原料仓库存 {{ formatKilograms(materials.find((material) => material.itemId === line.itemId)?.warehouseQuantity) }}</span>
-          </div>
-          <QuantityInput v-model="draft.quantities[line.id]!" :label="`${line.materialName}实发数量`" :max="pending(line)" :package-weight="packageWeight(line.itemId)" />
+        <div class="overflow-x-auto">
+          <table aria-label="待实发原料" class="raw-order-table min-w-[510px]">
+            <thead>
+              <tr>
+                <th scope="col">原料</th>
+                <th scope="col" class="text-right">待发数量</th>
+                <th scope="col" class="text-right">原料仓库存</th>
+                <th scope="col" class="min-w-48">实发数量</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="line in draft.order.lines.filter((row) => pending(row) > 0)" :key="line.id">
+                <td>{{ line.materialName }}</td>
+                <td class="whitespace-nowrap text-right tabular-nums">{{ formatKilograms(pending(line)) }}</td>
+                <td class="whitespace-nowrap text-right tabular-nums">{{ formatKilograms(materials.find((material) => material.itemId === line.itemId)?.warehouseQuantity) }}</td>
+                <td><QuantityInput v-model="draft.quantities[line.id]!" :label="`${line.materialName}实发数量`" :max="pending(line)" :package-weight="packageWeight(line.itemId)" /></td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
       <div v-else-if="draft?.kind === 'return'" class="flex flex-col gap-3 py-2">
@@ -265,3 +323,22 @@ function closePending(order: FoamRawOrder) {
     </Modal>
   </div>
 </template>
+
+<style scoped>
+.raw-order-table {
+  width: 100%;
+  text-align: left;
+  border-collapse: collapse;
+}
+
+.raw-order-table th,
+.raw-order-table td {
+  padding: 6px 8px;
+  border: 1px solid hsl(var(--border));
+}
+
+.raw-order-table th {
+  white-space: nowrap;
+  background: hsl(var(--muted));
+}
+</style>

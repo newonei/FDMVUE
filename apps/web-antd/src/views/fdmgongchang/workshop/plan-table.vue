@@ -8,7 +8,7 @@ import type { FdmgongchangStageStockApi as StockApi } from '#/api/fdmgongchang/s
 
 import { computed, ref, watch } from 'vue';
 
-import { Button, Input, Modal, Pagination, Select, Table } from 'ant-design-vue';
+import { Button, DatePicker, Input, Modal, Pagination, Select, Table } from 'ant-design-vue';
 
 import TaskMaterials from '../schedule/modules/task-materials.vue';
 import { formatQty, sumQty, toNumber } from '../stage-stock/model';
@@ -16,11 +16,16 @@ import { buildWorkshopPlanRows } from './plan-model';
 import RelatedOrderTable from './related-order-table.vue';
 
 const props = defineProps<{
+  canEditWorkDate?: boolean;
   options?: StockApi.Options;
   process: string;
+  savingWorkDate?: boolean;
   tasks: Api.Task[];
 }>();
-const emit = defineEmits<{ openOrder: [id: number] }>();
+const emit = defineEmits<{
+  openOrder: [id: number];
+  updateWorkDate: [id: number, workDate: string, done: (success: boolean) => void];
+}>();
 
 const keyword = ref('');
 const date = ref<string>();
@@ -28,6 +33,8 @@ const status = ref<WorkshopPlanRow['progress']['group']>();
 const page = ref(1);
 const pageSize = ref(20);
 const detailId = ref<number>();
+const workDateId = ref<number>();
+const workDateDraft = ref<string>();
 
 const rows = computed(() => buildWorkshopPlanRows(props.tasks, props.options));
 const dateOptions = computed(() => [...new Set(rows.value.map((row) => row.date))]
@@ -66,11 +73,32 @@ const dateSpans = computed(() => {
 });
 const pendingCount = computed(() => visibleRows.value.filter((row) => row.progress.group === 'pending').length);
 const detail = computed(() => rows.value.find((row) => row.task.id === detailId.value));
+const workDateRow = computed(() => rows.value.find((row) => row.task.id === workDateId.value));
+const canSaveWorkDate = computed(() => props.canEditWorkDate && !!workDateRow.value
+  && !!workDateDraft.value && workDateDraft.value !== workDateRow.value.date);
 
 watch([keyword, date, status, pageSize], () => { page.value = 1; });
 watch(() => visibleRows.value.length, (total) => {
   page.value = Math.min(page.value, Math.max(1, Math.ceil(total / pageSize.value)));
 });
+
+function openWorkDateEditor(id: number, currentDate: string) {
+  workDateDraft.value = currentDate || undefined;
+  workDateId.value = id;
+}
+
+function saveWorkDate() {
+  const id = workDateId.value;
+  const workDate = workDateDraft.value;
+  if (id === undefined || !workDate || !canSaveWorkDate.value || props.savingWorkDate) return;
+
+  emit('updateWorkDate', id, workDate, (success) => {
+    if (!success || workDateId.value !== id) return;
+    workDateId.value = undefined;
+    if (date.value !== undefined && date.value !== workDate) date.value = undefined;
+    page.value = 1;
+  });
+}
 
 const materialTitles: Record<string, string> = {
   MIX: '产出版材',
@@ -89,7 +117,10 @@ const columns = computed<TableColumnsType<WorkshopPlanRow>>(() => {
   return [
     {
       key: 'date', title: '生产日期', width: 106, fixed: 'left',
-      customCell: (row) => ({ rowSpan: dateSpans.value.get(row.task.id), class: 'plan-date-cell' }),
+      customCell: (row) => ({
+        rowSpan: props.canEditWorkDate ? 1 : dateSpans.value.get(row.task.id),
+        class: 'plan-date-cell',
+      }),
     },
     { key: 'order', title: '订单 / 客户', width: 166, fixed: 'left' },
     { key: 'size', title: '成品规格', width: 132 },
@@ -177,6 +208,17 @@ const percent = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2, style
       <template #bodyCell="{ column, record: row }">
         <template v-if="column.key === 'date'">
           <span class="whitespace-nowrap font-semibold tabular-nums">{{ row.date || '未定日期' }}</span>
+          <Button
+            v-if="canEditWorkDate"
+            :aria-label="`${row.date ? '调整' : '设置'}任务 ${row.task.id} 的生产日期`"
+            :disabled="savingWorkDate"
+            class="!block !h-auto !px-0 !text-xs"
+            size="small"
+            type="link"
+            @click="openWorkDateEditor(row.task.id, row.date)"
+          >
+            {{ row.date ? '调整日期' : '设置日期' }}
+          </Button>
         </template>
         <template v-else-if="column.key === 'order'">
           <div class="truncate font-semibold" :title="row.order">{{ row.order }}</div>
@@ -287,6 +329,36 @@ const percent = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2, style
         size="small"
       />
     </div>
+
+    <Modal
+      :open="!!workDateRow && !!canEditWorkDate"
+      :title="`任务 #${workDateId ?? ''} 的生产日期`"
+      :cancel-button-props="{ disabled: savingWorkDate }"
+      :closable="!savingWorkDate"
+      :confirm-loading="savingWorkDate"
+      :keyboard="!savingWorkDate"
+      :mask-closable="false"
+      :ok-button-props="{ disabled: !canSaveWorkDate }"
+      :width="400"
+      ok-text="保存"
+      @cancel="workDateId = undefined"
+      @ok="saveWorkDate"
+    >
+      <div v-if="workDateRow" class="flex flex-col gap-4">
+        <p class="m-0 font-semibold">{{ workDateRow.order }}</p>
+        <label for="workshop-task-work-date" class="flex flex-col gap-1">
+          <span>生产日期</span>
+          <DatePicker
+            id="workshop-task-work-date"
+            v-model:value="workDateDraft"
+            :allow-clear="false"
+            :disabled="savingWorkDate"
+            placeholder="选择生产日期"
+            value-format="YYYY-MM-DD"
+          />
+        </label>
+      </div>
+    </Modal>
 
     <Modal
       :open="!!detail"

@@ -224,61 +224,90 @@ watch([section, keyword, page], () => { job.homeView = { section: section.value,
         {{ keyword ? '没有找到任务' : section === 'running' ? '还没有开工的任务' : section === 'recent' ? '最近没有完工记录' : '没有待开工任务' }}
       </p>
 
-      <ul v-else aria-label="任务列表" role="list" class="m-0 list-none divide-y divide-border rounded-lg border border-border bg-card p-0">
-        <li v-for="task in visiblePending" :key="task.id" :data-task-id="task.id">
-          <div class="flex items-center gap-3 px-3 py-3 sm:px-4">
-            <Checkbox
-              class="shrink-0"
-              :aria-label="`选择任务 #${task.id}`"
-              :checked="selected.includes(task.id)"
-              @update:checked="selectRows([task.id], $event)"
-            />
-            <div class="flex min-w-0 flex-1 flex-col gap-1 break-words">
-              <b class="text-base leading-snug">{{ processTitle(task.process) }}</b>
-              <span v-if="outputSpec(task)" class="text-base leading-snug">{{ outputSpec(task) }}</span>
-              <span v-if="foldingRequirement(task)" class="text-sm" :class="{ 'text-warning': !task.output?.foldingType }">{{ foldingRequirement(task) }}</span>
-              <span class="text-sm text-muted-foreground">任务 #{{ task.id }}<template v-if="task.contractCode"> · {{ task.contractCode }}</template></span>
-              <span class="text-sm tabular-nums">
-                计划 {{ formatQty(planned(task)) }} {{ taskUnit(task) }}<template v-if="remaining(task) < Number(planned(task))"> · 剩余 {{ formatQty(remaining(task)) }} {{ taskUnit(task) }}</template>
-              </span>
-            </div>
-            <button class="min-h-11 shrink-0 rounded-md bg-primary px-3 text-base font-semibold text-primary-foreground" type="button" @click="emit('startTask', task, processOf(task.process)!)">
-              {{ task.process === 'MIX' ? '发泡开工' : '领料开工' }}
-            </button>
-          </div>
-        </li>
-        <li v-for="{ order, task } in visibleOrders" :key="`order-${ order.id}`" :data-order-id="order.id">
-          <div v-if="section === 'running'" class="flex items-start">
-            <Checkbox
-              class="ml-3 mt-3 shrink-0 sm:ml-4"
-              :aria-label="`选择工序单 ${order.orderNo}`"
-              :checked="selected.includes(order.id)"
-              @update:checked="selectRows([order.id], $event)"
-            />
-            <RunningReportRow
-              class="min-w-0 flex-1"
-              :order="order"
-              :planned-spec="task && outputSpec(task)"
-              @details="emit('orderDetails', $event)"
-              @draft="reportDrafts.set(order.id, $event)"
-              @report="emit('reportOrder', $event)"
-            />
-          </div>
-          <div v-else class="flex items-center gap-3 px-3 py-3 sm:px-4">
-            <div class="flex min-w-0 flex-1 flex-col gap-1 break-words">
-              <b class="text-base leading-snug">{{ processTitle(order.process) }}</b>
-              <span v-if="task && outputSpec(task)" class="text-base leading-snug">{{ outputSpec(task) }}</span>
-              <span v-if="foldingRequirement(task)" class="text-sm" :class="{ 'text-warning': !task?.output?.foldingType }">{{ foldingRequirement(task) }}</span>
-              <span class="text-sm text-muted-foreground">
-                {{ task ? `任务 #${task.id}` : order.orderNo }}<template v-if="task?.contractCode || order.contractCode"> · {{ task?.contractCode || order.contractCode }}</template>
-              </span>
-              <span class="text-sm tabular-nums">
-                已报良品 {{ formatQty(order.goodQuantity) }} {{ stageUnit(order) }}
-              </span>
-            </div>
-          </div>
-        </li>
-      </ul>
+      <div v-else class="overflow-x-auto rounded-lg border border-border bg-card" role="region" aria-label="我的任务表格" tabindex="0">
+        <table v-if="section === 'pending'" aria-label="任务列表" class="task-table">
+          <thead>
+            <tr>
+              <th scope="col">选择</th>
+              <th scope="col">任务编号</th>
+              <th scope="col">关联订单</th>
+              <th scope="col">工序</th>
+              <th scope="col">产出规格</th>
+              <th scope="col" class="text-right">计划产量</th>
+              <th scope="col" class="text-right">剩余产量</th>
+              <th scope="col">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="task in visiblePending" :key="task.id" :data-task-id="task.id">
+              <td>
+                <Checkbox
+                  :aria-label="`选择任务 #${task.id}`"
+                  :checked="selected.includes(task.id)"
+                  @update:checked="selectRows([task.id], $event)"
+                />
+              </td>
+              <th scope="row" class="font-medium whitespace-nowrap">任务 #{{ task.id }}</th>
+              <td class="whitespace-nowrap">{{ task.contractCode || '—' }}</td>
+              <td class="min-w-24">{{ processTitle(task.process) }}</td>
+              <td class="min-w-36">
+                {{ outputSpec(task) || '—' }}
+                <div v-if="foldingRequirement(task)" :class="{ 'text-warning': !task.output?.foldingType }">{{ foldingRequirement(task) }}</div>
+              </td>
+              <td class="text-right tabular-nums whitespace-nowrap">{{ formatQty(planned(task)) }} {{ taskUnit(task) }}</td>
+              <td class="text-right tabular-nums whitespace-nowrap">{{ formatQty(remaining(task)) }} {{ taskUnit(task) }}</td>
+              <td>
+                <button class="min-h-11 rounded-md bg-primary px-3 font-semibold whitespace-nowrap text-primary-foreground" type="button" @click="emit('startTask', task, processOf(task.process)!)">
+                  {{ task.process === 'MIX' ? '发泡开工' : '领料开工' }}
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <table v-else aria-label="任务列表" class="task-table">
+          <thead>
+            <tr>
+              <th v-if="section === 'running'" scope="col">选择</th>
+              <th scope="col">工序单</th>
+              <th scope="col">任务编号</th>
+              <th scope="col">关联订单</th>
+              <th scope="col">工序</th>
+              <th v-if="section === 'recent'" scope="col">产出规格</th>
+              <th scope="col" class="text-right">已报良品</th>
+              <th v-if="section === 'running'" scope="col">本次报工</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="{ order, task } in visibleOrders" :key="order.id" :data-order-id="order.id">
+              <td v-if="section === 'running'">
+                <Checkbox
+                  :aria-label="`选择工序单 ${order.orderNo}`"
+                  :checked="selected.includes(order.id)"
+                  @update:checked="selectRows([order.id], $event)"
+                />
+              </td>
+              <th scope="row" class="font-medium whitespace-nowrap">{{ order.orderNo }}</th>
+              <td class="whitespace-nowrap">{{ order.scheduleTaskId ? `任务 #${order.scheduleTaskId}` : '—' }}</td>
+              <td class="whitespace-nowrap">{{ task?.contractCode || order.contractCode || '—' }}</td>
+              <td class="min-w-24">{{ processTitle(order.process) }}</td>
+              <td v-if="section === 'recent'" class="min-w-36">
+                {{ (task && outputSpec(task)) || '—' }}
+                <div v-if="foldingRequirement(task)" :class="{ 'text-warning': !task?.output?.foldingType }">{{ foldingRequirement(task) }}</div>
+              </td>
+              <td class="text-right tabular-nums whitespace-nowrap">{{ formatQty(order.goodQuantity) }} {{ stageUnit(order) }}</td>
+              <td v-if="section === 'running'" class="min-w-72">
+                <RunningReportRow
+                  :order="order"
+                  :planned-spec="task && outputSpec(task)"
+                  @details="emit('orderDetails', $event)"
+                  @draft="reportDrafts.set(order.id, $event)"
+                  @report="emit('reportOrder', $event)"
+                />
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
       <nav v-if="pageCount > 1" aria-label="我的任务分页" class="flex items-center justify-between gap-3">
         <button type="button" :disabled="page <= 1" class="h-11 rounded-md border border-border px-4 disabled:opacity-40" @click="page--">上一页</button>
@@ -297,27 +326,46 @@ watch([section, keyword, page], () => { job.homeView = { section: section.value,
           </button>
         </h2>
         <div v-if="teamExpanded" id="team-tasks-panel" class="flex flex-col gap-2">
-        <p class="m-0 text-xs text-muted-foreground">组员忘了报可以替他报，工序单和计件仍记在实际生产人员名下。</p>
-        <Input v-model:value="teamKeyword" allow-clear aria-label="搜索组员任务" placeholder="搜索订单、任务编号、颜色、规格或折法" />
-        <span class="text-xs text-muted-foreground">共 {{ teamTasks.length }} 个任务<template v-if="teamKeyword"> · 匹配 {{ matchingTeam.length }} 个</template></span>
-        <p v-if="matchingTeam.length === 0" class="m-0 rounded-md bg-card p-3 text-sm text-muted-foreground">没有匹配的组员任务，请换个关键词。</p>
-        <ul class="m-0 flex list-none flex-col divide-y divide-border rounded-lg border border-border bg-card p-0">
-          <li v-for="t in visibleTeam" :key="t.id" :data-team-task-id="t.id" class="flex items-center gap-3 px-3 py-3">
-            <span class="flex min-w-0 flex-1 flex-col gap-1 break-words">
-              <b class="text-base">{{ processTitle(t.process) }}</b>
-              <span v-if="outputSpec(t)" class="text-base">{{ outputSpec(t) }}</span>
-              <span v-if="foldingRequirement(t)" class="text-sm">{{ foldingRequirement(t) }}</span>
-              <span class="text-sm text-muted-foreground">任务 #{{ t.id }} · {{ t.workerNames || '还没人接' }}<template v-if="t.contractCode"> · {{ t.contractCode }}</template></span>
-              <span class="text-sm">计划 {{ formatQty(planned(t)) }} {{ taskUnit(t) }}</span>
-            </span>
-            <button class="min-h-11 shrink-0 rounded-md border border-primary px-3 text-base text-primary" type="button" @click="openBehalf(t)">代报</button>
-          </li>
-        </ul>
-        <nav v-if="teamPageCount > 1" aria-label="组员任务分页" class="flex items-center justify-between gap-3">
-          <button type="button" :disabled="teamPage <= 1" class="h-11 rounded-md border border-border px-4 disabled:opacity-40" @click="teamPage--">上一页</button>
-          <span class="text-xs">第 {{ teamPage }} / {{ teamPageCount }} 页 · {{ matchingTeam.length }} 条</span>
-          <button type="button" :disabled="teamPage >= teamPageCount" class="h-11 rounded-md border border-border px-4 disabled:opacity-40" @click="teamPage++">下一页</button>
-        </nav>
+          <p class="m-0 text-xs text-muted-foreground">组员忘了报可以替他报，工序单和计件仍记在实际生产人员名下。</p>
+          <Input v-model:value="teamKeyword" allow-clear aria-label="搜索组员任务" placeholder="搜索订单、任务编号、颜色、规格或折法" />
+          <span class="text-xs text-muted-foreground">共 {{ teamTasks.length }} 个任务<template v-if="teamKeyword"> · 匹配 {{ matchingTeam.length }} 个</template></span>
+          <p v-if="matchingTeam.length === 0" class="m-0 rounded-md bg-card p-3 text-sm text-muted-foreground">没有匹配的组员任务，请换个关键词。</p>
+          <div v-else class="overflow-x-auto rounded-lg border border-border bg-card" role="region" aria-label="组员任务表格" tabindex="0">
+            <table aria-label="组员任务列表" class="task-table">
+              <thead>
+                <tr>
+                  <th scope="col">任务编号</th>
+                  <th scope="col">关联订单</th>
+                  <th scope="col">工序</th>
+                  <th scope="col">产出规格</th>
+                  <th scope="col">接单人员</th>
+                  <th scope="col" class="text-right">计划产量</th>
+                  <th scope="col">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="task in visibleTeam" :key="task.id" :data-team-task-id="task.id">
+                  <th scope="row" class="font-medium whitespace-nowrap">任务 #{{ task.id }}</th>
+                  <td class="whitespace-nowrap">{{ task.contractCode || '—' }}</td>
+                  <td class="min-w-24">{{ processTitle(task.process) }}</td>
+                  <td class="min-w-36">
+                    {{ outputSpec(task) || '—' }}
+                    <div v-if="foldingRequirement(task)">{{ foldingRequirement(task) }}</div>
+                  </td>
+                  <td class="min-w-20">{{ task.workerNames || '还没人接' }}</td>
+                  <td class="text-right tabular-nums whitespace-nowrap">{{ formatQty(planned(task)) }} {{ taskUnit(task) }}</td>
+                  <td>
+                    <button class="min-h-11 rounded-md border border-primary px-3 whitespace-nowrap text-primary" type="button" @click="openBehalf(task)">代报</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <nav v-if="teamPageCount > 1" aria-label="组员任务分页" class="flex items-center justify-between gap-3">
+            <button type="button" :disabled="teamPage <= 1" class="h-11 rounded-md border border-border px-4 disabled:opacity-40" @click="teamPage--">上一页</button>
+            <span class="text-xs">第 {{ teamPage }} / {{ teamPageCount }} 页 · {{ matchingTeam.length }} 条</span>
+            <button type="button" :disabled="teamPage >= teamPageCount" class="h-11 rounded-md border border-border px-4 disabled:opacity-40" @click="teamPage++">下一页</button>
+          </nav>
         </div>
       </section>
       <BatchWorkbench
@@ -351,3 +399,36 @@ watch([section, keyword, page], () => { job.homeView = { section: section.value,
     </main>
   </div>
 </template>
+
+<style scoped>
+.task-table {
+  width: 100%;
+  font-size: 0.875rem;
+  text-align: start;
+  border-collapse: collapse;
+}
+
+.task-table thead {
+  white-space: nowrap;
+  background: hsl(var(--muted) / 60%);
+}
+
+.task-table :is(th, td) {
+  padding: 0.5rem 0.75rem;
+  vertical-align: top;
+  border-block-end: 1px solid hsl(var(--border));
+  border-inline-end: 1px solid hsl(var(--border));
+}
+
+.task-table th:not(.text-right) {
+  text-align: start;
+}
+
+.task-table :is(th, td):last-child {
+  border-inline-end: 0;
+}
+
+.task-table tbody tr:last-child > :is(th, td) {
+  border-block-end: 0;
+}
+</style>

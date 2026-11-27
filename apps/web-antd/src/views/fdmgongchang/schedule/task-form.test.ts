@@ -121,6 +121,16 @@ async function selectInput() {
 }
 
 describe('production task dispatch', () => {
+  it('keeps a date set in the workshop available when editing an existing task', async () => {
+    const initial: Api.PlanTask = {
+      date: '2026-11-27', process: 'SLICE', product: '历史开片任务', quantity: 8, workerIds: [],
+    };
+    await mount(initial, 21);
+    const field = document.querySelector<HTMLSelectElement>('#task-form-date')!;
+    expect([...field.options].map((option) => option.value)).toContain(initial.date);
+    expect(field.value).toBe(initial.date);
+  });
+
   it('opens batch mixing from the single-task form with current order and date without saving one task', async () => {
     const submit = await mount(); await set('task-form-process', 'MIX');
     await set('task-form-order', 'GD-01'); await set('task-form-date', '2026-11-11');

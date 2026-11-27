@@ -329,12 +329,12 @@ describe('批量发泡', () => {
     expect(reason.textContent).toContain('请确认规格');
     expect(reason.closest('details')).toBeNull();
     expect(
-      document.querySelector('tbody td:nth-child(3)')!.textContent,
+      document.querySelector('[aria-label="发泡任务预览"] tbody td:nth-child(3)')!.textContent,
     ).toContain('待确认结构');
     for (const column of [5, 6, 7])
       expect(
         document
-          .querySelector(`tbody td:nth-child(${column})`)!
+          .querySelector(`[aria-label="发泡任务预览"] tbody td:nth-child(${column})`)!
           .textContent?.trim(),
       ).toBe('—');
     expect(
@@ -366,7 +366,7 @@ describe('批量发泡', () => {
       workerIds: [7],
       note: undefined,
     });
-    expect(document.querySelectorAll('tbody tr')).toHaveLength(5);
+    expect(document.querySelectorAll('[aria-label="发泡任务预览"] tbody tr')).toHaveLength(5);
     expect(document.body.textContent).toContain('正面层 · 2 mm');
     expect(document.body.textContent).toContain('反面层 · 4 mm');
     expect(
@@ -456,7 +456,7 @@ describe('批量发泡', () => {
     await mount({ initialOrderNo: 'GD-1' });
     await click('预览发泡任务');
     await input('mix-batch-date', dayjs().add(2, 'day').format('YYYY-MM-DD'));
-    expect(document.querySelector('tbody')).toBeNull();
+    expect(document.querySelector('[aria-label="发泡任务预览"]')).toBeNull();
     expect(button('下发选中').disabled).toBe(true);
     await click('预览发泡任务');
     await input('mix-batch-workers', '7', 'change');
@@ -497,7 +497,7 @@ describe('批量发泡', () => {
     await flush();
     opened.value = true;
     await flush();
-    expect(document.querySelector('tbody')).toBeNull();
+    expect(document.querySelector('[aria-label="发泡任务预览"]')).toBeNull();
     expect(button('下发选中').disabled).toBe(true);
   });
   it('超过 50 单明确阻止预览，不能静默截取订单', async () => {
@@ -520,7 +520,7 @@ describe('批量发泡', () => {
     });
     await mount({ initialOrderNo: 'GD-1' });
     await click('预览发泡任务');
-    expect(document.querySelectorAll('tbody tr')).toHaveLength(301);
+    expect(document.querySelectorAll('[aria-label="发泡任务预览"] tbody tr')).toHaveLength(301);
     expect(document.body.textContent).toContain(
       '每批最多下发 300 项，当前已选 301 项',
     );
@@ -542,14 +542,14 @@ describe('批量发泡', () => {
     ]);
     await mount();
     expect(
-      document.querySelector('.batch-order-products')!.textContent,
+      document.querySelector('[aria-label="发泡订单"] tbody td:nth-child(5)')!.textContent,
     ).toContain('等 18 个产品');
     expect(
-      document.querySelector('.batch-order-products')!.textContent,
+      document.querySelector('[aria-label="发泡订单"] tbody td:nth-child(5)')!.textContent,
     ).not.toContain('特殊产品-17');
     await input('mix-batch-order-search', '特殊产品-17');
-    expect(document.querySelectorAll('.batch-order')).toHaveLength(1);
-    expect(document.querySelector('.batch-order')!.textContent).toContain(
+    expect(document.querySelectorAll('[aria-label="发泡订单"] tbody tr')).toHaveLength(1);
+    expect(document.querySelector('[aria-label="发泡订单"] tbody tr')!.textContent).toContain(
       'GD-1',
     );
   });

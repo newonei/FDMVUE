@@ -16,7 +16,7 @@ import { buildUUID } from '@vben/utils';
 
 import { Alert, AutoComplete, Button, Input, InputNumber, message, Modal, Progress, Select, Table, Tag } from 'ant-design-vue';
 
-import { reassignScheduleTasks } from '#/api/fdmgongchang/schedule';
+import { reassignScheduleTasks, updateScheduleTaskWorkDate } from '#/api/fdmgongchang/schedule';
 import { batchReportWorkbenchTasks, getWorkbenchBatchOptions, getWorkbenchMates } from '#/api/fdmgongchang/workbench';
 
 import DispatchWageCheck from '../schedule/modules/dispatch-wage-check.vue';
@@ -129,6 +129,34 @@ async function dispatch() {
   } catch (error) { if (version === contextVersion) warning.value = businessError(error).msg; }
   finally { if (version === contextVersion) busy.value = false; }
 }
+
+async function updateWorkDate(id: number, workDate: string, done: (success: boolean) => void) {
+  if (!canDispatch.value || busy.value || !tasks.value.some((task) => task.id === id)) {
+    done(false);
+    return;
+  }
+  const version = contextVersion;
+  busy.value = true;
+  let saved = false;
+  try {
+    await updateScheduleTaskWorkDate({ id, workDate });
+    if (version !== contextVersion) return;
+    for (const task of job.my?.workshopTasks ?? []) {
+      if (task.id === id) {
+        task.workDate = workDate;
+        task.undated = false;
+      }
+    }
+    saved = true;
+    message.success('生产日期已保存');
+  } catch (error) {
+    if (version === contextVersion) message.error(businessError(error).msg);
+  } finally {
+    if (version === contextVersion) busy.value = false;
+    done(saved);
+  }
+}
+
 const selected = (task: ScheduleApi.Task) => selectedIds.value.includes(task.id);
 const batchAvailability = (task: ScheduleApi.Task) => props.process !== 'MIX' && task.followActualBatches ? toNumber(task.actualBatchAvailable) : undefined;
 function remainingReportQuantity(task: ScheduleApi.Task, planned: unknown) {
@@ -427,10 +455,13 @@ const mixOutputLines = (task: ScheduleApi.Task) => reportMixPlanLines(task).filt
     </template>
     <PlanTable
       v-else-if="view === 'plan'"
+      :can-edit-work-date="canDispatch"
       :options="job.options"
       :process="props.process"
+      :saving-work-date="busy"
       :tasks="tasks"
       @open-order="openPlanOrder"
+      @update-work-date="updateWorkDate"
     />
     <template v-else>
       <div class="flex flex-wrap items-center justify-between gap-3 border-y border-border py-2">

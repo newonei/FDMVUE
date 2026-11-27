@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { FdmgongchangMaterialPlanApi as Api } from '#/api/fdmgongchang/production-order';
 
-import { computed, ref, watch } from 'vue';
+import { computed, ref, shallowReactive, watch } from 'vue';
 
 import { Alert, Button, Checkbox, message, Select, Spin, Tag } from 'ant-design-vue';
 
@@ -15,12 +15,24 @@ import { num } from '../shared';
  * 工厂可以给每条明细换配方（决定每张板投多少料、原料比例）和板材规格（默认本厂发泡出板规格，可换模具档案）。
  * 一般不同规格用不同配方，所以给一条明细选了配方或模具，同规格（成品长宽厚一样）的明细默认跟着设成一样的。
  */
-const props = defineProps<{
-  compact?: boolean;
-  disabled?: boolean;
-  editable: boolean;
+interface OrderTarget {
   itemIds?: number[];
   orderId: number;
+}
+
+interface OrderPlanState {
+  failed: boolean;
+  loading: boolean;
+  plan?: Api.Plan;
+}
+
+type MaterialItem = Api.ItemPlan & { orderId: number; orderNo: string };
+
+const props = defineProps<{
+  disabled?: boolean;
+  editable: boolean;
+  orderId?: number;
+  orders?: OrderTarget[];
 }>();
 const emit = defineEmits<{
   saved: [itemIds: number[]];
@@ -29,10 +41,21 @@ const emit = defineEmits<{
 
 const SETTING = 'SETTING';
 
-const plan = ref<Api.Plan>();
-const recipes = ref<Api.RecipeOption[]>([]);
-const loading = ref(false);
-const loadError = ref(false);
+const compact = computed(() => props.orders !== undefined);
+const targets = computed<OrderTarget[]>(() => {
+  const orderId = props.orderId ?? null;
+  return props.orders ?? (orderId === null ? [] : [{ orderId }]);
+});
+const orderPlans = shallowReactive(new Map<number, OrderPlanState>());
+const plan = computed(() => {
+  const orderId = props.orderId ?? null;
+  return orderId === null ? undefined : orderPlans.get(orderId)?.plan;
+});
+const recipes = ref<Api.RecipeOption[]>();
+const recipeLoading = ref(false);
+const recipeError = ref(false);
+const loading = computed(() => recipeLoading.value || [...orderPlans.values()].some((state) => state.loading));
+const loadError = computed(() => recipeError.value || [...orderPlans.values()].some((state) => state.failed));
 const saving = ref<'batch' | 'single'>();
 const batchOpen = ref(false);
 const batchItemIds = ref<number[]>([]);
@@ -41,13 +64,16 @@ const batchBoardKey = ref<string>();
 const batchError = ref('');
 /** 选配方、模具时同规格的明细一起改。 */
 const syncSameSize = ref(true);
-const canEdit = computed(() => props.editable && !props.disabled && !loading.value && !loadError.value && !saving.value);
-const displayedItems = computed(() => {
-  const items = plan.value?.items ?? [];
-  if (!props.itemIds) return items;
-  const ids = new Set(props.itemIds);
-  return items.filter((item) => ids.has(item.itemId));
-});
+const canEdit = computed(() => props.editable && !props.disabled && !loading.value
+  && !recipeError.value && (compact.value || !loadError.value) && !saving.value);
+const displayedItems = computed<MaterialItem[]>(() => targets.value.flatMap(({ orderId, itemIds }) => {
+  const state = orderPlans.get(orderId);
+  if (!state?.plan || (compact.value && state.failed)) return [];
+  const ids = itemIds && new Set(itemIds);
+  const { items, orderNo } = state.plan;
+  return items.filter((item) => !ids || ids.has(item.itemId))
+    .map((item) => ({ ...item, orderId, orderNo }));
+}));
 const batchCandidates = computed(() => displayedItems.value.filter((item) => num(item.quantity) > 0));
 const batchItems = computed(() => batchCandidates.value.filter((item) => batchItemIds.value.includes(item.itemId)));
 const allBatchItemsSelected = computed(() => batchItems.value.length > 0 && batchItems.value.length === batchCandidates.value.length);
@@ -57,10 +83,9 @@ const batchBoardOptions = computed(() => {
   const available = rest.map((item) => new Set(item.candidates.map(boardKey)));
   return first.candidates.map(compactBoardOption).filter((option) => available.every((keys) => keys.has(option.value)));
 });
-let loadSequence = 0;
 
 const recipeOptions = computed(() =>
-  recipes.value.map((r) => ({
+  (recipes.value ?? []).map((r) => ({
     label: `${r.recipeName}（${r.recipeCode}）`,
     value: r.recipeCode,
   })),
@@ -73,23 +98,47 @@ function sameSize(item: Api.ItemPlan) {
 const hasSameSize = computed(() => (plan.value?.items ?? []).some((i) => sameSize(i).length > 0));
 const showTotals = computed(() => (plan.value?.items.length ?? 0) > 1 && (plan.value?.totals.length ?? 0) > 0);
 
-async function load() {
-  const sequence = ++loadSequence;
-  loading.value = true;
-  loadError.value = false;
+async function loadRecipes() {
+  if (recipes.value || recipeLoading.value) return;
+  recipeLoading.value = true;
+  recipeError.value = false;
   try {
-    const [p, r] = await Promise.all([
-      getMaterialPlan(props.orderId),
-      recipes.value.length > 0 ? Promise.resolve(recipes.value) : getRecipeOptions(),
-    ]);
-    if (sequence !== loadSequence) return;
-    plan.value = p;
-    recipes.value = r;
+    recipes.value = await getRecipeOptions();
   } catch {
-    if (sequence === loadSequence) loadError.value = true;
+    recipeError.value = true;
   } finally {
-    if (sequence === loadSequence) loading.value = false;
+    recipeLoading.value = false;
   }
+}
+
+async function loadPlan(orderId: number) {
+  const request = { failed: false, loading: true, plan: orderPlans.get(orderId)?.plan };
+  orderPlans.set(orderId, request);
+  try {
+    const result = await getMaterialPlan(orderId);
+    if (orderPlans.get(orderId) === request) {
+      orderPlans.set(orderId, { failed: false, loading: false, plan: result });
+    }
+  } catch {
+    if (orderPlans.get(orderId) === request) {
+      orderPlans.set(orderId, { ...request, failed: true, loading: false });
+    }
+  }
+}
+
+async function load(orderIds: number[]) {
+  await Promise.all([loadRecipes(), ...orderIds.map((orderId) => loadPlan(orderId))]);
+}
+
+function reload(orderId?: number) {
+  const orderIds = targets.value.map((order) => order.orderId);
+  return load(orderId === null || orderId === undefined
+    ? orderIds
+    : orderIds.filter((id) => id === orderId));
+}
+
+function retryLoad() {
+  void load([...orderPlans].filter(([, state]) => state.failed).map(([id]) => id));
 }
 
 function closeBatch() {
@@ -100,10 +149,19 @@ function closeBatch() {
   batchError.value = '';
 }
 
-watch(() => props.orderId, () => {
-  closeBatch();
-  plan.value = undefined;
-  void load();
+watch(targets, (orders) => {
+  const ids = new Set(orders.map((order) => order.orderId));
+  for (const id of orderPlans.keys()) {
+    if (!ids.has(id)) orderPlans.delete(id);
+  }
+  if (compact.value) {
+    const itemIds = new Set(orders.flatMap((order) => order.itemIds ?? []));
+    batchItemIds.value = batchItemIds.value.filter((id) => itemIds.has(id));
+  } else {
+    closeBatch();
+  }
+  const addedIds = [...ids].filter((id) => !orderPlans.has(id));
+  if (addedIds.length > 0) void load(addedIds);
 }, { immediate: true });
 
 watch(batchBoardOptions, (options) => {
@@ -115,24 +173,24 @@ function setSaving(value?: 'batch' | 'single') {
   emit('saving', !!value);
 }
 
-async function save(item: Api.ItemPlan, recipeCode: null | string | undefined, mouldProfileId: null | number | undefined) {
+async function save(item: MaterialItem, recipeCode: null | string | undefined, mouldProfileId: null | number | undefined) {
   if (!canEdit.value) return;
-  const orderId = props.orderId;
+  const { orderId } = item;
   const saved: number[] = [];
   setSaving('single');
-  const others = !props.compact && syncSameSize.value ? sameSize(item) : [];
+  const others = !compact.value && syncSameSize.value ? sameSize(item) : [];
   try {
     // 同规格的明细设成和这条一样的配方、模具
     for (const target of [item, ...others]) {
-      if (props.orderId !== orderId) return;
+      if (!orderPlans.has(orderId)) return;
       await saveItemMaterial({ itemId: target.itemId, mouldProfileId: mouldProfileId ?? null, recipeCode: recipeCode ?? null });
       saved.push(target.itemId);
     }
-    if (props.orderId === orderId && others.length > 0) message.success(`同规格的 ${others.length} 个产品也设成了一样的配方和板材规格`);
+    if (orderPlans.has(orderId) && others.length > 0) message.success(`同规格的 ${others.length} 个产品也设成了一样的配方和板材规格`);
   } catch {
     // 后端错误已由全局提示展示
   } finally {
-    if (props.orderId === orderId) await load();
+    if (orderPlans.has(orderId)) await reload(orderId);
     if (saved.length > 0) emit('saved', saved);
     setSaving();
   }
@@ -154,14 +212,15 @@ async function applyBatch() {
   const items = batchItems.value;
   if (!canEdit.value || (!recipeCode && !board) || items.length === 0) return;
 
-  const orderId = props.orderId;
   const failed: number[] = [];
   const saved: number[] = [];
+  const affectedOrders = new Set<number>();
   setSaving('batch');
   batchError.value = '';
   try {
     for (const item of items) {
-      if (props.orderId !== orderId) return;
+      if (!orderPlans.has(item.orderId)) continue;
+      affectedOrders.add(item.orderId);
       try {
         await saveItemMaterial({
           itemId: item.itemId,
@@ -173,16 +232,17 @@ async function applyBatch() {
         failed.push(item.itemId);
       }
     }
-    if (props.orderId !== orderId) return;
+    const orderIds = [...affectedOrders].filter((id) => orderPlans.has(id));
+    if (orderIds.length === 0) return;
     batchItemIds.value = failed;
     if (failed.length > 0) {
       batchError.value = `已保存 ${saved.length} 个产品，${failed.length} 个保存失败，已保留勾选，可重试。`;
     } else {
-      message.success(`已为 ${saved.length} 个产品${props.compact ? '更新设置' : '应用配方'}`);
+      message.success(`已为 ${saved.length} 个产品${compact.value ? '更新设置' : '应用配方'}`);
       batchRecipeCode.value = undefined;
       batchBoardKey.value = undefined;
     }
-    await load();
+    await load(orderIds);
   } finally {
     if (saved.length > 0) emit('saved', saved);
     setSaving();
@@ -221,7 +281,7 @@ function boardOptions(item: Api.ItemPlan) {
 }
 
 function configuredRecipe(item: Api.ItemPlan) {
-  return props.compact && item.recipeSuggested ? null : item.recipeCode ?? null;
+  return compact.value && item.recipeSuggested ? null : item.recipeCode ?? null;
 }
 
 function recipePlaceholder(item: Api.ItemPlan) {
@@ -229,11 +289,11 @@ function recipePlaceholder(item: Api.ItemPlan) {
   return item.recipeName ? `${item.recipeName}（${item.recipeCode}）` : item.recipeCode;
 }
 
-function onRecipe(item: Api.ItemPlan, value: unknown) {
+function onRecipe(item: MaterialItem, value: unknown) {
   return save(item, (value as string | undefined) ?? null, item.mouldProfileId);
 }
 
-function onBoard(item: Api.ItemPlan, value: unknown) {
+function onBoard(item: MaterialItem, value: unknown) {
   return save(item, configuredRecipe(item), mouldId(String(value)));
 }
 
@@ -241,7 +301,7 @@ function fmt(v: null | number | string | undefined) {
   return num(v).toLocaleString('zh-CN', { maximumFractionDigits: 3 });
 }
 
-defineExpose({ reload: load, saving });
+defineExpose({ reload, saving });
 </script>
 
 <template>
@@ -269,12 +329,12 @@ defineExpose({ reload: load, saving });
     </div>
     <Spin :spinning="loading">
       <Alert v-if="loadError" class="mb-3" :message="compact ? '配方和模具加载失败' : '用料逆推加载失败'" show-icon type="error">
-        <template #action><Button size="small" @click="load">重新加载</Button></template>
+        <template #action><Button size="small" :disabled="loading || !!saving" @click="retryLoad">重新加载</Button></template>
       </Alert>
-      <div v-if="plan && (!compact || !loadError)" class="flex flex-col gap-3">
+      <div v-if="compact ? displayedItems.length > 0 : plan" class="flex flex-col gap-3">
         <section v-if="editable && batchOpen" :aria-label="compact ? '批量设置配方和模具' : '批量选配方'" class="space-y-3 rounded-md border border-primary/25 bg-muted/40 p-3">
           <div class="flex flex-wrap items-center justify-between gap-2">
-            <span class="text-sm font-medium">{{ compact ? '本订单已选' : '批量选配方 · 已选' }} {{ batchItems.length }} / {{ batchCandidates.length }} 个产品</span>
+            <span class="text-sm font-medium">{{ compact ? '已选' : '批量选配方 · 已选' }} {{ batchItems.length }} / {{ batchCandidates.length }} 个产品</span>
             <Button :disabled="!!saving" size="small" type="text" @click="closeBatch">退出批量选择</Button>
           </div>
           <div class="max-h-56 overflow-auto rounded-md border border-border bg-background">
@@ -291,6 +351,7 @@ defineExpose({ reload: load, saving });
                       全选
                     </Checkbox>
                   </th>
+                  <th v-if="compact" class="px-3 py-2 font-normal" scope="col">订单号</th>
                   <th class="px-3 py-2 font-normal" scope="col">产品 / 成品规格</th>
                   <th class="px-3 py-2 font-normal" scope="col">当前配方</th>
                   <th v-if="compact" class="px-3 py-2 font-normal" scope="col">当前发泡模具 / 板材规格</th>
@@ -300,12 +361,13 @@ defineExpose({ reload: load, saving });
                 <tr v-for="item in batchCandidates" :key="item.itemId" class="border-t border-border">
                   <td class="px-3 py-2">
                     <Checkbox
-                      :aria-label="`勾选 ${item.productName}${!compact && item.targetSize ? ` ${item.targetSize}cm` : ''}`"
+                      :aria-label="`勾选 ${compact && targets.length > 1 ? `${item.orderNo} ` : ''}${item.productName}${!compact && item.targetSize ? ` ${item.targetSize}cm` : ''}`"
                       :checked="batchItemIds.includes(item.itemId)"
                       :disabled="!canEdit"
                       @change="(event) => selectBatchItem(item.itemId, event.target.checked)"
                     />
                   </td>
+                  <td v-if="compact" class="whitespace-nowrap px-3 py-2 font-mono">{{ item.orderNo }}</td>
                   <td class="px-3 py-2">
                     <div>{{ item.productName }}</div>
                     <div class="mt-0.5 text-muted-foreground">
@@ -364,16 +426,24 @@ defineExpose({ reload: load, saving });
         </section>
         <template v-if="compact">
           <div v-if="displayedItems.length > 0 && !batchOpen" class="max-h-64 overflow-auto rounded-md border border-border">
-            <table class="w-full min-w-[620px] table-fixed text-left text-xs">
+            <table class="w-full min-w-[840px] table-fixed text-left text-xs">
+              <colgroup>
+                <col class="w-36" />
+                <col class="w-1/4" />
+                <col class="w-1/4" />
+                <col />
+              </colgroup>
               <thead class="sticky top-0 z-10 bg-muted text-muted-foreground">
                 <tr>
-                  <th class="w-1/3 px-3 py-2 font-normal" scope="col">产品 / 成品规格</th>
-                  <th class="w-1/3 px-3 py-2 font-normal" scope="col">配方</th>
-                  <th class="w-1/3 px-3 py-2 font-normal" scope="col">发泡模具 / 板材规格</th>
+                  <th class="px-3 py-2 font-normal" scope="col">订单号</th>
+                  <th class="px-3 py-2 font-normal" scope="col">产品 / 成品规格</th>
+                  <th class="px-3 py-2 font-normal" scope="col">配方</th>
+                  <th class="px-3 py-2 font-normal" scope="col">发泡模具 / 板材规格</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="item in displayedItems" :key="item.itemId" class="border-t border-border align-top">
+                  <td class="whitespace-nowrap px-3 py-2 font-mono">{{ item.orderNo }}</td>
                   <td class="px-3 py-2">
                     <div class="font-medium">{{ item.productName }}</div>
                     <div class="mt-1 text-muted-foreground">
@@ -384,7 +454,7 @@ defineExpose({ reload: load, saving });
                   <td class="px-3 py-2">
                     <Select
                       :id="`split-mp-recipe-${item.itemId}`"
-                      :aria-label="`${item.productName}的配方`"
+                      :aria-label="`${item.orderNo} ${item.productName}的配方`"
                       :disabled="!canEdit"
                       :options="recipeOptions"
                       :value="configuredRecipe(item) ?? undefined"
@@ -401,7 +471,7 @@ defineExpose({ reload: load, saving });
                   <td class="px-3 py-2">
                     <Select
                       :id="`split-mp-board-${item.itemId}`"
-                      :aria-label="`${item.productName}的发泡模具 / 板材规格`"
+                      :aria-label="`${item.orderNo} ${item.productName}的发泡模具 / 板材规格`"
                       :disabled="!canEdit || item.candidates.length === 0"
                       :options="item.candidates.map(compactBoardOption)"
                       :value="compactBoardValue(item)"
@@ -511,7 +581,7 @@ defineExpose({ reload: load, saving });
           <p v-for="w in item.warnings" :key="w" class="m-0 text-xs text-warning">{{ w }}</p>
         </div>
 
-        <div v-if="showTotals" class="flex flex-col gap-1 rounded-md bg-muted/40 p-3 text-xs">
+        <div v-if="plan && showTotals" class="flex flex-col gap-1 rounded-md bg-muted/40 p-3 text-xs">
           <span class="font-semibold text-foreground">整张单原料合计</span>
           <span v-for="t in plan.totals" :key="t.rawMaterialCode" class="flex justify-between gap-2">
             <span>{{ t.rawMaterialName || t.rawMaterialCode }}</span>

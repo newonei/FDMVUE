@@ -56,7 +56,7 @@ function buttons(text: string) {
   return [...document.querySelectorAll('button')].filter((b) => b.textContent?.replaceAll(/\s/g, '') === text);
 }
 
-function orderCards() {
+function orderGroups() {
   return [...document.querySelectorAll<HTMLElement>('[data-order-key]')];
 }
 
@@ -111,18 +111,26 @@ describe('schedule task management', () => {
     const { opened } = await mount();
 
     expect(mocks.list).toHaveBeenCalledWith(expect.objectContaining({ from: expect.any(String), to: expect.any(String) }));
-    expect(orderCards()).toHaveLength(1);
+    expect(orderGroups()).toHaveLength(1);
+    const summary = orderGroups()[0]!.querySelector<HTMLTableRowElement>('[data-order-summary]')!;
+    expect(summary.cells[1]?.textContent).toBe('HT-001');
+    expect(summary.cells[5]?.textContent).toBe('4');
+    const details = buttons('展开明细')[0]!;
+    expect(details.getAttribute('aria-expanded')).toBe('false');
+    details.click();
+    await flush();
+    expect(details.getAttribute('aria-expanded')).toBe('true');
     const text = document.body.textContent ?? '';
     expect(text).toContain('待领取');
     expect(text).toContain('已报工');
     expect(text).toContain('任务大厅等人抢');
     expect(text).toContain('差 10 待处理');
-    const rowBoxes = document.querySelectorAll('tbody input[type="checkbox"]');
+    const rowBoxes = document.querySelectorAll('table[aria-label="订单任务明细"] tbody input[type="checkbox"]');
     expect(rowBoxes).toHaveLength(3);
 
     for (const box of rowBoxes) (box as HTMLInputElement).click();
     await flush();
-    const groupBox = orderCards()[0]!.querySelector<HTMLInputElement>('header input[type="checkbox"]')!;
+    const groupBox = orderGroups()[0]!.querySelector<HTMLInputElement>('[data-order-summary] input[type="checkbox"]')!;
     expect(groupBox.checked).toBe(true);
     groupBox.click();
     await flush();
@@ -154,10 +162,10 @@ describe('schedule task management', () => {
     expect(focusedParams).not.toHaveProperty('from');
     expect(focusedParams).not.toHaveProperty('to');
     expect(document.body.textContent).toContain('HT-001 · 全部日期');
-    expect(orderCards()).toHaveLength(1);
-    expect(orderCards()[0]?.querySelector('details')?.open).toBe(true);
-    expect(orderCards()[0]?.querySelectorAll('details tbody tr')).toHaveLength(2);
-    expect(orderCards()[0]?.textContent).toContain('PB20261021-002');
+    expect(orderGroups()).toHaveLength(1);
+    expect(orderGroups()[0]?.querySelector('[data-order-summary] button')?.getAttribute('aria-expanded')).toBe('true');
+    expect(orderGroups()[0]?.querySelectorAll('table[aria-label="订单任务明细"] tbody tr')).toHaveLength(2);
+    expect(orderGroups()[0]?.textContent).toContain('PB20261021-002');
 
     buttons('清除订单筛选')[0]!.click();
     await flush();
@@ -173,7 +181,7 @@ describe('schedule task management', () => {
     mocks.list.mockResolvedValue([task({ id: 1, output }), task({ id: 2, output })]);
     mocks.wageWarning.mockResolvedValue('命中多个同等优先的计价项目');
     await mount();
-    orderCards()[0]!.querySelector<HTMLInputElement>('header input[type="checkbox"]')!.click();
+    orderGroups()[0]!.querySelector<HTMLInputElement>('[data-order-summary] input[type="checkbox"]')!.click();
     await flush();
     buttons('改派')[0]!.click();
     await flush();
@@ -196,10 +204,10 @@ describe('schedule task management', () => {
     ]);
     const { opened } = await mount();
 
-    expect(orderCards()).toHaveLength(2);
-    const merged = orderCards().find((card) => card.textContent?.includes('HT-001'))!;
+    expect(orderGroups()).toHaveLength(2);
+    const merged = orderGroups().find((card) => card.textContent?.includes('HT-001'))!;
     expect(merged.textContent).toContain('订单已完成');
-    expect(merged.querySelectorAll('details tbody tr')).toHaveLength(2);
+    expect(merged.querySelectorAll('table[aria-label="订单任务明细"] tbody tr')).toHaveLength(2);
     const summaries = merged.querySelectorAll('[data-process-key]');
     expect(summaries).toHaveLength(1);
     expect(summaries[0]!.textContent).toMatch(/125\s*\/\s*100\s*片/);
@@ -230,7 +238,7 @@ describe('schedule task management', () => {
     ]);
     await mount();
 
-    const card = orderCards()[0]!;
+    const card = orderGroups()[0]!;
     expect(card.textContent).toContain(statusText);
     expect(card.textContent).not.toContain(completed ? '订单进行中' : '订单已完成');
     const summaries = [...card.querySelectorAll('[data-process-key]')];
@@ -256,14 +264,14 @@ describe('schedule task management', () => {
     ]);
     await mount();
 
-    const card = orderCards()[0]!;
-    expect(card.querySelectorAll('details tbody tr')).toHaveLength(1);
+    const card = orderGroups()[0]!;
+    expect(card.querySelectorAll('table[aria-label="订单任务明细"] tbody tr')).toHaveLength(1);
     expect(card.textContent).toContain('订单进行中');
     expect(card.textContent).not.toContain('订单已完成');
     expect(card.querySelectorAll('[data-process-key]')).toHaveLength(2);
     expect(card.textContent).toContain('包装');
     expect(card.textContent).toMatch(/15\s*\/\s*40\s*条/);
-    expect(card.querySelectorAll('tbody input[type="checkbox"]')).toHaveLength(0);
+    expect(card.querySelectorAll('table[aria-label="订单任务明细"] tbody input[type="checkbox"]')).toHaveLength(0);
   });
 
   it('keeps unlinked stock tasks separate instead of merging all of them as one order', async () => {
@@ -274,9 +282,9 @@ describe('schedule task management', () => {
     ]);
     await mount();
 
-    expect(orderCards()).toHaveLength(3);
-    expect(new Set(orderCards().map((card) => card.dataset.orderKey)).size).toBe(3);
-    for (const card of orderCards()) expect(card.querySelectorAll('details tbody tr')).toHaveLength(1);
+    expect(orderGroups()).toHaveLength(3);
+    expect(new Set(orderGroups().map((card) => card.dataset.orderKey)).size).toBe(3);
+    for (const card of orderGroups()) expect(card.querySelectorAll('table[aria-label="订单任务明细"] tbody tr')).toHaveLength(1);
   });
 
   it('does not infer whole-order completion from a completed task when the full order summary is unavailable', async () => {
@@ -285,8 +293,8 @@ describe('schedule task management', () => {
     ]);
     await mount();
 
-    expect(orderCards()).toHaveLength(1);
-    expect(orderCards()[0]!.textContent).not.toContain('订单已完成');
-    expect(orderCards()[0]!.querySelectorAll('details tbody tr')).toHaveLength(1);
+    expect(orderGroups()).toHaveLength(1);
+    expect(orderGroups()[0]!.textContent).not.toContain('订单已完成');
+    expect(orderGroups()[0]!.querySelectorAll('table[aria-label="订单任务明细"] tbody tr')).toHaveLength(1);
   });
 });

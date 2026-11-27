@@ -41,6 +41,7 @@ const tasks = ref<Api.Task[]>([]);
 const workers = ref<FdmgongchangFactoryApi.Worker[]>([]);
 const loading = ref(false);
 const selected = ref<number[]>([]);
+const expandedGroups = ref<Record<string, boolean>>({});
 let loadVersion = 0;
 
 const processOptions = Object.entries(PROCESS_LABELS).map(([value, label]) => ({ label, value }));
@@ -56,11 +57,16 @@ const groups = computed(() => {
     group.tasks.push(task);
     grouped.set(key, group);
   }
-  return [...grouped.values()].map((group) => ({
-    ...group,
-    products: [...new Set(group.tasks.map((task) => task.product?.trim()).filter(Boolean))].join('、'),
-    progress: group.tasks.find((task) => task.orderProgress)?.orderProgress,
-  }));
+  return [...grouped.values()].map((group) => {
+    const progress = group.tasks.find((task) => task.orderProgress)?.orderProgress;
+    const processes = progress?.processes ?? [];
+    return {
+      ...group,
+      completedProcesses: processes.length > 0 ? `${processes.filter((item) => item.completed).length} / ${processes.length}` : '—',
+      products: [...new Set(group.tasks.map((task) => task.product?.trim()).filter(Boolean))].join('、'),
+      progress,
+    };
+  });
 });
 const selectedTasks = computed(() => tasks.value.filter((t) => selected.value.includes(t.id)));
 const nameOf = (id: number) => workers.value.find((w) => w.userId === id)?.nickname ?? String(id);
@@ -105,11 +111,16 @@ watch(
   [() => props.factoryId, orderNo],
   ([factoryId], [previousFactoryId]) => {
     selected.value = [];
+    expandedGroups.value = {};
     tasks.value = [];
     void load();
     if (factoryId !== previousFactoryId) void loadWorkers();
   },
 );
+
+function groupExpanded(group: { key: string; progress?: Api.Task['orderProgress'] }) {
+  return expandedGroups.value[group.key] ?? (!!orderNo.value || !group.progress);
+}
 
 function percent(task: Pick<Api.Task, 'actualQuantity' | 'quantity' | 'supplementGoodQuantity'>) {
   const plan = Number(task.quantity);
@@ -247,122 +258,151 @@ function returnToHall() {
       <p v-if="groups.length" class="mb-3 text-xs text-muted-foreground">
         同订单合并展示，进度累计该订单全部已下发有效任务的良品数量；各已下发工序分别达标后，订单显示已完成。下方任务明细保留当前筛选范围。
       </p>
-      <section v-for="group in groups" :key="group.key" :data-order-key="group.key" class="mb-4 overflow-hidden rounded-lg border border-border bg-card">
-        <header class="flex flex-wrap items-center gap-x-3 gap-y-1.5 bg-muted/30 px-3 py-3">
-          <Checkbox
-            v-if="canEdit && group.tasks.some(manageable)"
-            :aria-label="`选中 ${group.contractCode || '备货'} 当前筛选内全部可改的任务`"
-            :checked="group.tasks.filter(manageable).every((t) => selected.includes(t.id))"
-            :indeterminate="group.tasks.some((t) => selected.includes(t.id)) && !group.tasks.filter(manageable).every((t) => selected.includes(t.id))"
-            @change="(e) => toggleGroup(group.tasks, e.target.checked)"
-          />
-          <h4 class="m-0 font-mono text-sm font-semibold">{{ group.contractCode || '备货 / 未关联订单' }}</h4>
-          <Tag v-if="group.contractCode && group.progress" :color="group.progress.completed ? 'success' : 'processing'" class="m-0">
-            {{ group.progress.completed ? '订单已完成' : '订单进行中' }}
-          </Tag>
-          <Tag v-else-if="group.contractCode" class="m-0">订单进度待加载</Tag>
-          <span class="ml-auto text-xs text-muted-foreground">
-            <template v-if="group.progress">共 {{ group.progress.taskCount }} 个有效任务 · </template>
-            当前筛选 {{ group.tasks.length }} 个任务
-          </span>
-          <div v-if="group.products" class="w-full text-xs text-muted-foreground">关联产品：{{ group.products }}</div>
-        </header>
+      <div v-if="groups.length" class="overflow-x-auto rounded-lg border border-border bg-card" role="region" aria-label="订单任务表格" tabindex="0">
+        <table aria-label="订单任务汇总" class="order-task-table w-full min-w-[960px] table-fixed border-collapse text-left text-sm">
+          <thead class="bg-muted/60">
+            <tr>
+              <th v-if="canEdit" scope="col" class="w-16">选择</th>
+              <th scope="col" class="w-44">订单号</th>
+              <th scope="col">关联产品</th>
+              <th scope="col" class="w-32">订单状态</th>
+              <th scope="col" class="w-28 text-right">达标工序</th>
+              <th scope="col" class="w-24 text-right">有效任务</th>
+              <th scope="col" class="w-24 text-right">筛选任务</th>
+              <th scope="col" class="w-28">操作</th>
+            </tr>
+          </thead>
+          <tbody v-for="group in groups" :key="group.key" :data-order-key="group.key">
+            <tr data-order-summary>
+              <td v-if="canEdit">
+                <Checkbox
+                  v-if="group.tasks.some(manageable)"
+                  :aria-label="`选中 ${group.contractCode || '备货'} 当前筛选内全部可改的任务`"
+                  :checked="group.tasks.filter(manageable).every((t) => selected.includes(t.id))"
+                  :indeterminate="group.tasks.some((t) => selected.includes(t.id)) && !group.tasks.filter(manageable).every((t) => selected.includes(t.id))"
+                  @change="(e) => toggleGroup(group.tasks, e.target.checked)"
+                />
+              </td>
+              <th scope="row" class="break-words font-mono font-medium">{{ group.contractCode || '备货 / 未关联订单' }}</th>
+              <td class="break-words">{{ group.products || '—' }}</td>
+              <td>
+                <Tag v-if="group.contractCode && group.progress" :color="group.progress.completed ? 'success' : 'processing'" class="m-0">
+                  {{ group.progress.completed ? '订单已完成' : '订单进行中' }}
+                </Tag>
+                <Tag v-else-if="group.contractCode" class="m-0">订单进度待加载</Tag>
+                <template v-else>—</template>
+              </td>
+              <td class="text-right tabular-nums">{{ group.completedProcesses }}</td>
+              <td class="text-right tabular-nums">{{ group.progress?.taskCount ?? '—' }}</td>
+              <td class="text-right tabular-nums">{{ group.tasks.length }}</td>
+              <td>
+                <Button size="small" type="link" class="!px-0" :aria-expanded="groupExpanded(group)" @click="expandedGroups[group.key] = !groupExpanded(group)">
+                  {{ groupExpanded(group) ? '收起明细' : '展开明细' }}
+                </Button>
+              </td>
+            </tr>
+            <tr v-show="groupExpanded(group)">
+              <td :colspan="canEdit ? 8 : 7" class="bg-muted/10">
+                <div v-if="group.progress" class="px-3 pb-2 pt-1">
+                  <h4 class="mb-1 mt-0 text-sm font-semibold">各工序进度</h4>
+                  <table aria-label="订单工序进度" class="w-full text-sm">
+                    <thead class="text-xs text-muted-foreground">
+                      <tr>
+                        <th scope="col" class="w-28 py-2 text-left font-medium">工序</th>
+                        <th scope="col" class="py-2 pr-4 text-left font-medium">已报工 / 任务数量</th>
+                        <th scope="col" class="w-32 py-2 text-left font-medium">工序状态</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="item in group.progress.processes" :key="`${item.process}:${item.unit ?? ''}`" :data-process-key="`${item.process}:${item.unit ?? ''}`" class="border-t border-border">
+                        <td class="py-2 font-medium">{{ PROCESS_LABELS[item.process] ?? item.process }}</td>
+                        <td class="py-2 pr-4">
+                          <div class="flex items-center gap-3">
+                            <Progress :percent="percent(item)" :status="item.completed ? 'success' : 'normal'" :show-info="false" class="m-0 max-w-72 flex-1" size="small" />
+                            <span class="whitespace-nowrap text-xs tabular-nums">{{ formatQty(item.actualQuantity) }} / {{ formatQty(item.quantity) }} {{ item.unit }}</span>
+                          </div>
+                          <div v-if="!item.completed && Number(item.quantity) > 0 && Number(item.actualQuantity) >= Number(item.quantity)" class="text-xs text-muted-foreground">部分产品任务尚未达标</div>
+                        </td>
+                        <td class="py-2">
+                          <Tag :color="item.completed ? 'success' : Number(item.actualQuantity) > 0 ? 'processing' : 'default'" class="m-0">
+                            {{ item.completed ? '已完成' : Number(item.actualQuantity) > 0 ? '进行中' : '未开始' }}
+                          </Tag>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <p v-if="group.progress.note" class="mb-1 mt-2 text-xs text-warning">{{ group.progress.note }}</p>
+                </div>
 
-        <div v-if="group.progress" class="px-3 pb-2 pt-1">
-          <table class="w-full text-sm">
-            <thead class="text-xs text-muted-foreground">
-              <tr>
-                <th class="w-28 py-2 text-left font-medium">工序</th>
-                <th class="py-2 pr-4 text-left font-medium">已报工 / 任务数量</th>
-                <th class="w-32 py-2 text-left font-medium">工序状态</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="item in group.progress.processes" :key="`${item.process}:${item.unit ?? ''}`" :data-process-key="`${item.process}:${item.unit ?? ''}`" class="border-t border-border">
-                <td class="py-2 font-medium">{{ PROCESS_LABELS[item.process] ?? item.process }}</td>
-                <td class="py-2 pr-4">
-                  <div class="flex items-center gap-3">
-                    <Progress :percent="percent(item)" :status="item.completed ? 'success' : 'normal'" :show-info="false" class="m-0 max-w-72 flex-1" size="small" />
-                    <span class="whitespace-nowrap text-xs tabular-nums">{{ formatQty(item.actualQuantity) }} / {{ formatQty(item.quantity) }} {{ item.unit }}</span>
+                <div class="border-t border-border">
+                  <h4 class="m-0 px-3 py-2 text-sm font-semibold">任务明细（{{ group.tasks.length }}）</h4>
+                  <div class="overflow-x-auto">
+                    <table aria-label="订单任务明细" class="w-full min-w-[1000px] text-sm">
+                      <thead class="bg-muted/40 text-xs text-muted-foreground">
+                        <tr>
+                          <th v-if="canEdit" class="w-8 px-2 py-1.5"></th>
+                          <th class="px-2 py-1.5 text-left font-medium">日期</th>
+                          <th class="px-2 py-1.5 text-left font-medium">工序</th>
+                          <th class="px-2 py-1.5 text-left font-medium">产品 / 领料产出</th>
+                          <th class="w-56 px-2 py-1.5 text-left font-medium">进度（良品 / 任务）</th>
+                          <th class="px-2 py-1.5 text-left font-medium">任务状态</th>
+                          <th class="px-2 py-1.5 text-left font-medium">人员</th>
+                          <th class="px-2 py-1.5 text-left font-medium">来自排单</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="task in group.tasks" :key="task.id" class="border-t border-border align-top">
+                          <td v-if="canEdit" class="px-2 py-1.5">
+                            <Checkbox
+                              v-if="manageable(task)"
+                              :aria-label="`选中 ${PROCESS_LABELS[task.process] ?? task.process} 任务`"
+                              :checked="selected.includes(task.id)"
+                              @change="(e) => toggle(task.id, e.target.checked)"
+                            />
+                          </td>
+                          <td class="whitespace-nowrap px-2 py-1.5 text-xs text-muted-foreground">{{ dateText(task.workDate) ? dayLabel(dateText(task.workDate)) : '未定日期' }}</td>
+                          <td class="whitespace-nowrap px-2 py-1.5">{{ task.sequence }}. {{ PROCESS_LABELS[task.process] ?? task.process }}</td>
+                          <td class="px-2 py-1.5">
+                            <div class="text-xs text-muted-foreground">关联产品：{{ task.product || '备货' }}</div>
+                            <div v-if="task.parentTaskId" class="text-xs text-muted-foreground">补派子任务 · 原任务 #{{ task.parentTaskId }}</div>
+                            <TaskMaterials v-if="task.output || task.inputs?.length" :task="task" class="mt-0.5" />
+                            <div v-else class="text-xs">产出：{{ taskMaterialText(task.output, task.spec) }}</div>
+                          </td>
+                          <td class="px-2 py-1.5">
+                            <div class="flex items-center gap-2">
+                              <Progress :percent="percent(task)" :show-info="false" class="m-0 flex-1" size="small" />
+                              <span class="whitespace-nowrap text-xs tabular-nums">
+                                {{ formatQty(task.actualQuantity ?? 0) }}
+                                <template v-if="Number(task.supplementGoodQuantity) > 0">＋ 补派良品 {{ formatQty(task.supplementGoodQuantity) }}</template>
+                                / {{ formatQty(task.quantity) }} {{ task.unit }}
+                              </span>
+                            </div>
+                            <div v-if="task.shortage" class="text-xs text-warning">差 {{ Number(task.shortage) }} 待处理</div>
+                          </td>
+                          <td class="px-2 py-1.5">
+                            <Tag v-if="task.completedBySupplement" color="success" class="m-0">已完成</Tag>
+                            <Tag v-else-if="task.status" :color="TASK_STATUS[task.status].color" class="m-0">{{ TASK_STATUS[task.status].label }}</Tag>
+                            <div v-if="task.closedReason" class="text-xs text-muted-foreground">{{ task.closedReason }}</div>
+                          </td>
+                          <td class="px-2 py-1.5 text-xs">
+                            <span v-if="task.workerNames">{{ task.workerNames }}</span>
+                            <span v-else class="text-muted-foreground">任务大厅等人抢</span>
+                          </td>
+                          <td class="px-2 py-1.5">
+                            <button class="font-mono text-xs text-primary hover:underline" type="button" @click="emit('openSchedule', task.scheduleId)">
+                              {{ task.scheduleNo }}
+                            </button>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
                   </div>
-                  <div v-if="!item.completed && Number(item.quantity) > 0 && Number(item.actualQuantity) >= Number(item.quantity)" class="text-xs text-muted-foreground">部分产品任务尚未达标</div>
-                </td>
-                <td class="py-2">
-                  <Tag :color="item.completed ? 'success' : Number(item.actualQuantity) > 0 ? 'processing' : 'default'" class="m-0">
-                    {{ item.completed ? '已完成' : Number(item.actualQuantity) > 0 ? '进行中' : '未开始' }}
-                  </Tag>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-          <p v-if="group.progress.note" class="mb-1 mt-2 text-xs text-warning">{{ group.progress.note }}</p>
-        </div>
-
-        <details class="border-t border-border" :open="!!orderNo || !group.progress">
-          <summary class="cursor-pointer px-3 py-2 text-xs font-medium text-muted-foreground">任务明细（{{ group.tasks.length }}） · 查看领料、人员和来源排单</summary>
-          <div class="overflow-x-auto">
-            <table class="w-full min-w-[1000px] text-sm">
-              <thead class="bg-muted/40 text-xs text-muted-foreground">
-                <tr>
-                  <th v-if="canEdit" class="w-8 px-2 py-1.5"></th>
-                  <th class="px-2 py-1.5 text-left font-medium">日期</th>
-                  <th class="px-2 py-1.5 text-left font-medium">工序</th>
-                  <th class="px-2 py-1.5 text-left font-medium">产品 / 领料产出</th>
-                  <th class="w-56 px-2 py-1.5 text-left font-medium">进度（良品 / 任务）</th>
-                  <th class="px-2 py-1.5 text-left font-medium">任务状态</th>
-                  <th class="px-2 py-1.5 text-left font-medium">人员</th>
-                  <th class="px-2 py-1.5 text-left font-medium">来自排单</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="task in group.tasks" :key="task.id" class="border-t border-border align-top">
-                  <td v-if="canEdit" class="px-2 py-1.5">
-                    <Checkbox
-                      v-if="manageable(task)"
-                      :aria-label="`选中 ${PROCESS_LABELS[task.process] ?? task.process} 任务`"
-                      :checked="selected.includes(task.id)"
-                      @change="(e) => toggle(task.id, e.target.checked)"
-                    />
-                  </td>
-                  <td class="whitespace-nowrap px-2 py-1.5 text-xs text-muted-foreground">{{ dateText(task.workDate) ? dayLabel(dateText(task.workDate)) : '未定日期' }}</td>
-                  <td class="whitespace-nowrap px-2 py-1.5">{{ task.sequence }}. {{ PROCESS_LABELS[task.process] ?? task.process }}</td>
-                  <td class="px-2 py-1.5">
-                    <div class="text-xs text-muted-foreground">关联产品：{{ task.product || '备货' }}</div>
-                    <div v-if="task.parentTaskId" class="text-xs text-muted-foreground">补派子任务 · 原任务 #{{ task.parentTaskId }}</div>
-                    <TaskMaterials v-if="task.output || task.inputs?.length" :task="task" class="mt-0.5" />
-                    <div v-else class="text-xs">产出：{{ taskMaterialText(task.output, task.spec) }}</div>
-                  </td>
-                  <td class="px-2 py-1.5">
-                    <div class="flex items-center gap-2">
-                      <Progress :percent="percent(task)" :show-info="false" class="m-0 flex-1" size="small" />
-                      <span class="whitespace-nowrap text-xs tabular-nums">
-                        {{ formatQty(task.actualQuantity ?? 0) }}
-                        <template v-if="Number(task.supplementGoodQuantity) > 0">＋ 补派良品 {{ formatQty(task.supplementGoodQuantity) }}</template>
-                        / {{ formatQty(task.quantity) }} {{ task.unit }}
-                      </span>
-                    </div>
-                    <div v-if="task.shortage" class="text-xs text-warning">差 {{ Number(task.shortage) }} 待处理</div>
-                  </td>
-                  <td class="px-2 py-1.5">
-                    <Tag v-if="task.completedBySupplement" color="success" class="m-0">已完成</Tag>
-                    <Tag v-else-if="task.status" :color="TASK_STATUS[task.status].color" class="m-0">{{ TASK_STATUS[task.status].label }}</Tag>
-                    <div v-if="task.closedReason" class="text-xs text-muted-foreground">{{ task.closedReason }}</div>
-                  </td>
-                  <td class="px-2 py-1.5 text-xs">
-                    <span v-if="task.workerNames">{{ task.workerNames }}</span>
-                    <span v-else class="text-muted-foreground">任务大厅等人抢</span>
-                  </td>
-                  <td class="px-2 py-1.5">
-                    <button class="font-mono text-xs text-primary hover:underline" type="button" @click="emit('openSchedule', task.scheduleId)">
-                      {{ task.scheduleNo }}
-                    </button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </details>
-      </section>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </Spin>
 
     <Modal v-model:open="reassignOpen" :confirm-loading="busy" :title="`改派 · ${selected.length} 个任务`" ok-text="改派" @ok="reassign">
@@ -388,3 +428,26 @@ function returnToHall() {
     </Modal>
   </div>
 </template>
+
+<style scoped>
+.order-task-table > thead > tr > th,
+.order-task-table > tbody > tr[data-order-summary] > :is(th, td) {
+  padding: 0.5rem 0.75rem;
+  vertical-align: middle;
+  border-inline-end: 1px solid hsl(var(--border));
+}
+
+.order-task-table > thead > tr > th:last-child,
+.order-task-table > tbody > tr[data-order-summary] > td:last-child {
+  border-inline-end: 0;
+}
+
+.order-task-table > thead > tr > th:not(.text-right),
+.order-task-table > tbody > tr[data-order-summary] > th {
+  text-align: start;
+}
+
+.order-task-table > tbody > tr {
+  border-block-start: 1px solid hsl(var(--border));
+}
+</style>

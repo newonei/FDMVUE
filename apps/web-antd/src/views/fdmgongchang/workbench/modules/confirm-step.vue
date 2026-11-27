@@ -44,7 +44,7 @@ const orderChoices = computed(() =>
         targetThickness: i.targetThickness,
         id: i.id,
         label: i.productName,
-        left: `还差 ${formatQty(Number(i.quantity) - Number(i.completedQuantity))} ${i.unit ?? ''}`,
+        left: `${formatQty(Number(i.quantity) - Number(i.completedQuantity))} ${i.unit ?? ''}`,
         orderNo: o.orderNo,
         party: o.requesterDeptName || o.requesterName || '',
       })),
@@ -172,19 +172,38 @@ function confirm(reportNow = false) {
           <button type="button" class="px-2 text-primary" @click="loadOrders">重试</button>
         </div>
         <span v-else-if="orderChoices.length === 0" class="text-sm text-muted-foreground">当前没有待完成且以包装为最后一道工序的订单明细。</span>
-        <button
-          v-for="c in orderChoices"
-          :key="c.id"
-          :class="job.productionItem?.id === c.id ? 'border-primary bg-primary/10' : 'border-border'"
-          class="flex flex-col items-start justify-center rounded-md border px-3 py-1.5 text-left"
-          type="button"
-          :aria-pressed="job.productionItem?.id === c.id"
-          :disabled="props.submitting"
-          @click="job.productionItem = c"
-        >
-          <span class="text-sm font-semibold">{{ c.label }}</span>
-          <span class="text-xs text-muted-foreground">{{ c.orderNo }} · {{ c.party }} · {{ c.left }}</span>
-        </button>
+        <div v-else class="max-h-72 overflow-auto rounded-md border border-border">
+          <table aria-label="包装对应的工厂订单" class="w-full min-w-[440px] border-collapse text-left text-sm">
+            <thead class="sticky top-0 z-10 bg-muted">
+              <tr class="[&>th]:px-2 [&>th]:py-2">
+                <th scope="col">订单号</th>
+                <th scope="col">产品（点击选择）</th>
+                <th scope="col">下单部门 / 人员</th>
+                <th scope="col" class="whitespace-nowrap text-right">待包装数量</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="c in orderChoices" :key="c.id" :class="{ 'bg-primary/10': job.productionItem?.id === c.id }" class="border-t border-border [&>td]:border-r [&>td]:border-border [&>td]:px-2 [&>td]:py-1 [&>td:last-child]:border-r-0">
+                <td class="whitespace-nowrap font-mono text-xs">{{ c.orderNo }}</td>
+                <td>
+                  <button
+                    class="min-h-9 text-left text-primary hover:underline disabled:opacity-50"
+                    type="button"
+                    :aria-label="`选择 ${c.orderNo} ${c.label}`"
+                    :aria-pressed="job.productionItem?.id === c.id"
+                    :disabled="props.submitting"
+                    @click="job.productionItem = c"
+                  >
+                    {{ c.label }}
+                  </button>
+                  <span v-if="job.productionItem?.id === c.id" class="ml-1 whitespace-nowrap text-xs text-primary">已选</span>
+                </td>
+                <td>{{ c.party || '—' }}</td>
+                <td class="whitespace-nowrap text-right tabular-nums">{{ c.left }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </section>
       <section v-if="late" class="flex flex-col gap-1.5 rounded-lg border border-warning/60 bg-card p-3">
         <label for="workbench-late-reason" class="text-sm font-bold">为什么要补登？<span class="font-normal text-destructive">（必填）</span></label>

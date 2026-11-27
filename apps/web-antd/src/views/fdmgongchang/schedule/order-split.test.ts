@@ -348,7 +348,7 @@ describe('order selection → process preview → release', () => {
     expect(api.release).toHaveBeenCalledWith(expect.objectContaining({ previewKey: 'after-foam-update', stockSelections }));
   });
 
-  it('loads material configuration separately for each selected order', async () => {
+  function mockFoamOrders() {
     const foamOrders = orders.map((order) => ({
       ...order,
       items: order.items.map((item) => ({ ...item, processes: ['MIX'] })),
@@ -363,15 +363,61 @@ describe('order selection → process preview → release', () => {
         orderId, orderNo: order.orderNo, shortage: false, totals: [],
       };
     });
+    api.get.mockImplementation(async (orderId: number) => foamOrders.find(({ id }) => id === orderId));
+    api.saveMaterial.mockResolvedValue(true);
+    return foamOrders;
+  }
 
-    await mount(foamOrders);
-    expect(api.materialPlan).toHaveBeenCalledExactlyOnceWith(11);
+  it('shows selected orders in one material table and saves to the edited order', async () => {
+    await mount(mockFoamOrders());
+    const panel = document.querySelector('section[aria-label="配方和发泡模具"]')!;
+    expect(panel.querySelectorAll('table')).toHaveLength(1);
+    expect(panel.querySelector('thead th')?.textContent).toBe('订单号');
+    expect([...panel.querySelectorAll('tbody tr')].map((row) => row.firstElementChild?.textContent))
+      .toEqual(['GD-11', 'GD-11', 'GD-12']);
+    expect(document.querySelector('#split-material-order')).toBeNull();
+    expect(api.materialPlan.mock.calls).toEqual([[11], [12]]);
+
+    await selectOption('#split-mp-recipe-103', '调整后配方');
+    expect(api.saveMaterial).toHaveBeenCalledExactlyOnceWith({ itemId: 103, mouldProfileId: null, recipeCode: 'REC-NEW' });
+    expect(api.get).toHaveBeenCalledExactlyOnceWith(12);
+    expect(api.materialPlan.mock.calls).toEqual([[11], [12], [12]]);
+
+    document.querySelector<HTMLInputElement>('input[aria-label="选择订单 GD-12"]')!.click();
+    await flush();
     expect(document.querySelector('#split-mp-recipe-101')).not.toBeNull();
-    await selectOption('#split-material-order', 'GD-12');
-    expect(api.materialPlan).toHaveBeenLastCalledWith(12);
-    expect(document.querySelector('#split-mp-recipe-101')).toBeNull();
-    expect(document.querySelector('#split-mp-recipe-103')).not.toBeNull();
-    expect(api.saveMaterial).not.toHaveBeenCalled();
+    expect(document.querySelector('#split-mp-recipe-103')).toBeNull();
+    expect(api.materialPlan.mock.calls).toEqual([[11], [12], [12]]);
+  });
+
+  it('applies a material batch across orders and retains only the failed products for retry', async () => {
+    await mount(mockFoamOrders());
+    api.saveMaterial.mockResolvedValueOnce(true).mockRejectedValueOnce(new Error('save failed'));
+
+    button('批量设置').click();
+    await flush();
+    const first = document.querySelector<HTMLInputElement>('input[aria-label="勾选 GD-11 紫色瑜伽垫"]')!;
+    const second = document.querySelector<HTMLInputElement>('input[aria-label="勾选 GD-12 绿色瑜伽垫"]')!;
+    first.click();
+    second.click();
+    await flush();
+    await selectOption('#split-mp-batch-recipe', '标准配方');
+    button('应用到所选产品').click();
+    await flush();
+
+    const firstSave = { itemId: 101, mouldProfileId: null, recipeCode: 'REC-1' };
+    const secondSave = { itemId: 103, mouldProfileId: null, recipeCode: 'REC-1' };
+    expect(api.saveMaterial.mock.calls).toEqual([[firstSave], [secondSave]]);
+    expect(api.get).toHaveBeenCalledExactlyOnceWith(11);
+    expect(first.checked).toBe(false);
+    expect(second.checked).toBe(true);
+    expect(document.body.textContent).toContain('已保存 1 个产品，1 个保存失败');
+
+    button('应用到所选产品').click();
+    await flush();
+    expect(api.saveMaterial.mock.calls).toEqual([[firstSave], [secondSave], [secondSave]]);
+    expect(api.get.mock.calls).toEqual([[11], [12]]);
+    expect(second.checked).toBe(false);
   });
 
   it('invalidates the old preview even if refreshing a saved item fails', async () => {

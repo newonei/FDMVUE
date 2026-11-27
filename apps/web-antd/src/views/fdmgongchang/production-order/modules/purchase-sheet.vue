@@ -149,34 +149,56 @@ function openQty(line: Api.PurchaseSheet['order']['lines'][number]) {
           <span class="text-muted-foreground">交货地址：</span>{{ details.deliveryAddress }}
         </p>
 
-        <div class="flex flex-col gap-2">
-          <div v-for="{ line, item, purchase, colorCards } in rows" :key="line.id" class="flex flex-col gap-0.5 rounded bg-muted/40 px-2.5 py-1.5">
-            <span class="flex flex-wrap items-baseline justify-between gap-2">
-              <span>{{ line.skuName }} <span class="text-xs text-muted-foreground">{{ line.skuCode }}</span></span>
-              <span class="tabular-nums">{{ openQty(line) }} {{ line.unit }}</span>
-            </span>
-            <span class="text-xs"><span class="text-muted-foreground">采购规格原文：</span>{{ line.specification || '未记录' }}</span>
-            <ProductionSpecComparison v-if="item?.targetConfirmedAt" :item="item" :purchase="purchase" :options="targetOptions" />
-            <p v-else-if="item" class="m-0 text-xs text-orange-700">工厂执行规格待确认</p>
-            <p v-else-if="items?.length && openQty(line) > 0" class="m-0 text-xs text-orange-700">此采购行缺少对应的工厂明细</p>
-            <span class="mt-1 text-xs font-medium">采购来源规格</span>
-            <ProductStructureDetails :value="purchase" :expanded="!item?.targetConfirmedAt" />
-            <span v-if="extraText(line.id)" class="text-xs text-muted-foreground">{{ extraText(line.id) }}</span>
-            <span v-if="lineNote(line.id)" class="text-xs text-warning">备注：{{ lineNote(line.id) }}</span>
-            <Image
-              v-if="details.lineExtras?.[line.id]?.imageId && images[details.lineExtras[line.id]!.imageId!]"
-              :src="images[details.lineExtras[line.id]!.imageId!]"
-              :width="72"
-              class="rounded"
-            />
-            <div v-if="colorCards.length" class="mt-1 flex flex-wrap gap-3">
-              <div v-for="{ id, label } in colorCards" :key="label" class="flex flex-col items-start gap-1">
-                <span class="text-xs text-muted-foreground">供应商实物色号图（{{ label }}）</span>
-                <Image v-if="id && images[id]" :src="images[id]" :width="96" class="rounded" />
-                <span v-else class="text-xs text-muted-foreground">色号图暂时无法读取</span>
-              </div>
-            </div>
-          </div>
+        <div v-if="rows.length > 0" class="overflow-x-auto" role="region" aria-label="采购产品明细" tabindex="0">
+          <table class="purchase-lines-table w-full min-w-[1130px]" aria-label="采购产品明细">
+            <thead>
+              <tr>
+                <th scope="col" class="min-w-28">采购产品</th>
+                <th scope="col" class="min-w-24">SKU 编码</th>
+                <th scope="col" class="number-cell">有效采购数量</th>
+                <th scope="col" class="min-w-44">采购来源规格</th>
+                <th scope="col" class="min-w-64">工厂执行规格</th>
+                <th scope="col" class="min-w-28">补充说明</th>
+                <th scope="col" class="min-w-24">备注</th>
+                <th scope="col" class="min-w-28">图片</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="{ line, item, purchase, colorCards } in rows" :key="line.id">
+                <th scope="row">{{ line.skuName }}</th>
+                <td>{{ line.skuCode || '—' }}</td>
+                <td class="number-cell">{{ openQty(line) }} {{ line.unit }}</td>
+                <td>
+                  <p class="mb-1"><span class="text-muted-foreground">采购规格原文：</span>{{ line.specification || '未记录' }}</p>
+                  <ProductStructureDetails :value="purchase" :expanded="!item?.targetConfirmedAt" />
+                </td>
+                <td>
+                  <ProductionSpecComparison v-if="item?.targetConfirmedAt" :item="item" :purchase="purchase" :options="targetOptions" />
+                  <p v-else-if="item" class="m-0 text-xs text-orange-700">工厂执行规格待确认</p>
+                  <p v-else-if="items?.length && openQty(line) > 0" class="m-0 text-xs text-orange-700">此采购行缺少对应的工厂明细</p>
+                  <span v-else>—</span>
+                </td>
+                <td>{{ extraText(line.id) || '—' }}</td>
+                <td class="whitespace-pre-wrap">{{ lineNote(line.id) || '—' }}</td>
+                <td>
+                  <Image
+                    v-if="details.lineExtras?.[line.id]?.imageId && images[details.lineExtras[line.id]!.imageId!]"
+                    :src="images[details.lineExtras[line.id]!.imageId!]"
+                    :width="72"
+                    class="rounded"
+                  />
+                  <span v-else-if="colorCards.length === 0">—</span>
+                  <div v-if="colorCards.length" class="flex flex-wrap gap-2">
+                    <div v-for="{ id, label } in colorCards" :key="label" class="flex flex-col items-start gap-1">
+                      <span class="text-muted-foreground">供应商实物色号图（{{ label }}）</span>
+                      <Image v-if="id && images[id]" :src="images[id]" :width="96" class="rounded" />
+                      <span v-else class="text-muted-foreground">色号图暂时无法读取</span>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
 
         <div v-for="col in shared" :key="col.title" class="flex flex-col gap-1">
@@ -217,3 +239,27 @@ function openQty(line: Api.PurchaseSheet['order']['lines'][number]) {
     </Spin>
   </section>
 </template>
+
+<style scoped>
+.purchase-lines-table th,
+.purchase-lines-table td {
+  padding: 7px 10px;
+  font-size: 12px;
+  vertical-align: top;
+  text-align: left;
+  overflow-wrap: anywhere;
+  border: 1px solid hsl(var(--border));
+}
+
+.purchase-lines-table thead th {
+  font-weight: 600;
+  white-space: nowrap;
+  background: hsl(var(--muted) / 55%);
+}
+
+.purchase-lines-table .number-cell {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+</style>

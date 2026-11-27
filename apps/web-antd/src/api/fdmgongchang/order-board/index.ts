@@ -30,6 +30,8 @@ export namespace FactoryOrderBoardApi {
   export interface StepTask {
     actualQuantity: ScheduleApi.Decimal;
     attained: boolean;
+    boardColor?: null | string;
+    boardSide?: null | string;
     children?: StepTask[];
     creditedQuantity: ScheduleApi.Decimal;
     id: number;
@@ -45,6 +47,7 @@ export namespace FactoryOrderBoardApi {
   }
 
   export interface Order extends OrderApi.Order {
+    colorLabels?: null | Record<string, string>;
     items: Item[];
     ownerName?: null | string;
     ownerUserId?: null | number;

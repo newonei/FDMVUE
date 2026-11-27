@@ -124,6 +124,11 @@ describe('factory dashboard', () => {
     expect(text).toContain('98.3%');
     expect(text).toContain('50.0%');
     expect(text).toContain('逾期 2 天');
+    const deliveryTable = host.querySelector('[aria-label="订单交付"]')!;
+    expect([...deliveryTable.querySelectorAll('th')].map((header) => header.textContent)).toEqual([
+      '类型', '单号', '客户 / 部门', '产品', '交期', '交付进度', '状态',
+    ]);
+    expect(deliveryTable.querySelector('tr[data-row-key]')?.textContent).toContain('GD20261010-001');
     expect(text).toContain('1 张订单已逾期');
     expect(text).toContain('贴合明天可能缺料');
     expect(text).toContain('张三');

@@ -494,6 +494,18 @@ export function saveScheduleTask(data: {
   );
 }
 
+/** 单独调整已下发任务的计划生产日期。 */
+export function updateScheduleTaskWorkDate(data: {
+  id: number;
+  workDate: string;
+}) {
+  return requestClient.put<boolean>(
+    '/fdmgongchang/schedule/task/work-date',
+    data,
+    headers(),
+  );
+}
+
 export function deleteScheduleTask(scheduleId: number, id: number) {
   return requestClient.post<boolean>(
     '/fdmgongchang/schedule/task/delete',

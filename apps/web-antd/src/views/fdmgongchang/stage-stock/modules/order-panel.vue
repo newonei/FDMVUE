@@ -205,14 +205,31 @@ async function onExpand(expanded: boolean, record: Api.Order) {
 }
 
 const columns = [
-  { key: 'orderNo', title: '单号 / 领料时间' },
+  { dataIndex: 'orderNo', key: 'orderNo', title: '工序单号' },
+  { key: 'issuedAt', title: '领料时间' },
   { key: 'process', title: '工序' },
+  { key: 'status', title: '状态' },
   { align: 'right' as const, key: 'input', title: '领料' },
   { align: 'right' as const, key: 'output', title: '产出' },
   { key: 'contract', title: '关联订单' },
-  { key: 'people', title: '班组 · 操作人' },
-  { align: 'right' as const, key: 'actions', title: '', width: 120 },
+  { key: 'team', title: '班组' },
+  { key: 'operator', title: '操作人' },
+  { align: 'right' as const, key: 'actions', title: '操作', width: 120 },
 ];
+const inProgressColumns = computed(() => [
+  { dataIndex: 'orderNo', key: 'orderNo', title: '工序单号', width: 130 },
+  { key: 'process', title: '工序', width: 70 },
+  { key: 'source', title: '领料工段', width: 100 },
+  { align: 'right' as const, key: 'input', title: '已领数量', width: 105 },
+  { align: 'right' as const, key: 'returned', title: '已退数量', width: 105 },
+  { align: 'right' as const, key: 'supplemented', title: '补领次数', width: 78 },
+  { align: 'right' as const, key: 'reported', title: '报工次数', width: 78 },
+  { align: 'right' as const, key: 'good', title: '良品数量', width: 105 },
+  { key: 'team', title: '班组', width: 85 },
+  { key: 'operator', title: '操作人', width: 85 },
+  { key: 'issuedAt', title: '领料时间', width: 150 },
+  ...(canOperate.value ? [{ key: 'actions', title: '操作', width: 192 }] : []),
+]);
 
 const statusOptions = [
   { label: '在制', value: 'IN_PROGRESS' },
@@ -258,52 +275,35 @@ const statCards = computed(() =>
       <h3 class="m-0 text-sm font-semibold">
         车间在制<span class="ml-2 text-xs font-normal text-muted-foreground">已领料、还没报完工</span>
       </h3>
-      <div class="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-2">
-        <div
-          v-for="o in inProgress"
-          :key="o.id"
-          class="flex flex-col gap-1.5 rounded-md border border-border p-3"
-        >
-          <div class="flex items-center justify-between gap-2">
-            <span class="font-mono text-xs">{{ o.orderNo }}</span>
-            <Tag color="orange">{{ processLabel(o.process) }} · 在制</Tag>
+      <Table
+        aria-label="车间在制工序单"
+        bordered
+        :columns="inProgressColumns"
+        :data-source="inProgress"
+        :pagination="false"
+        :scroll="{ x: 'max-content', y: 300 }"
+        row-key="id"
+        size="small"
+      >
+        <template #bodyCell="{ column, record }">
+          <span v-if="column.key === 'orderNo'" class="whitespace-nowrap font-mono text-xs">{{ record.orderNo }}</span>
+          <span v-else-if="column.key === 'process'" class="whitespace-nowrap">{{ processLabel(record.process) }}</span>
+          <span v-else-if="column.key === 'source'" class="whitespace-nowrap">{{ stageOf(record.sourceStage)?.label || '—' }}</span>
+          <span v-else-if="column.key === 'input'" class="whitespace-nowrap tabular-nums">{{ formatQty(record.inputQuantity) }} {{ stageOf(record.sourceStage)?.unit }}</span>
+          <span v-else-if="column.key === 'returned'" class="whitespace-nowrap tabular-nums">{{ formatQty(record.returnedQuantity ?? 0) }} {{ stageOf(record.sourceStage)?.unit }}</span>
+          <span v-else-if="column.key === 'supplemented'" class="tabular-nums">{{ record.supplementCount ?? 0 }}</span>
+          <span v-else-if="column.key === 'reported'" class="tabular-nums">{{ record.reportCount ?? 0 }}</span>
+          <span v-else-if="column.key === 'good'" class="whitespace-nowrap tabular-nums">{{ (record.reportCount ?? 0) > 0 ? `${formatQty(record.goodQuantity)} ${stageOf(record.outputStage)?.unit ?? ''}` : '—' }}</span>
+          <span v-else-if="column.key === 'team'">{{ record.team || '—' }}</span>
+          <span v-else-if="column.key === 'operator'">{{ record.operatorName || '—' }}</span>
+          <span v-else-if="column.key === 'issuedAt'" class="whitespace-nowrap tabular-nums">{{ formatDateTime(record.issuedAt) }}</span>
+          <div v-else-if="column.key === 'actions' && canOperate" class="flex gap-1 whitespace-nowrap">
+            <Button v-if="record.process !== 'MIX'" size="small" @click="openSupplement(record as Api.Order)">补领</Button>
+            <Button v-if="canReturn(record as Api.Order)" size="small" @click="openReturn(record as Api.Order)">退料</Button>
+            <Button size="small" type="primary" @click="emit('report', record.id)">报产出</Button>
           </div>
-          <div class="text-sm">
-            已领 <b class="tabular-nums">{{ formatQty(o.inputQuantity) }}</b>
-            {{ stageOf(o.sourceStage)?.unit }}
-            {{ stageOf(o.sourceStage)?.label }}
-            <span
-              v-if="Number(o.returnedQuantity ?? 0) > 0"
-              class="text-xs text-muted-foreground"
-            >（已退 {{ formatQty(o.returnedQuantity) }}）</span>
-            <span
-              v-if="(o.supplementCount ?? 0) > 0"
-              class="text-xs text-muted-foreground"
-            >（含补领 {{ o.supplementCount }} 次）</span>
-          </div>
-          <div
-            v-if="(o.reportCount ?? 0) > 0"
-            class="text-xs text-muted-foreground"
-          >
-            已报 {{ o.reportCount }} 次，良品
-            {{ formatQty(o.goodQuantity) }}
-            {{ stageOf(o.outputStage)?.unit }}
-          </div>
-          <div
-            class="flex items-center justify-between gap-2 text-xs text-muted-foreground"
-          >
-            <span>{{ [o.team, o.operatorName].filter(Boolean).join(' · ') }} ·
-              {{ formatDateTime(o.issuedAt) }}</span>
-            <span v-if="canOperate" class="flex gap-1">
-              <Button v-if="o.process !== 'MIX'" size="small" @click="openSupplement(o)">补领</Button>
-              <Button v-if="canReturn(o)" size="small" @click="openReturn(o)">退料</Button>
-              <Button size="small" type="primary" @click="emit('report', o.id)">
-                报产出
-              </Button>
-            </span>
-          </div>
-        </div>
-      </div>
+        </template>
+      </Table>
     </section>
 
     <section class="flex flex-col gap-2">
@@ -372,6 +372,8 @@ const statCards = computed(() =>
         </div>
       </div>
       <Table
+        aria-label="工序单"
+        bordered
         v-model:expanded-row-keys="expandedKeys"
         :columns="columns"
         :data-source="rows"
@@ -390,22 +392,18 @@ const statCards = computed(() =>
         @expand="onExpand"
       >
         <template #bodyCell="{ column, record }">
-          <template v-if="column.key === 'orderNo'">
-            <div class="flex flex-col">
-              <span class="font-mono text-xs">{{ record.orderNo }}</span>
-              <span class="whitespace-nowrap text-xs text-muted-foreground">
-                {{ formatDateTime(record.issuedAt) }}
-              </span>
-            </div>
-          </template>
+          <span v-if="column.key === 'orderNo'" class="whitespace-nowrap font-mono text-xs">{{ record.orderNo }}</span>
+          <span v-else-if="column.key === 'issuedAt'" class="whitespace-nowrap tabular-nums">{{ formatDateTime(record.issuedAt) }}</span>
           <template v-else-if="column.key === 'process'">
             <div class="flex flex-wrap items-center gap-1">
               <span class="whitespace-nowrap">{{ processLabel(record.process) }}</span>
+              <Tag v-if="isSkipped(record as Api.Order)" class="m-0">跳过工序</Tag>
+            </div>
+          </template>
+          <template v-else-if="column.key === 'status'">
               <Tag :color="statusOf(record.status).color" class="m-0">
                 {{ statusOf(record.status).label }}
               </Tag>
-              <Tag v-if="isSkipped(record as Api.Order)" class="m-0">跳过工序</Tag>
-            </div>
           </template>
           <template v-else-if="column.key === 'input'">
             <div class="flex flex-col items-end">
@@ -467,11 +465,8 @@ const statCards = computed(() =>
             </span>
             <span v-else class="text-muted-foreground">—</span>
           </template>
-          <template v-else-if="column.key === 'people'">
-            <span class="text-xs">
-              {{ [record.team, record.operatorName].filter(Boolean).join(' · ') || '—' }}
-            </span>
-          </template>
+          <span v-else-if="column.key === 'team'">{{ record.team || '—' }}</span>
+          <span v-else-if="column.key === 'operator'">{{ record.operatorName || '—' }}</span>
           <template v-else-if="column.key === 'actions'">
             <span class="flex justify-end gap-2 whitespace-nowrap text-xs">
               <button
@@ -522,9 +517,9 @@ const statCards = computed(() =>
           <Spin :spinning="!details[record.id]">
             <div
               v-if="details[record.id]"
-              class="grid grid-cols-1 gap-4 py-1 text-xs md:grid-cols-2"
+              class="flex flex-col gap-4 py-1 text-xs"
             >
-              <div>
+              <div class="min-w-0">
                 <h4 class="m-0 mb-1 text-sm font-semibold">
                   {{ record.process === 'MIX' && !details[record.id]!.inputs?.length ? '发泡预计用料' : `领料（扣${stageOf(record.sourceStage)?.label}库存）` }}
                   <span
@@ -533,103 +528,106 @@ const statCards = computed(() =>
                   >按配方 {{ details[record.id]!.recipeName || details[record.id]!.recipeCode }} ×
                     {{ formatQty(details[record.id]!.recipeBatches) }} 锅</span>
                 </h4>
-                <ul class="m-0 flex list-disc flex-col gap-1 pl-4">
-                  <li v-for="line in details[record.id]!.inputs" :key="line.id">
-                    <Tag v-if="issueSeqLabel(line.issueSeq)" class="mr-1" color="blue">
-                      {{ issueSeqLabel(line.issueSeq) }}
-                    </Tag>
-                    <span class="font-mono">{{ line.itemCode }}</span>
-                    <span class="ml-2">{{
-                      attrSummary(line.stage, line.item, labels)
-                    }}</span>
-                    <span class="ml-2 text-muted-foreground">批次
-                      <span class="font-mono">{{ line.batchNo }}</span></span>
-                    <b class="ml-2 tabular-nums">{{ formatQty(line.quantity) }}
-                      {{ stageOf(line.stage)?.unit }}</b>
-                    <span
-                      v-if="Number(line.returnedQuantity ?? 0) > 0"
-                      class="ml-1 text-muted-foreground"
-                    >已退 {{ formatQty(line.returnedQuantity) }}</span>
-                    <Tag v-if="line.laminationSide" class="ml-1">
-                      {{ line.laminationSide === 'FRONT' ? '正面' : '反面' }}
-                    </Tag>
-                    <span
-                      v-if="(line.issueSeq ?? 0) > 0 && (line.issuedBy || line.issueRemark)"
-                      class="ml-1 text-muted-foreground"
-                    >（{{ [line.issuedBy && `${line.issuedBy} 登记`, line.issueRemark].filter(Boolean).join('：') }}）</span>
-                  </li>
-                </ul>
-                <div
-                  v-if="(details[record.id]!.recipeLines ?? []).length > 0"
-                  class="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-muted-foreground"
-                >
-                  <span
-                    v-for="r in details[record.id]!.recipeLines"
-                    :key="r.rawMaterialCode"
-                    :class="Number(r.remaining) > 0 ? 'text-warning' : ''"
-                  >
-                    {{ r.rawMaterialName || r.rawMaterialCode }}
-                    {{ formatQty(r.issued) }}{{ r.required == null ? '（配方外）' : ` / ${formatQty(r.required)}` }} kg
-                  </span>
+                <div v-if="details[record.id]!.inputs?.length" class="overflow-x-auto">
+                  <table aria-label="领料明细" class="order-detail-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">领料记录</th>
+                        <th scope="col">物料编码</th>
+                        <th scope="col">规格</th>
+                        <th scope="col">批次</th>
+                        <th scope="col" class="text-right">领料数量</th>
+                        <th scope="col" class="text-right">已退数量</th>
+                        <th scope="col">用料面</th>
+                        <th scope="col">补领登记</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="line in details[record.id]!.inputs" :key="line.id">
+                        <td class="whitespace-nowrap">{{ issueSeqLabel(line.issueSeq) || '领料' }}</td>
+                        <td class="font-mono">{{ line.itemCode }}</td>
+                        <td>{{ attrSummary(line.stage, line.item, labels) }}</td>
+                        <td class="font-mono">{{ line.batchNo }}</td>
+                        <td class="whitespace-nowrap text-right tabular-nums">{{ formatQty(line.quantity) }} {{ stageOf(line.stage)?.unit }}</td>
+                        <td class="whitespace-nowrap text-right tabular-nums">{{ formatQty(line.returnedQuantity ?? 0) }} {{ stageOf(line.stage)?.unit }}</td>
+                        <td class="whitespace-nowrap">{{ line.laminationSide ? (line.laminationSide === 'FRONT' ? '正面' : '反面') : '—' }}</td>
+                        <td>{{ (line.issueSeq ?? 0) > 0 ? [line.issuedBy, line.issueRemark].filter(Boolean).join(' · ') || '—' : '—' }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div v-if="details[record.id]!.recipeLines?.length" class="mt-2 overflow-x-auto">
+                  <table aria-label="配方用料明细" class="order-detail-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">配方原料</th>
+                        <th scope="col" class="text-right">已领 (kg)</th>
+                        <th scope="col" class="text-right">应领 (kg)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="r in details[record.id]!.recipeLines" :key="r.rawMaterialCode" :class="{ 'text-warning': Number(r.remaining) > 0 }">
+                        <td>{{ r.rawMaterialName || r.rawMaterialCode }}</td>
+                        <td class="text-right tabular-nums">{{ formatQty(r.issued) }}</td>
+                        <td class="text-right tabular-nums">{{ r.required == null ? '配方外' : formatQty(r.required) }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
                 </div>
               </div>
-              <div>
+              <div class="min-w-0">
                 <h4 class="m-0 mb-1 text-sm font-semibold">
                   产出（入{{ stageOf(record.outputStage)?.label }}库存）
                 </h4>
-                <ul
-                  v-if="(details[record.id]!.outputs ?? []).length > 0"
-                  class="m-0 flex list-disc flex-col gap-1 pl-4"
-                >
-                  <li
-                    v-for="line in details[record.id]!.outputs"
-                    :key="line.id"
-                  >
-                    <Tag
-                      v-if="(details[record.id]!.reportCount ?? 0) > 1"
-                      class="mr-1"
-                    >
-                      第 {{ line.reportSeq ?? 1 }} 次
-                    </Tag>
-                    <span class="font-mono">{{ line.itemCode }}</span>
-                    <span class="ml-2">{{
-                      attrSummary(line.stage, line.item, labels)
-                    }}</span>
-                    <span class="ml-2 text-muted-foreground">批次
-                      <span class="font-mono">{{ line.batchNo }}</span></span>
-                    <span class="ml-2">良品
-                      <b class="tabular-nums">{{
-                        formatQty(line.goodQuantity)
-                      }}</b></span>
-                    <span v-if="line.frontDefectQuantity !== null && line.frontDefectQuantity !== undefined && line.backDefectQuantity !== null && line.backDefectQuantity !== undefined" class="ml-2">
-                      正面 {{ labels.color(line.item?.frontColor) }} 残次 <b class="tabular-nums">{{ formatQty(line.frontDefectQuantity) }}</b> 片；
-                      反面 {{ labels.color(line.item?.backColor) }} 残次 <b class="tabular-nums">{{ formatQty(line.backDefectQuantity) }}</b> 片
-                    </span>
-                    <span v-else class="ml-2">残次
-                      <b class="tabular-nums">{{
-                        formatQty(line.defectQuantity)
-                      }}</b>
-                      {{ stageOf(line.stage)?.unit }}</span>
-                    <Tag v-if="held[record.id]?.[line.id]" class="ml-2" color="red">
-                      冻结 {{ formatQty(held[record.id]?.[line.id]) }}
-                    </Tag>
-                    <Button
-                      v-if="canOperate && record.status !== 'VOIDED' && Number(line.goodQuantity ?? 0) > 0"
-                      class="ml-1"
-                      size="small"
-                      type="link"
-                      @click="openHold(details[record.id]!, line)"
-                    >
-                      冻结
-                    </Button>
-                  </li>
-                </ul>
+                <div v-if="details[record.id]!.outputs?.length" class="overflow-x-auto">
+                  <table aria-label="产出明细" class="order-detail-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">报工批次</th>
+                        <th scope="col">物料编码</th>
+                        <th scope="col">规格</th>
+                        <th scope="col">物料批次</th>
+                        <th scope="col" class="text-right">良品</th>
+                        <th scope="col" class="text-right">残次</th>
+                        <th scope="col" class="text-right">冻结数量</th>
+                        <th v-if="canOperate" scope="col">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="line in details[record.id]!.outputs" :key="line.id">
+                        <td class="whitespace-nowrap">第 {{ line.reportSeq ?? 1 }} 次</td>
+                        <td class="font-mono">{{ line.itemCode }}</td>
+                        <td>{{ attrSummary(line.stage, line.item, labels) }}</td>
+                        <td class="font-mono">{{ line.batchNo }}</td>
+                        <td class="whitespace-nowrap text-right tabular-nums">{{ formatQty(line.goodQuantity) }} {{ stageOf(line.stage)?.unit }}</td>
+                        <td class="text-right tabular-nums">
+                          <template v-if="line.frontDefectQuantity != null && line.backDefectQuantity != null">
+                            <span class="block whitespace-nowrap">正面 {{ labels.color(line.item?.frontColor) }} {{ formatQty(line.frontDefectQuantity) }} 片</span>
+                            <span class="block whitespace-nowrap">反面 {{ labels.color(line.item?.backColor) }} {{ formatQty(line.backDefectQuantity) }} 片</span>
+                          </template>
+                          <span v-else class="whitespace-nowrap">{{ formatQty(line.defectQuantity) }} {{ stageOf(line.stage)?.unit }}</span>
+                        </td>
+                        <td class="text-right tabular-nums">{{ formatQty(held[record.id]?.[line.id]) }}</td>
+                        <td v-if="canOperate">
+                          <Button
+                            v-if="record.status !== 'VOIDED' && Number(line.goodQuantity ?? 0) > 0"
+                            size="small"
+                            type="link"
+                            @click="openHold(details[record.id]!, line)"
+                          >
+                            冻结
+                          </Button>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
                 <p v-else class="m-0 text-muted-foreground">还没报产出。</p>
               </div>
-              <div v-if="record.remark" class="md:col-span-2">
+              <div v-if="record.remark">
                 <b class="mr-2">备注</b>{{ record.remark }}
               </div>
-              <div v-if="record.issueSheetUrls" class="flex flex-wrap items-start gap-2 md:col-span-2">
+              <div v-if="record.issueSheetUrls" class="flex flex-wrap items-start gap-2">
                 <b class="mr-2">领料单</b>
                 <Image.PreviewGroup>
                   <Image
@@ -644,7 +642,7 @@ const statCards = computed(() =>
               </div>
               <div
                 v-if="record.status === 'VOIDED'"
-                class="text-muted-foreground md:col-span-2"
+                class="text-muted-foreground"
               >
                 <b class="mr-2 text-foreground">已作废</b>{{ record.voidReason }} ·
                 {{ record.voidedBy }} · {{ formatDateTime(record.voidedAt) }}
@@ -677,3 +675,22 @@ const statCards = computed(() =>
     />
   </div>
 </template>
+
+<style scoped>
+.order-detail-table {
+  width: 100%;
+  text-align: left;
+  border-collapse: collapse;
+}
+
+.order-detail-table th,
+.order-detail-table td {
+  padding: 6px 8px;
+  border: 1px solid hsl(var(--border));
+}
+
+.order-detail-table th {
+  white-space: nowrap;
+  background: hsl(var(--muted));
+}
+</style>

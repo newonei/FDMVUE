@@ -541,7 +541,7 @@ describe('production order page', () => {
     mocks.factoryPage.mockResolvedValue({ list: [purchase], total: 1 });
     unmount = mount();
     await flush();
-    button('采购单CG-20261118-1F17C9').click();
+    button('CG-20261118-1F17C9').click();
     expect(mocks.push).toHaveBeenCalledWith({
       path: '/fdmprocurement/platform-orders',
       query: { contractId, documentId: 'po-id' },
@@ -568,21 +568,25 @@ describe('production order page', () => {
     unmount = mount();
     await flush();
 
-    const purchaseRow = document.querySelector('tr[data-row-key="9"]')!;
-    const manualRow = document.querySelector('tr[data-row-key="10"]')!;
-    const source = (root: ParentNode) => Object.fromEntries([...root.querySelectorAll('dl > div')].map((line) => [
-      line.querySelector('dt')?.textContent,
-      line.querySelector('dd')?.textContent,
-    ]));
+    const purchaseRow = document.querySelector<HTMLTableRowElement>('tr[data-row-key="9"]')!;
+    const manualRow = document.querySelector<HTMLTableRowElement>('tr[data-row-key="10"]')!;
+    const source = (row: HTMLTableRowElement) => {
+      const table = row.closest('.production-orders-table') || row.closest('table')!;
+      const headers = table.querySelector('thead tr')!.children;
+      return Object.fromEntries([...headers].map((header, index) => [
+        header.textContent?.trim(),
+        row.children[index]?.textContent?.trim(),
+      ]));
+    };
     expect(source(purchaseRow)).toMatchObject({ 合同内部单号: 'NB-202611-18', 合同编号: 'HT-202611-26', 客户: '测试客户' });
     expect(purchaseRow.textContent).toContain('瑜伽垫冬季补货');
     expect(purchaseRow.textContent).toContain('CG-202611-14');
     expect(manualRow.textContent).toContain('电商备货');
-    expect(manualRow.textContent).not.toContain('合同内部单号');
+    expect(source(manualRow)).toMatchObject({ 合同内部单号: '—', 合同编号: '—', 客户: '—' });
 
     button(purchase.orderNo, purchaseRow).click();
     await flush();
-    expect(source(document.querySelector('[aria-labelledby="po-purchase-source"]')!)).toMatchObject({
+    expect(source(document.querySelector<HTMLTableRowElement>('table[aria-labelledby="po-purchase-source"] tbody tr')!)).toMatchObject({
       合同内部单号: 'NB-202611-18',
       合同编号: 'HT-202611-26',
       客户: '测试客户',
@@ -740,8 +744,10 @@ describe('production order page', () => {
     expect(text).toContain('正反两层配齐后才计入整垫覆盖');
     expect(text).toContain('300粉单层片材');
     expect(text).toContain('单层缺口：粉200片；GY300片');
-    expect(text).toContain('开片500片单层');
-    expect(text).toContain('贴合500条成品');
+    const steps = [...document.querySelectorAll('table[aria-label="各工序剩余折算需求"] tbody tr')].map((row) =>
+      [...row.querySelectorAll('td')].map((cell) => cell.textContent?.trim()),
+    );
+    expect(steps).toEqual([['开片', '500 片单层'], ['贴合', '500 条成品']]);
   });
 
   it('lets the factory confirm the structured spec and shows how stock covers the order', async () => {
@@ -784,8 +790,13 @@ describe('production order page', () => {
     expect(mocks.supplyMatch).toHaveBeenCalledWith(9);
     expect(text).toContain('规格与库存匹配');
     expect(text).toContain('未确认');
-    expect(text).toContain('还要交500：现成料覆盖200，缺料300');
-    expect(text).toContain('开片300·冲裁300');
+    const stockAmounts = [...document.querySelectorAll('table[aria-label="订单产品库存匹配"] tbody td.amount')]
+      .map((cell) => cell.textContent?.replaceAll(/\s+/g, ''));
+    expect(stockAmounts).toEqual(['500条', '500', '200', '缺料300']);
+    const processAmounts = [...document.querySelectorAll('table[aria-label="各工序剩余折算需求"] tbody tr')].map((row) =>
+      [...row.querySelectorAll('td')].map((cell) => cell.textContent?.trim()),
+    );
+    expect(processAmounts).toEqual([['开片', '300 条'], ['冲裁', '300 条']]);
     expect(text).toContain('CC-2：颜色不同');
 
     expect([...document.querySelectorAll('button')].some((el) => el.textContent === '确认规格')).toBe(false);
@@ -875,8 +886,11 @@ describe('production order page', () => {
     await flush();
     const text = document.body.textContent ?? '';
     expect(text).toContain('JH20261013001');
-    expect(text).toContain('入库单 RK20261013001');
-    expect(text.replaceAll(/\s/g, '')).toContain('已交货100');
+    const deliveryRow = document.querySelector('#po-detail-deliveries tbody tr')!;
+    expect(deliveryRow.textContent).toContain('RK20261013001');
+    expect(deliveryRow.textContent).toContain('入库单');
+    const productRow = document.querySelector('#po-detail-items tbody tr')!;
+    expect(productRow.querySelectorAll('.detail-number')[1]?.textContent?.trim()).toBe('100 条');
 
     const guide = document.querySelector<HTMLElement>('#factory-order-fulfillment-panel')!;
     expect(guide?.textContent).toContain('已交货');
@@ -946,7 +960,7 @@ describe('production order page', () => {
     expect(panel.textContent).toContain('已入库');
     expect(panel.textContent).toContain('还差');
     expect(panel.textContent).not.toContain('DZ2400008');
-    const rows = [...panel.querySelectorAll('ul[aria-label="待补产品"] > li')];
+    const rows = [...panel.querySelectorAll('table[aria-label="待补产品"] > tbody > tr')];
     expect(rows).toHaveLength(3);
     for (const [code, expected] of [
       ['DZ2400010', [200, 199, 1]],
@@ -955,7 +969,7 @@ describe('production order page', () => {
     ] as const) {
       const row = rows.find((element) => element.textContent?.includes(code))!;
       expect(row).toBeDefined();
-      const values = [...row.querySelectorAll('dd')].map((cell) => cell.textContent?.replaceAll(/\s/g, ''));
+      const values = [...row.querySelectorAll('td.number-cell')].map((cell) => cell.textContent?.replaceAll(/\s/g, ''));
       expect(values).toEqual(expected.map((quantity) => `${quantity}条`));
     }
 
@@ -963,14 +977,15 @@ describe('production order page', () => {
     expect(taskOnlyRow.textContent).toContain('暂未匹配到可用现货');
     button('核对库存', taskOnlyRow).click();
     await flush();
-    expect(taskOnlyRow.textContent).not.toContain('TASK-1');
+    expect(taskOnlyRow.nextElementSibling?.textContent).toContain('暂无可用的匹配批次');
+    expect(taskOnlyRow.nextElementSibling?.textContent).not.toContain('TASK-1');
 
     const stockRow = rows.find((row) => row.textContent?.includes('DZ2400009'))!;
     expect(stockRow.textContent).toContain('选定批次，再预览需要接续的工序');
     button('核对库存', stockRow).click();
     await flush();
-    expect(stockRow.textContent).toContain('YH-1');
-    expect(stockRow.textContent).toContain('冲裁 → 包装');
+    expect(stockRow.nextElementSibling?.textContent).toContain('YH-1');
+    expect(stockRow.nextElementSibling?.textContent).toContain('冲裁 → 包装');
 
     const lastRow = rows.find((element) => element.textContent?.includes('DZ2400011'))!;
     expect(button('核对库存', lastRow)).toBeDefined();
@@ -1034,7 +1049,7 @@ describe('production order page', () => {
     button('查看').click();
     await flush();
     const panel = document.querySelector<HTMLElement>('#factory-order-fulfillment-panel')!;
-    const row = [...panel.querySelectorAll('ul[aria-label="待补产品"] > li')].find((element) => element.textContent?.includes('SHORT-B'))!;
+    const row = [...panel.querySelectorAll('table[aria-label="待补产品"] > tbody > tr')].find((element) => element.textContent?.includes('SHORT-B'))!;
     button('补派工', row).click();
     await flush();
     expect(document.querySelector('[aria-label="补派工表单"]')).not.toBeNull();
@@ -1151,10 +1166,10 @@ describe('production order page', () => {
 
     const laserRoute = document.querySelector('[aria-label="po-item-91 要走的工序"]')!;
     const plainRoute = document.querySelector('[aria-label="po-item-92 要走的工序"]')!;
-    expect(laserRoute.closest('article')?.textContent).toContain('激光雕刻');
-    expect(laserRoute.closest('article')?.textContent).toContain('RED');
-    expect(plainRoute.closest('article')?.textContent).toContain('无雕刻');
-    expect(plainRoute.closest('article')?.textContent).toContain('BLUE');
+    expect(laserRoute.closest('tr')?.textContent).toContain('激光雕刻');
+    expect(laserRoute.closest('tr')?.textContent).toContain('RED');
+    expect(plainRoute.closest('tr')?.textContent).toContain('无雕刻');
+    expect(plainRoute.closest('tr')?.textContent).toContain('BLUE');
     expect([...laserRoute.querySelectorAll('button')].find((chip) => chip.textContent?.trim() === '雕刻')?.getAttribute('aria-pressed')).toBe('false');
     expect(mocks.getPurchaseSheet).toHaveBeenCalledOnce();
   });
@@ -1183,21 +1198,50 @@ describe('production order page', () => {
     ] }));
   });
 
-  it('blocks acceptance with unconfirmed parameters and opens the editor, then accepts after saved parameters refresh', async () => {
+  it('blocks acceptance with the specific missing parameters and opens the editor, then accepts after refresh', async () => {
     mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:handle');
-    mocks.factoryPage.mockResolvedValue({ list: [order], total: 1 }); mocks.get.mockResolvedValue(order);
+    const incomplete: Api.Order = { ...order, items: [{ ...order.items[0]!, productionConfigProblems: ['请选择单色或双色', '请选择单层或双层贴合结构', '请选择正面颜色'] }] };
+    mocks.factoryPage.mockResolvedValue({ list: [incomplete], total: 1 }); mocks.get.mockResolvedValue(incomplete);
     mocks.supplyMatch.mockResolvedValue([]);
     mocks.materialPlan.mockResolvedValue({ items: [], orderId: 9, orderNo: order.orderNo, shortage: false, totals: [] });
     unmount = mount(); await flush(); button('去接单').click(); await flush();
-    expect(document.body.textContent).toContain('1 个产品尚未完整确认生产参数');
+    const details = document.querySelector('#po-detail-items');
+    expect(details?.textContent).toContain('1 个产品的生产参数需要补齐或修正');
+    expect(details?.textContent).toContain('请选择单色或双色；请选择单层或双层贴合结构；请选择正面颜色');
     button('接单').click(); await flush();
     expect(mocks.accept).not.toHaveBeenCalled();
     expect(document.querySelector('#save-order-config-test')?.textContent).toContain('9/91');
-    mocks.get.mockResolvedValue({ ...order, items: order.items.map((item) => ({ ...item, ...confirmedParameters })) });
+    mocks.get.mockResolvedValue({ ...order, items: [{ ...order.items[0]!, ...confirmedParameters, productionConfigProblems: [] }] });
     document.querySelector<HTMLButtonElement>('#save-order-config-test')!.click(); await flush();
     expect(document.querySelector<HTMLInputElement>('#po-promised input')?.value || document.querySelector<HTMLInputElement>('#po-promised')?.value).toBe('2026-10-20');
     button('接单').click(); await flush();
     expect(mocks.accept).toHaveBeenCalledWith(expect.objectContaining({ id: 9, promisedDate: '2026-10-20' }));
+  });
+
+  it('accepts complete purchase parameters directly and ignores cancelled lines', async () => {
+    mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:handle');
+    const purchase: Api.Order = {
+      ...order,
+      sourceType: 'PURCHASE_ORDER',
+      items: [
+        { ...order.items[0]!, ...confirmedParameters, targetConfirmedAt: null, productionConfigProblems: [] },
+        { ...order.items[0]!, id: 92, quantity: 0, productionConfigProblems: ['请选择正面颜色'] },
+      ],
+    };
+    mocks.factoryPage.mockResolvedValue({ list: [purchase], total: 1 });
+    mocks.get.mockResolvedValue(purchase);
+    mocks.supplyMatch.mockResolvedValue([]);
+    mocks.materialPlan.mockResolvedValue({ items: [], orderId: 9, orderNo: order.orderNo, shortage: false, totals: [] });
+    mocks.accept.mockResolvedValue(true);
+    unmount = mount(); await flush(); button('去接单').click(); await flush();
+    expect(document.body.textContent).not.toContain('请先人工确认并保存生产参数');
+    expect(document.body.textContent).not.toContain('请选择正面颜色');
+    expect(document.body.textContent).not.toContain('去补齐');
+    button('接单').click(); await flush();
+    expect(mocks.accept).toHaveBeenCalledWith(expect.objectContaining({ id: 9, promisedDate: '2026-10-20', routes: [
+      { itemId: 91, routeId: 3, steps: ['SLICE', 'PUNCH'] },
+    ] }));
+    expect(document.querySelector('#save-order-config-test')).toBeNull();
   });
 
   it('checks the impact of a missed process before release and refreshes the order route', async () => {

@@ -6,7 +6,7 @@ import type {
 
 import { computed, ref, watch } from 'vue';
 
-import { Alert, Spin, Tag } from 'ant-design-vue';
+import { Spin, Tag } from 'ant-design-vue';
 
 import { getSupplyMatch, getTargetOptions } from '#/api/fdmgongchang/production-order';
 import { colorModeText, constructionText } from '#/views/fdmplatform/products/manufacturing';
@@ -26,6 +26,10 @@ const options = ref<MatchApi.TargetOptions>();
 const loading = ref(false);
 
 const matchByItem = computed(() => new Map(matches.value.map((m) => [m.itemId, m])));
+const rows = computed(() => props.items.map((item) => ({ item, match: matchByItem.value.get(item.id) })));
+const matchedRows = computed(() => rows.value.filter(({ match }) => match && !match.pending));
+const stockRows = computed(() => matchedRows.value.flatMap(({ item, match }) => (match?.lines ?? []).map((line) => ({ item, line }))));
+const processRows = computed(() => matchedRows.value.flatMap(({ item, match }) => (match?.processes ?? []).map((process) => ({ item, process }))));
 
 async function load() {
   loading.value = true;
@@ -53,11 +57,10 @@ function doubleLayer(item: Api.Item) {
   return (item.targetConstructionType ?? (item.targetConfirmedAt ? undefined : item.targetSuggested?.constructionType)) === 'DOUBLE_LAYER';
 }
 const sideText = (side?: null | string) => ({ FRONT: '正面', BACK: '反面', BOTH: '正反同规格' })[side as 'FRONT'] || '';
-function layerGapText(item: Api.Item) {
-  const match = matchByItem.value.get(item.id);
-  const layers = Object.values(match?.newProductionByLayer ?? {});
+function layerGapText(match: MatchApi.Match) {
+  const layers = Object.values(match.newProductionByLayer ?? {});
   return layers.length > 0 ? layers.map((layer) => `${sideText(layer.side)} ${label(options.value?.colors, layer.color)} ${Number(layer.thickness) * 10} mm：${fmt(layer.quantity)} 片`).join('；')
-    : Object.entries(match?.newProductionByColor ?? {}).map(([color, quantity]) => `${label(options.value?.colors, color)} ${fmt(quantity)} 片`).join('；');
+    : Object.entries(match.newProductionByColor ?? {}).map(([color, quantity]) => `${label(options.value?.colors, color)} ${fmt(quantity)} 片`).join('；');
 }
 
 function confirmed(item: Api.Item) {
@@ -100,6 +103,11 @@ function fmt(v: null | number | string | undefined) {
   return num(v).toLocaleString('zh-CN', { maximumFractionDigits: 3 });
 }
 
+function processUnit(item: Api.Item, process: string) {
+  if (!doubleLayer(item)) return item.unit || '成品';
+  return ['CUT', 'MIX', 'SLICE'].includes(process) ? '片单层' : '条成品';
+}
+
 defineExpose({ reload: load });
 </script>
 
@@ -107,75 +115,142 @@ defineExpose({ reload: load });
   <section class="flex flex-col gap-2">
     <h3 class="m-0 text-sm font-semibold">规格与库存匹配</h3>
     <Spin :spinning="loading">
-      <div class="flex flex-col gap-3">
-        <div v-for="item in items" :key="item.id" class="flex flex-col gap-2 rounded-md border border-border p-3">
-          <div class="flex flex-wrap items-center justify-between gap-2">
-            <span class="font-medium">{{ item.productName }}</span>
-          </div>
-          <p class="m-0 text-xs">
-            <Tag v-if="confirmed(item)" color="green">已确认</Tag>
-            <Tag v-else color="orange">未确认</Tag>
-            <template v-if="confirmed(item)">
-              {{ targetText(item) }}
-              <span v-if="item.targetConfirmedBy" class="text-muted-foreground">（{{ item.targetConfirmedBy }}）</span>
-            </template>
-            <span v-else class="text-muted-foreground">按规格文本解析，只比对材质、颜色、长宽厚；确认后才比对压纹、图案，也不会用已雕刻的库存</span>
-          </p>
-          <p class="m-0 text-sm">成品数量 <b class="tabular-nums">{{ item.quantity == null ? '未填写' : fmt(item.quantity) }}</b> {{ item.unit }}</p>
-
-          <template v-if="matchByItem.get(item.id)">
-            <Alert v-if="matchByItem.get(item.id)!.pending" type="warning" show-icon :message="`${matchByItem.get(item.id)!.pending}，确认前不能排单`" />
-            <template v-else>
-              <p class="m-0 text-sm">
-                还要交 <b class="tabular-nums">{{ fmt(matchByItem.get(item.id)!.remaining) }}</b>：
-                现成料覆盖 <b class="tabular-nums">{{ fmt(matchByItem.get(item.id)!.covered) }}</b>，
-                {{ item.processes?.[0] === 'MIX' || !item.processes?.length ? '新做' : '缺料' }}
-                <b class="tabular-nums">{{ fmt(matchByItem.get(item.id)!.newProduction) }}</b>
-              </p>
-              <p v-if="doubleLayer(item)" class="m-0 text-xs text-muted-foreground">
-                正反两层配齐后才计入整垫覆盖；单层缺口：{{ layerGapText(item) }}
-              </p>
-              <table v-if="matchByItem.get(item.id)!.lines.length > 0" class="w-full text-xs">
-                <thead class="text-muted-foreground">
-                  <tr>
-                    <th class="py-1 text-left font-normal">用哪份料</th>
-                    <th class="py-1 text-right font-normal">用量</th>
-                    <th class="py-1 text-right font-normal">可覆盖数量</th>
-                    <th class="py-1 text-left font-normal pl-3">后面还要做</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="(l, index) in matchByItem.get(item.id)!.lines" :key="index" class="border-t border-border">
-                    <td class="py-1">
-                      <Tag :color="l.source === 'TASK' ? 'blue' : l.source === 'OWN' ? 'green' : undefined">
-                        {{ l.source === 'TASK' ? '已排任务' : l.source === 'OWN' ? `已锁 · ${l.stageLabel}` : l.stageLabel }}
-                      </Tag>
-                      {{ l.code }}
-                    </td>
-                    <td class="py-1 text-right tabular-nums">{{ fmt(l.used) }} {{ l.unit }}</td>
-                    <td class="py-1 text-right tabular-nums">{{ fmt(l.covers) }} {{ l.color ? `${sideText(l.side)} ${label(options?.colors, l.color)}${l.thickness != null ? ` ${Number(l.thickness) * 10} mm` : ''} 单层片材` : '条成品' }}</td>
-                    <td class="py-1 pl-3">{{ l.nextProcesses.length > 0 ? l.nextProcesses.join(' → ') : '直接交货' }}</td>
-                  </tr>
-                </tbody>
-              </table>
-              <p class="m-0 text-xs text-muted-foreground">
-                各工序剩余折算需求{{ doubleLayer(item) ? '（贴合前折算为成品尺寸的单层片数，贴合后按成品）' : '（折成品）' }}：
-                <template v-for="(p, index) in matchByItem.get(item.id)!.processes" :key="p.process">
-                  <template v-if="index > 0"> · </template>{{ p.label }} {{ fmt(p.quantity) }}<template v-if="doubleLayer(item)">{{ ['MIX', 'SLICE', 'CUT'].includes(p.process) ? ' 片单层' : ' 条成品' }}</template>
-                </template>
-                <span v-if="doubleLayer(item)" class="mt-1 block">实际任务数量按板材规格换算。</span>
-              </p>
-              <details v-if="matchByItem.get(item.id)!.notes.length > 0" class="text-xs text-muted-foreground">
-                <summary class="cursor-pointer">没用上的库存</summary>
-                <ul class="m-0 pl-4">
-                  <li v-for="n in matchByItem.get(item.id)!.notes" :key="n">{{ n }}</li>
-                </ul>
-              </details>
-            </template>
-          </template>
-          <p v-else class="m-0 text-xs text-muted-foreground">接单后按本厂库存和已排任务计算匹配。</p>
+      <div class="space-y-3">
+        <div class="match-table-wrap">
+          <table aria-label="订单产品库存匹配" class="match-table min-w-[990px]">
+            <thead>
+              <tr>
+                <th scope="col">产品</th>
+                <th scope="col">规格状态</th>
+                <th scope="col">生产规格</th>
+                <th scope="col" class="amount">成品数量</th>
+                <th scope="col" class="amount">待交</th>
+                <th scope="col" class="amount">现成料覆盖</th>
+                <th scope="col" class="amount">新做 / 缺料</th>
+                <th scope="col">匹配说明</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="{ item, match } in rows" :key="item.id">
+                <th scope="row">{{ item.productName }}</th>
+                <td>
+                  <Tag v-if="confirmed(item)" color="green" class="m-0">已确认</Tag>
+                  <Tag v-else color="orange" class="m-0">未确认</Tag>
+                  <div v-if="confirmed(item) && item.targetConfirmedBy" class="mt-1 text-muted-foreground">{{ item.targetConfirmedBy }}</div>
+                </td>
+                <td class="min-w-60">
+                  <template v-if="confirmed(item)">{{ targetText(item) }}</template>
+                  <span v-else class="text-muted-foreground">按规格文本解析材质、颜色、长宽厚。确认后才比对压纹、图案，并排除已雕刻库存。</span>
+                </td>
+                <td class="amount">{{ item.quantity == null ? '未填写' : fmt(item.quantity) }} {{ item.unit }}</td>
+                <td class="amount">{{ match && !match.pending ? fmt(match.remaining) : '—' }}</td>
+                <td class="amount">{{ match && !match.pending ? fmt(match.covered) : '—' }}</td>
+                <td class="amount">
+                  <template v-if="match && !match.pending">{{ item.processes?.[0] === 'MIX' || !item.processes?.length ? '新做' : '缺料' }} {{ fmt(match.newProduction) }}</template>
+                  <template v-else>—</template>
+                </td>
+                <td class="min-w-40">
+                  <span v-if="match?.pending" class="text-warning">{{ match.pending }}，确认前不能排单</span>
+                  <span v-else-if="!match" class="text-muted-foreground">接单后计算匹配</span>
+                  <template v-else>
+                    <span v-if="doubleLayer(item)" class="text-muted-foreground">正反两层配齐后才计入整垫覆盖；单层缺口：{{ layerGapText(match) || '—' }}</span>
+                    <details v-if="match.notes.length > 0" class="text-muted-foreground">
+                      <summary class="cursor-pointer">没用上的库存</summary>
+                      <ul class="m-0 pl-4"><li v-for="(note, index) in match.notes" :key="index">{{ note }}</li></ul>
+                    </details>
+                    <span v-if="!doubleLayer(item) && match.notes.length === 0" class="text-muted-foreground">—</span>
+                  </template>
+                </td>
+              </tr>
+              <tr v-if="rows.length === 0"><td colspan="8" class="text-center text-muted-foreground">暂无订单产品</td></tr>
+            </tbody>
+          </table>
         </div>
+        <section v-if="stockRows.length > 0" class="space-y-2">
+          <h4 class="m-0 text-sm font-medium">匹配用料</h4>
+          <div class="match-table-wrap">
+            <table aria-label="匹配用料" class="match-table min-w-[720px]">
+              <thead>
+                <tr>
+                  <th scope="col">产品</th>
+                  <th scope="col">料件来源</th>
+                  <th scope="col">料件编码</th>
+                  <th scope="col" class="amount">用量</th>
+                  <th scope="col" class="amount">可覆盖数量</th>
+                  <th scope="col">后续工序</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="({ item, line }, index) in stockRows" :key="`${item.id}-${index}`">
+                  <th scope="row">{{ item.productName }}</th>
+                  <td><Tag :color="line.source === 'TASK' ? 'blue' : line.source === 'OWN' ? 'green' : undefined" class="m-0">{{ line.source === 'TASK' ? '已排任务' : line.source === 'OWN' ? `已锁 · ${line.stageLabel}` : line.stageLabel }}</Tag></td>
+                  <td>{{ line.code || '—' }}</td>
+                  <td class="amount">{{ fmt(line.used) }} {{ line.unit }}</td>
+                  <td class="amount">{{ fmt(line.covers) }} {{ line.color ? `${sideText(line.side)} ${label(options?.colors, line.color)}${line.thickness != null ? ` ${Number(line.thickness) * 10} mm` : ''} 单层片材` : '条成品' }}</td>
+                  <td>{{ line.nextProcesses.length > 0 ? line.nextProcesses.join(' → ') : '直接交货' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <section v-if="processRows.length > 0" class="space-y-2">
+          <h4 class="m-0 text-sm font-medium">各工序剩余折算需求</h4>
+          <p v-if="matchedRows.some(({ item }) => doubleLayer(item))" class="m-0 text-xs text-muted-foreground">双层产品在贴合前按成品尺寸折算单层片数，贴合后按成品计。实际任务数量按板材规格换算。</p>
+          <div class="match-table-wrap">
+            <table aria-label="各工序剩余折算需求" class="match-table min-w-[420px]">
+              <thead><tr><th scope="col">产品</th><th scope="col">工序</th><th scope="col" class="amount">折算数量</th></tr></thead>
+              <tbody>
+                <tr v-for="{ item, process } in processRows" :key="`${item.id}-${process.process}`">
+                  <th scope="row">{{ item.productName }}</th>
+                  <td>{{ process.label }}</td>
+                  <td class="amount">{{ fmt(process.quantity) }} {{ processUnit(item, process.process) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
       </div>
     </Spin>
-</section>
+  </section>
 </template>
+
+<style scoped>
+.match-table-wrap {
+  overflow-x: auto;
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+}
+
+.match-table {
+  width: 100%;
+  font-size: 12px;
+  text-align: left;
+  border-collapse: collapse;
+}
+
+.match-table thead {
+  background: hsl(var(--muted) / 60%);
+}
+
+.match-table :is(th, td) {
+  padding: 8px 10px;
+  vertical-align: middle;
+  overflow-wrap: anywhere;
+  border-inline-end: 1px solid hsl(var(--border));
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.match-table :is(th, td):last-child {
+  border-inline-end: 0;
+}
+
+.match-table tbody tr:last-child :is(th, td) {
+  border-bottom: 0;
+}
+
+.amount {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+</style>

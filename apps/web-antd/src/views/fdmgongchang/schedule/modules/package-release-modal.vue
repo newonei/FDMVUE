@@ -98,7 +98,7 @@ async function submit() {
     :confirm-loading="submitting"
     :ok-button-props="{ disabled: checked.length === 0 || checked.length > MAX }"
     :ok-text="checked.length > 0 ? `下发 ${checked.length} 张单的任务包` : '下发任务包'"
-    :width="680"
+    width="min(880px, 96vw)"
     title="下发任务包 · 选订单"
     @ok="submit"
   >
@@ -112,24 +112,34 @@ async function submit() {
       </div>
       <Spin :spinning="loading">
         <Empty v-if="!loading && shown.length === 0" :image="Empty.PRESENTED_IMAGE_SIMPLE" :description="list.length === 0 ? '没有已接单的订单' : '没有搜到'" />
-        <ul v-else class="m-0 flex max-h-80 list-none flex-col divide-y divide-border overflow-auto rounded-md border border-border p-0">
-          <li v-for="o in shown" :key="o.id">
-            <label class="flex cursor-pointer items-center gap-3 px-3 py-1.5 hover:bg-muted/50">
-              <Checkbox :checked="checked.includes(o.id)" :aria-label="o.orderNo" @change="(e: any) => toggle(o.id, e.target.checked)" />
-              <span class="flex min-w-0 flex-1 flex-col">
-                <span class="font-mono text-xs">
-                  {{ o.orderNo }}<template v-if="o.sourceContractCode"> · {{ o.sourceContractCode }}</template><template v-if="o.customerName"> · {{ o.customerName }}</template>
-                </span>
-                <span class="truncate text-xs text-muted-foreground">
-                  {{ o.items[0]?.productName }}<template v-if="o.items.length > 1"> 等 {{ o.items.length }} 个产品</template>
-                </span>
-              </span>
-              <span class="shrink-0 text-right text-xs text-muted-foreground">
-                待做 {{ num(o.totalQuantity) - num(o.completedQuantity) }}<template v-if="due(o)"> · 交期 {{ due(o) }}</template>
-              </span>
-            </label>
-          </li>
-        </ul>
+        <div v-else class="max-h-80 overflow-auto rounded-md border border-border">
+          <table aria-label="待下发订单" class="w-full min-w-[700px] border-collapse text-left text-xs">
+            <thead class="sticky top-0 z-10 bg-muted">
+              <tr class="[&>th]:px-2 [&>th]:py-2">
+                <th scope="col" class="w-12">选择</th>
+                <th scope="col">订单号</th>
+                <th scope="col">合同号</th>
+                <th scope="col">客户</th>
+                <th scope="col">产品</th>
+                <th scope="col" class="whitespace-nowrap text-right">待做数量</th>
+                <th scope="col" class="whitespace-nowrap">交期</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="o in shown" :key="o.id" class="border-t border-border hover:bg-muted/50 [&>td]:border-r [&>td]:border-border [&>td]:px-2 [&>td]:py-1.5 [&>td:last-child]:border-r-0">
+                <td><Checkbox :id="`package-order-${o.id}`" :checked="checked.includes(o.id)" :aria-label="o.orderNo" @change="(e: any) => toggle(o.id, e.target.checked)" /></td>
+                <td class="whitespace-nowrap font-mono"><label :for="`package-order-${o.id}`" class="cursor-pointer">{{ o.orderNo }}</label></td>
+                <td>{{ o.sourceContractCode || '—' }}</td>
+                <td>{{ o.customerName || '—' }}</td>
+                <td :title="o.items.map((item) => item.productName).join('、')">
+                  {{ o.items[0]?.productName || '—' }}<template v-if="o.items.length > 1"> 等 {{ o.items.length }} 个产品</template>
+                </td>
+                <td class="text-right tabular-nums">{{ num(o.totalQuantity) - num(o.completedQuantity) }}</td>
+                <td class="whitespace-nowrap tabular-nums">{{ due(o) || '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </Spin>
       <p v-if="checked.length > MAX" class="m-0 text-xs text-red-500">一次最多选 {{ MAX }} 张，现在选了 {{ checked.length }} 张</p>
       <label for="package-release-note" class="flex flex-col gap-1 text-xs text-muted-foreground">
