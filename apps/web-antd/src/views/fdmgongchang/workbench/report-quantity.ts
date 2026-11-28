@@ -11,9 +11,8 @@ const round = (value: number) => Math.round(value * 1000) / 1000;
 /** 只预填本次尚未报出的计划量；不能把同一计划总量重复分给多种产出。 */
 export function prefillReportQuantity(job: Pick<Job, 'order' | 'outputs' | 'prepare' | 'process' | 'task'>) {
   if (!job.task || job.outputs.length !== 1) return;
-  const planned = job.process?.code === 'MIX'
-    ? job.task.output?.mixPlan?.wholeBatchBoards ?? job.task.quantity
-    : job.task.quantity;
+  if (job.process?.code === 'MIX') return;
+  const planned = job.task.quantity;
   const good = Math.max(quantity(job.task.actualQuantity), quantity(job.order?.goodQuantity));
   const defect = Math.max(quantity(job.task.defectQuantity), quantity(job.order?.defectQuantity));
   const remainder = round(Math.max(0, quantity(planned) - good - defect));
@@ -65,4 +64,11 @@ export function changeReportDefect(line: OutputDraft, value: null | number | und
   if (total === undefined) return;
   line.reportTotal = total;
   line.goodQuantity = round(Math.max(0, total - quantity(value)));
+}
+
+/** 发泡直接录入已点数的良品和分开记录的残次，合计仅供核对。 */
+export function changeCountedOutput(line: OutputDraft, good?: number, defect?: number) {
+  line.goodQuantity = good;
+  line.defectQuantity = defect;
+  line.reportTotal = good === undefined ? undefined : round(good + (defect ?? 0));
 }

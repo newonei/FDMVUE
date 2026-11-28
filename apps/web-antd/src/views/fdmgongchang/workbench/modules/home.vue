@@ -11,6 +11,7 @@ import { Button, Checkbox, Empty, Input, message, Modal, Select } from 'ant-desi
 import { getWorkbenchMates } from '#/api/fdmgongchang/workbench';
 
 import { dimensionTextInMm } from '../../shared/dimensions';
+import ReportCorrectionDialog from '../../shared/report-correction-dialog.vue';
 import { attrSummary, formatQty, makeLabels, toNumber } from '../../stage-stock/model';
 import { useJob } from '../use-job';
 import BatchWorkbench from './batch-workbench.vue';
@@ -78,6 +79,12 @@ const runningTaskIds = computed(() => new Set(inProgress.value.map((o) => o.sche
 const pendingTasks = computed(() => myTasks.value.filter((task) => !task.completedBySupplement
   && !runningTaskIds.value.has(task.id) && task.status !== 'DONE' && task.status !== 'CLOSED'));
 const recentDone = computed(() => (my.value.recentDone ?? []).filter((order) => processOf(order.process)));
+const correctionOpen = ref(false);
+const correctionOrder = ref<Api.Order>();
+function openCorrection(order: Api.Order) {
+  correctionOrder.value = order;
+  correctionOpen.value = true;
+}
 const section = ref<'pending' | 'recent' | 'running'>(job.homeView.section ?? (inProgress.value.length > 0 ? 'running' : 'pending'));
 const keyword = ref(job.homeView.keyword);
 const page = ref(job.homeView.page);
@@ -275,6 +282,7 @@ watch([section, keyword, page], () => { job.homeView = { section: section.value,
               <th v-if="section === 'recent'" scope="col">产出规格</th>
               <th scope="col" class="text-right">已报良品</th>
               <th v-if="section === 'running'" scope="col">本次报工</th>
+              <th scope="col">报工记录</th>
             </tr>
           </thead>
           <tbody>
@@ -303,6 +311,10 @@ watch([section, keyword, page], () => { job.homeView = { section: section.value,
                   @draft="reportDrafts.set(order.id, $event)"
                   @report="emit('reportOrder', $event)"
                 />
+              </td>
+              <td>
+                <Button v-if="(order.reportCount ?? 0) > 0 || section === 'recent'" @click="openCorrection(order)">查看与更正</Button>
+                <span v-else class="text-muted-foreground">—</span>
               </td>
             </tr>
           </tbody>
@@ -376,6 +388,13 @@ watch([section, keyword, page], () => { job.homeView = { section: section.value,
         :tasks="selectedTasks"
         @close="batchMode = undefined"
         @saved="batchSaved"
+      />
+      <ReportCorrectionDialog
+        v-model:open="correctionOpen"
+        :order-id="correctionOrder?.id"
+        :order-no="correctionOrder?.orderNo"
+        :unit="correctionOrder ? stageUnit(correctionOrder) : undefined"
+        @saved="emit('batchSaved')"
       />
       <Modal
         :open="!!behalf"

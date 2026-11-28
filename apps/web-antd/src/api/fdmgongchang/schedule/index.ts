@@ -231,6 +231,8 @@ export namespace FdmgongchangScheduleApi {
     spec?: null | string;
     unit?: null | string;
     workDate: DateValue;
+    /** 工序任务截止日期。 */
+    deadlineDate?: DateValue;
     /** 人员编号，逗号分隔。 */
     workerIds?: null | string;
     /** 来自哪份排单（任务管理列表返回）。 */
@@ -501,6 +503,28 @@ export function updateScheduleTaskWorkDate(data: {
 }) {
   return requestClient.put<boolean>(
     '/fdmgongchang/schedule/task/work-date',
+    data,
+    headers(),
+  );
+}
+
+export function updateScheduleTasksWorkDate(data: {
+  taskIds: number[];
+  workDate: string;
+}) {
+  return requestClient.put<boolean>(
+    '/fdmgongchang/schedule/task/batch-work-date',
+    data,
+    headers(),
+  );
+}
+
+export function updateScheduleTaskDeadlineDate(data: {
+  deadlineDate: null | string;
+  taskIds: number[];
+}) {
+  return requestClient.put<boolean>(
+    '/fdmgongchang/schedule/task/deadline-date',
     data,
     headers(),
   );

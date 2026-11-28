@@ -42,6 +42,7 @@ import FactoryDialog from '../../shared/factory-dialog.vue';
 import LaminationCounters from '../../shared/lamination-counters.vue';
 import { laminationDefects } from '../../shared/lamination-report';
 import { quantityPrecision } from '../../shared/quantity';
+import { reportPlanWarning } from '../../shared/report-plan-warning';
 import { formatVolume, sliceParticipantError, sliceVolume, sliceWageAllocation, sliceWageItem } from '../../shared/slice-wage';
 import {
   applyShrinkThickness,
@@ -481,6 +482,11 @@ const goodTotal = computed(() =>
 const defectTotal = computed(() =>
   sumQty(outputs.value.map((o) => o.defectQuantity)),
 );
+const planWarning = computed(() => {
+  const task = scheduleTasks.value.find((item) => item.id === (scheduleTaskId.value ?? order.value?.scheduleTaskId));
+  const plan = processCode.value === 'MIX' ? task?.output?.mixPlan?.wholeBatchBoards ?? task?.quantity : task?.quantity;
+  return reportPlanWarning(plan, task?.actualQuantity ?? order.value?.goodQuantity, goodTotal.value, outputStageOption.value?.unit);
+});
 
 /** 没手动改过数量的行，跟着良品合计走。 */
 watch(
@@ -548,6 +554,7 @@ watch(open, async (value) => {
       );
       applyOutputTarget();
       void loadOperators();
+      if (order.value.scheduleTaskId) void loadScheduleTasks();
     } finally {
       orderLoading.value = false;
     }
@@ -1261,6 +1268,7 @@ const summaryText = computed(() => {
                   : ''
               }}</span>
           </h3>
+          <Alert v-if="planWarning" :message="planWarning" show-icon type="warning" />
           <div
             v-if="processCode === 'SLICE'"
             class="text-xs text-muted-foreground"
@@ -1335,7 +1343,7 @@ const summaryText = computed(() => {
                 :for="`out-good-${line.key}`"
                 class="flex items-center gap-1.5 text-xs text-muted-foreground"
               >
-                良品
+                {{ processCode === 'MIX' ? '实点良品数' : '良品' }}
                 <InputNumber
                   :id="`out-good-${line.key}`"
                   v-model:value="line.goodQuantity"

@@ -7,7 +7,8 @@ import { computed, ref, watch } from 'vue';
 
 import { businessError } from '../../shared/business-error';
 import LaminationCounters from '../../shared/lamination-counters.vue';
-import { attrSummary, makeLabels } from '../../stage-stock/model';
+import { reportPlanWarning } from '../../shared/report-plan-warning';
+import { attrSummary, makeLabels, toNumber } from '../../stage-stock/model';
 import { loadOrderDraft } from '../order-report';
 import { canFinishWithoutOutput, hasExcessDefects, hasNewOutput } from '../report-quantity';
 import { useJob } from '../use-job';
@@ -29,6 +30,16 @@ const retry = ref(0);
 const labels = computed(() => makeLabels(job.options));
 const orderLabel = computed(() => props.order.scheduleTaskId ? `任务 #${props.order.scheduleTaskId}` : props.order.orderNo);
 const finishingWithoutOutput = computed(() => !!draft.value && canFinishWithoutOutput(draft.value));
+const planWarning = computed(() => {
+  const current = draft.value;
+  if (!current) return '';
+  return reportPlanWarning(
+    current.process.code === 'MIX' ? current.task?.output?.mixPlan?.wholeBatchBoards ?? current.task?.quantity : current.task?.quantity,
+    current.task?.actualQuantity ?? current.order.goodQuantity,
+    current.outputs.reduce((total, line) => total + (toNumber(line.goodQuantity) ?? 0), 0),
+    current.process.outputUnit,
+  );
+});
 const quantityError = computed(() => {
   if (!attempted.value || !draft.value) return '';
   const outputs = draft.value.outputs;
@@ -96,9 +107,10 @@ function submit() {
           :options="job.options"
           :unit="draft.process.outputUnit"
         />
-        <ReportQuantityFields v-else :line="line" :unit="draft.process.outputUnit" />
+        <ReportQuantityFields v-else :counted-good="draft.process.code === 'MIX'" :line="line" :unit="draft.process.outputUnit" />
       </div>
       <p v-if="quantityError" class="m-0 text-base text-destructive" role="alert">{{ quantityError }}</p>
+      <p v-if="planWarning" class="m-0 text-sm text-warning" role="status">{{ planWarning }}</p>
       <button
         v-if="draft.outputs.length || finishingWithoutOutput"
         class="min-h-12 w-full rounded-md bg-primary px-4 text-base font-bold text-primary-foreground"

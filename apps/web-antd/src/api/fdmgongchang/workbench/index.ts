@@ -164,6 +164,7 @@ export namespace FdmgongchangWorkbenchApi {
     boardItemCode?: string;
     foldingType?: string;
     laminateDefects?: FdmgongchangStageStockApi.LaminationDefect[];
+    materials?: Array<{ quantity: number; stockId: number }>;
   }
 
   export interface BatchReportReq {

@@ -2,7 +2,7 @@ import type { FactoryOrderBoardApi as Api } from '#/api/fdmgongchang/order-board
 
 import { describe, expect, it } from 'vitest';
 
-import { currentStage, deliveryProgress, dueHint, orderStages, stageDetails } from './model';
+import { currentStage, deliveryProgress, dueHint, orderStages, orderSummaryQuantities, stageDetails } from './model';
 
 function step(overrides: Partial<Api.Step> = {}): Api.Step {
   return { defectQuantity: 0, goodQuantity: 0, inProgressCount: 0, label: '发泡', orderCount: 0, outputStage: 'BOARD', planned: true, process: 'MIX', state: 'NOT_STARTED', unit: '张', ...overrides };
@@ -17,6 +17,17 @@ function order(items: Api.Item[], overrides: Partial<Api.Order> = {}): Api.Order
 }
 
 describe('order board progress', () => {
+  it('drills into remaining quantities per item and displays each unit separately', () => {
+    const items = [
+      item({ completedQuantity: 110 }),
+      item({ completedQuantity: 90, id: 12 }),
+      item({ completedQuantity: 2.25, id: 13, quantity: 2.5, unit: ' 箱 ' }),
+      item({ id: 14, quantity: 1, unit: '' }),
+    ];
+    expect(orderSummaryQuantities(items, 'UNFINISHED')).toEqual(['10 条', '0.25 箱', '1 （未填单位）']);
+    expect(orderSummaryQuantities(items, 'DEMAND')).toEqual(['200 条', '2.5 箱', '1 （未填单位）']);
+  });
+
   it('does not infer completion from a positive good quantity', () => {
     const stages = orderStages(order([item({ steps: [step({ goodQuantity: 1, orderCount: 1, state: 'PARTIAL' })] })]));
     expect(stages.find((s) => s.code === 'MIX')?.state).toBe('partial');

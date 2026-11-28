@@ -17,6 +17,7 @@ import {
   getOrderPage,
 } from '#/api/fdmgongchang/stage-stock';
 
+import ReportCorrectionDialog from '../../shared/report-correction-dialog.vue';
 import {
   attrSummary,
   defectRate,
@@ -62,6 +63,13 @@ const supplementOpen = ref(false);
 const supplementOrderId = ref<number>();
 const voidOpen = ref(false);
 const voidTarget = ref<Api.Order>();
+const correctionOpen = ref(false);
+const correctionOrder = ref<Api.Order>();
+
+function openCorrection(order: Api.Order) {
+  correctionOrder.value = order;
+  correctionOpen.value = true;
+}
 
 function openReturn(order: Api.Order) {
   returnOrderId.value = order.id;
@@ -470,6 +478,14 @@ const statCards = computed(() =>
           <template v-else-if="column.key === 'actions'">
             <span class="flex justify-end gap-2 whitespace-nowrap text-xs">
               <button
+                v-if="record.status !== 'VOIDED' && ((record.reportCount ?? 0) > 0 || record.status === 'COMPLETED')"
+                type="button"
+                class="text-primary hover:underline"
+                @click="openCorrection(record as Api.Order)"
+              >
+                报工记录与更正
+              </button>
+              <button
                 v-if="canOperate && record.status === 'IN_PROGRESS'"
                 type="button"
                 class="text-primary hover:underline"
@@ -497,10 +513,19 @@ const statCards = computed(() =>
                 v-if="canOperate && record.lateSupplementable && record.process !== 'MIX'"
                 type="button"
                 class="text-primary hover:underline"
-                title="完工 3 天内，实际多拿的料没登记的在这里补登"
+                title="完工当月或次月，补登实际使用但漏记的领料"
                 @click="openSupplement(record as Api.Order)"
               >
                 补登领料
+              </button>
+              <button
+                v-if="canOperate && record.status === 'COMPLETED' && record.lateSupplementable && Number(record.inputQuantity ?? 0) > Number(record.returnedQuantity ?? 0)"
+                type="button"
+                class="text-primary hover:underline"
+                title="完工当月或次月，补登实际未使用而多记的领料"
+                @click="openReturn(record as Api.Order)"
+              >
+                补登退料
               </button>
               <button
                 v-if="canVoid && voidable(record as Api.Order)"
@@ -665,6 +690,13 @@ const statCards = computed(() =>
       @saved="onAdjusted"
     />
     <VoidModal v-model:open="voidOpen" :order="voidTarget" @saved="onAdjusted" />
+    <ReportCorrectionDialog
+      v-model:open="correctionOpen"
+      :order-id="correctionOrder?.id"
+      :order-no="correctionOrder?.orderNo"
+      :unit="stageOf(correctionOrder?.outputStage)?.unit"
+      @saved="emit('changed')"
+    />
     <HoldModal
       v-model:open="holdOpen"
       :held="holdLine ? held[holdOrder?.id ?? 0]?.[holdLine.id] : undefined"

@@ -1,3 +1,4 @@
+import type { FactoryOrderBoardApi } from '#/api/fdmgongchang/order-board';
 import type { FdmgongchangStageStockApi } from '#/api/fdmgongchang/stage-stock';
 
 import { requestClient } from '#/api/request';
@@ -82,6 +83,7 @@ export namespace FdmgongchangDashboardApi {
     from: DateValue;
     generatedAt: number | string;
     kpi: Kpi;
+    orderSummary?: FactoryOrderBoardApi.Summary;
     orders: OrderProgress[];
     people: {
       active: number;

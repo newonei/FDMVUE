@@ -13,6 +13,7 @@ export interface WorkshopPlanRow {
   completed: string;
   customer: string;
   date: string;
+  deadlineDate: string;
   due: string;
   /** 本任务实际报工良品占实际总产出的比例，1 表示 100%。 */
   goodRate: number | undefined;
@@ -20,6 +21,7 @@ export interface WorkshopPlanRow {
   notes: string[];
   order: string;
   orderQuantity: string;
+  overdue: boolean;
   product: string;
   progress: ReturnType<typeof workshopTaskProgress>;
   requirements: FocusField[];
@@ -96,19 +98,23 @@ export function buildWorkshopPlanRows(
   return uniqueTasks(tasks).map((task) => {
     const items = task.relatedOrderItems ?? [];
     const orderQuantity = finishedQuantity(items);
+    const deadlineDate = planDate(task.deadlineDate);
+    const progress = workshopTaskProgress(task);
     return {
       colors: taskColors(task, options),
       completed: planDate(task.doneAt),
       customer: uniqueText(items.map((item) => item.customerName)).join('、'),
       date: task.undated ? '' : planDate(task.workDate),
+      deadlineDate,
       due: uniqueText(items.map((item) => planDate(item.promisedDate) || planDate(item.requiredDate))).toSorted().join('、'),
       goodRate: actualGoodRate(task),
       materials: planMaterials(task, options),
       notes: uniqueText([task.closedReason, task.shortageNote, task.upstreamNote, task.reason, ...items.map((item) => item.remark)]),
       order: uniqueText(taskOrderNos(task)).join('、') || `备货任务 · 排单 #${task.scheduleId}`,
       orderQuantity: orderQuantity === '未填写' ? '' : orderQuantity,
+      overdue: !!deadlineDate && deadlineDate <= today && progress.group === 'pending',
       product: uniqueText(items.map((item) => item.productName?.trim() || item.productCode)).join('、') || task.product?.trim() || '',
-      progress: workshopTaskProgress(task),
+      progress,
       requirements: planRequirements(task, options),
       size: uniqueText(items.map((item) => finishedSize(item)).filter((size) => size !== '未填写')).join('、'),
       task,

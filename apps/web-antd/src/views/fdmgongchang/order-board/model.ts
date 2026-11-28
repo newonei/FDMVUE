@@ -1,6 +1,6 @@
 import type { FactoryOrderBoardApi as Api } from '#/api/fdmgongchang/order-board';
 
-import { dateText, num } from '../production-order/shared';
+import { dateText, num, remainingOrderItemQuantity } from '../production-order/shared';
 import { factoryTodayText } from '../shared/factory-date';
 
 export interface Stage {
@@ -9,6 +9,29 @@ export interface Stage {
   label: string;
   state: 'done' | 'idle' | 'partial' | 'reported' | 'running' | 'skipped' | 'waiting';
   text: string;
+}
+
+export const ORDER_SUMMARY_LABELS: Record<Api.Scope, string> = {
+  DEMAND: '订单成品总数',
+  PENDING: '未接单数量',
+  UNFINISHED: '未生产完成数量',
+};
+
+const quantityFormat = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 3 });
+
+export function formatOrderUnitQuantity(quantity: number, unit?: null | string) {
+  return `${quantityFormat.format(quantity)} ${unit?.trim() || '（未填单位）'}`;
+}
+
+export function orderSummaryQuantities(items: Api.Item[], scope: Api.Scope) {
+  const quantities = new Map<string, number>();
+  for (const item of items) {
+    const quantity = scope === 'UNFINISHED' ? remainingOrderItemQuantity(item) : num(item.quantity);
+    if (quantity <= 0) continue;
+    const unit = item.unit?.trim() ?? '';
+    quantities.set(unit, (quantities.get(unit) ?? 0) + quantity);
+  }
+  return [...quantities].map(([unit, quantity]) => formatOrderUnitQuantity(quantity, unit));
 }
 
 const PROCESS_CHAIN = [

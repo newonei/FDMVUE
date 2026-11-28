@@ -55,7 +55,22 @@ export namespace FactoryOrderBoardApi {
 
   export interface PageReq extends OrderApi.PageReq {
     ownerUserId?: number;
-    status?: 'ACCEPTED' | 'COMPLETED';
+    scope?: Scope;
+    status?: 'ACCEPTED' | 'COMPLETED' | 'SUBMITTED';
+  }
+
+  export type Scope = 'DEMAND' | 'PENDING' | 'UNFINISHED';
+
+  export interface UnitTotals {
+    demandQuantity: ScheduleApi.Decimal;
+    pendingQuantity: ScheduleApi.Decimal;
+    unfinishedQuantity: ScheduleApi.Decimal;
+    unit: null | string;
+  }
+
+  export interface Summary {
+    pendingOrderCount: number;
+    units: UnitTotals[];
   }
 
   export interface Owner {
@@ -65,6 +80,13 @@ export namespace FactoryOrderBoardApi {
 }
 
 const base = '/fdmgongchang/order-board';
+
+export function getOrderBoardSummary() {
+  return requestClient.get<FactoryOrderBoardApi.Summary>(`${base}/summary`, {
+    headers: factoryHeaders(),
+    silent: true,
+  });
+}
 
 export function getOrderBoardShortageCount(
   factoryId: null | number,

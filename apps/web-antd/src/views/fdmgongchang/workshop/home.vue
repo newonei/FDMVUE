@@ -6,6 +6,7 @@ import type { WorkshopOrder } from './order-model';
 
 import type { FdmgongchangFactoryApi } from '#/api/fdmgongchang/factory';
 import type { FdmgongchangScheduleApi as ScheduleApi } from '#/api/fdmgongchang/schedule';
+import type { FdmgongchangStageStockApi as StockApi } from '#/api/fdmgongchang/stage-stock';
 import type { FdmgongchangWorkbenchApi as Api } from '#/api/fdmgongchang/workbench';
 
 import { computed, nextTick, reactive, ref, watch } from 'vue';
@@ -16,8 +17,8 @@ import { buildUUID } from '@vben/utils';
 
 import { Alert, AutoComplete, Button, Input, InputNumber, message, Modal, Progress, Select, Table, Tag } from 'ant-design-vue';
 
-import { reassignScheduleTasks, updateScheduleTaskWorkDate } from '#/api/fdmgongchang/schedule';
-import { batchReportWorkbenchTasks, getWorkbenchBatchOptions, getWorkbenchMates } from '#/api/fdmgongchang/workbench';
+import { reassignScheduleTasks, updateScheduleTaskDeadlineDate, updateScheduleTasksWorkDate, updateScheduleTaskWorkDate } from '#/api/fdmgongchang/schedule';
+import { batchReportWorkbenchTasks, getWorkbenchBatchOptions, getWorkbenchMates, getWorkbenchStock } from '#/api/fdmgongchang/workbench';
 
 import DispatchWageCheck from '../schedule/modules/dispatch-wage-check.vue';
 import TaskMaterials from '../schedule/modules/task-materials.vue';
@@ -25,9 +26,10 @@ import { businessError, reportFailureText } from '../shared/business-error';
 import FactorySwitch from '../shared/factory-switch.vue';
 import { changeLaminationDefect, changeLaminationGood, laminationDefects, laminationLayers } from '../shared/lamination-report';
 import { quantityPrecision } from '../shared/quantity';
+import { reportPlanWarning } from '../shared/report-plan-warning';
 import { FACTORY_ROUTES } from '../shared/routes';
 import { dateText, PROCESS_LABELS } from '../shared/schedule';
-import { formatQty, makeLabels, roundQty, sizeText, toNumber } from '../stage-stock/model';
+import { formatQty, makeLabels, roundQty, sizeText, slicePerBoard, toNumber } from '../stage-stock/model';
 import OrderModal from '../stage-stock/modules/order-modal.vue';
 import { useJob } from '../workbench/use-job';
 import InProgress from './in-progress.vue';
@@ -35,6 +37,7 @@ import { groupWorkshopOrders, mixPlanLines, orderFocus, orderMatches, taskFocus,
 import OrdersTable from './orders-table.vue';
 import PlanTable from './plan-table.vue';
 import RelatedOrderTable from './related-order-table.vue';
+import ReportCorrectionQueue from './report-correction-queue.vue';
 import StockCard from './stock-card.vue';
 
 const props = defineProps<{ factories: FdmgongchangFactoryApi.Factory[]; factoryId: null | number; process: string }>();
@@ -84,11 +87,23 @@ const warning = ref('');
 const reportWarnings = ref<string[]>([]);
 let contextVersion = 0;
 const request = ref<{ fingerprint: string; requestId: string }>();
-interface Draft extends LaminationReportDraft { taskVersion: string; boardItemCode?: string; foldingType: string; goodEdited?: boolean; operatorUserId?: number }
+interface Draft extends LaminationReportDraft {
+  taskVersion: string;
+  boardItemCode?: string;
+  foldingType: string;
+  materials: Partial<Record<number, number>>;
+  operatorUserId?: number;
+  sliceGoodEdited?: boolean;
+  unassignedBoards?: number;
+}
 const drafts = reactive<Record<number, Draft>>({});
 const boardOptions = reactive<Record<number, Api.BatchOptions>>({});
 const boardLoading = reactive<Record<number, boolean>>({});
 const boardErrors = reactive<Record<number, string>>({});
+const materialOptions = reactive<Record<number, StockApi.Stock[]>>({});
+const materialLoading = reactive<Record<number, boolean>>({});
+const materialErrors = reactive<Record<number, string>>({});
+const materialStockIds = reactive<Record<number, number[]>>({});
 const foldingOptions = ['二折', '三折', '四折', '六折', '八折', '十折', '十二折'].map((value) => ({ value }));
 const reportingEnded = (task: ScheduleApi.Task) => task.status === 'DONE' || task.status === 'CLOSED' || task.completedBySupplement === true;
 const canReport = (task: ScheduleApi.Task) => !!process.value && !reportingEnded(task) && !task.activeOrderId && !submittedIds.value.includes(task.id);
@@ -130,8 +145,14 @@ async function dispatch() {
   finally { if (version === contextVersion) busy.value = false; }
 }
 
-async function updateWorkDate(id: number, workDate: string, done: (success: boolean) => void) {
-  if (!canDispatch.value || busy.value || !tasks.value.some((task) => task.id === id)) {
+async function updateTaskDates(
+  ids: number[],
+  update: { deadlineDate: null | string } | { workDate: string },
+  done: (success: boolean) => void,
+) {
+  const [id] = ids;
+  const currentTaskIds = new Set(tasks.value.map((task) => task.id));
+  if (!canDispatch.value || busy.value || id === undefined || !ids.every((taskId) => currentTaskIds.has(taskId))) {
     done(false);
     return;
   }
@@ -139,16 +160,22 @@ async function updateWorkDate(id: number, workDate: string, done: (success: bool
   busy.value = true;
   let saved = false;
   try {
-    await updateScheduleTaskWorkDate({ id, workDate });
+    if ('deadlineDate' in update) {
+      await updateScheduleTaskDeadlineDate({ taskIds: ids, deadlineDate: update.deadlineDate });
+    } else if (ids.length === 1) {
+      await updateScheduleTaskWorkDate({ id, workDate: update.workDate });
+    } else {
+      await updateScheduleTasksWorkDate({ taskIds: ids, workDate: update.workDate });
+    }
     if (version !== contextVersion) return;
+    const updatedIds = new Set(ids);
+    const patch = 'workDate' in update ? { ...update, undated: false } : update;
     for (const task of job.my?.workshopTasks ?? []) {
-      if (task.id === id) {
-        task.workDate = workDate;
-        task.undated = false;
-      }
+      if (updatedIds.has(task.id)) Object.assign(task, patch);
     }
     saved = true;
-    message.success('生产日期已保存');
+    const label = 'workDate' in update ? '生产日期' : '截止日期';
+    message.success(ids.length === 1 ? `${label}已保存` : `已保存 ${ids.length} 项任务的${label}`);
   } catch (error) {
     if (version === contextVersion) message.error(businessError(error).msg);
   } finally {
@@ -172,22 +199,103 @@ function taskDraft(task: ScheduleApi.Task): Draft {
   const existing = drafts[task.id];
   if (existing?.taskVersion === taskVersion) return existing;
   const quantity = toNumber(task.quantity) ?? 0;
-  let planned: number | undefined = quantity;
-  if (task.process === 'MIX') {
-    planned = toNumber(task.output?.mixPlan?.wholeBatchBoards) ?? quantity;
-  } else if (task.process === 'SLICE') {
-    planned = toNumber(task.sliceBoardYield);
-  }
+  const planned = task.process === 'SLICE' ? toNumber(task.sliceBoardYield) : quantity;
   const draft: Draft = {
     taskVersion,
     attrs: task.output?.attrs ?? {},
-    goodQuantity: reportingEnded(task) ? undefined : remainingReportQuantity(task, planned),
-    defectQuantity: 0, foldingType: task.output?.foldingType?.trim() ?? '',
+    goodQuantity: reportingEnded(task) || task.process === 'MIX' ? undefined : remainingReportQuantity(task, planned),
+    defectQuantity: 0, foldingType: task.output?.foldingType?.trim() ?? '', materials: {},
     operatorUserId: (task.workerIds ?? '').split(',').filter(Boolean).length === 1 ? Number(task.workerIds) : undefined,
   };
   if (task.process === 'LAMINATE') laminationLayers(draft);
   drafts[task.id] = draft;
   return drafts[task.id]!;
+}
+
+async function loadMaterialOptions(task: ScheduleApi.Task) {
+  if (materialLoading[task.id]) return;
+  const version = contextVersion;
+  materialLoading[task.id] = true;
+  materialErrors[task.id] = '';
+  try {
+    const result = await getWorkbenchStock('BOARD', task.id);
+    if (version !== contextVersion) return;
+    materialOptions[task.id] = result.list.filter((stock) => Number(stock.quantity) > 0);
+  } catch (error) {
+    if (version === contextVersion) materialErrors[task.id] = businessError(error).msg;
+  } finally {
+    if (version === contextVersion) materialLoading[task.id] = false;
+  }
+}
+
+function actualMaterialOptions(task: ScheduleApi.Task) {
+  return (materialOptions[task.id] ?? []).map((stock) => ({
+    label: [stock.batchNo, stock.itemCode, `在库 ${formatQty(stock.quantity)} 张`].filter(Boolean).join(' · '),
+    value: stock.id,
+  }));
+}
+
+function updateMaterialSelection(task: ScheduleApi.Task, ids: number[]) {
+  const previous = materialStockIds[task.id] ?? [];
+  const draft = taskDraft(task);
+  const quantities = draft.materials;
+  if (previous.length === 1 && ids.length === 0) draft.unassignedBoards = quantities[previous[0]!];
+  if (previous.length === 0 && ids.length === 1) {
+    quantities[ids[0]!] = draft.unassignedBoards;
+    draft.unassignedBoards = undefined;
+  }
+  materialStockIds[task.id] = ids;
+  for (const id of Object.keys(quantities).map(Number)) {
+    if (!ids.includes(id)) Reflect.deleteProperty(quantities, id);
+  }
+}
+
+function materialLabel(task: ScheduleApi.Task, id: number) {
+  const stock = materialOptions[task.id]?.find((item) => item.id === id);
+  return stock?.batchNo ?? stock?.itemCode ?? `批次 ${id}`;
+}
+
+function plannedSliceBoards(task: ScheduleApi.Task) {
+  return (task.inputs ?? []).filter((input) => input.stage === 'BOARD')
+    .reduce((total, input) => total + (toNumber(input.quantity) ?? 0), 0);
+}
+
+function sliceBoardCapacity(task: ScheduleApi.Task) {
+  const output = task.output?.attrs;
+  if (!output) return undefined;
+  const draft = taskDraft(task);
+  const ids = materialStockIds[task.id] ?? [];
+  if (ids.length === 0) {
+    if (!draft.unassignedBoards) return undefined;
+    const rates = (task.inputs ?? []).filter((input) => input.stage === 'BOARD')
+      .map((input) => slicePerBoard(input.attrs ?? {}, output));
+    const rate = rates[0];
+    return rate && rates.every((value) => value === rate) ? draft.unassignedBoards * rate : undefined;
+  }
+  let capacity = 0;
+  for (const id of ids) {
+    const quantity = draft.materials[id];
+    const stock = materialOptions[task.id]?.find((item) => item.id === id);
+    const rate = slicePerBoard(stock?.item ?? {}, output);
+    if (!quantity || !rate) return undefined;
+    capacity += quantity * rate;
+  }
+  return capacity;
+}
+
+function reportGoodQuantity(task: ScheduleApi.Task) {
+  const draft = taskDraft(task);
+  if (task.process !== 'SLICE' || draft.sliceGoodEdited) return draft.goodQuantity;
+  const capacity = sliceBoardCapacity(task);
+  return capacity === undefined ? draft.goodQuantity : Math.max(0, capacity - (toNumber(draft.defectQuantity) ?? 0));
+}
+
+function taskReportWarning(task: ScheduleApi.Task) {
+  if (!selected(task)) return '';
+  const plan = props.process === 'MIX'
+    ? adjustedBoards(task) ?? task.output?.mixPlan?.wholeBatchBoards ?? task.quantity
+    : task.quantity;
+  return reportPlanWarning(plan, task.actualQuantity, reportGoodQuantity(task), task.unit);
 }
 function selectedBoard(task: ScheduleApi.Task) {
   const options = boardOptions[task.id];
@@ -203,17 +311,12 @@ function boardSelectOptions(task: ScheduleApi.Task) {
   }) ?? [];
 }
 function updateReportBoard(task: ScheduleApi.Task, code: string | undefined) {
-  const draft = taskDraft(task);
-  draft.boardItemCode = code;
-  if (draft.goodEdited) return;
-  const board = selectedBoard(task);
-  draft.goodQuantity = remainingReportQuantity(task,
-    board?.mixPlan?.wholeBatchBoards ?? board?.plannedBoards ?? task.output?.mixPlan?.wholeBatchBoards ?? task.quantity);
+  taskDraft(task).boardItemCode = code;
 }
 function updateReportGood(task: ScheduleApi.Task, value: unknown) {
   const draft = taskDraft(task);
   draft.goodQuantity = toNumber(value);
-  if (task.process === 'MIX') draft.goodEdited = true;
+  if (task.process === 'SLICE') draft.sliceGoodEdited = true;
 }
 async function loadBoards(task: ScheduleApi.Task) {
   if (props.process !== 'MIX' || boardOptions[task.id] || boardLoading[task.id]) return;
@@ -251,13 +354,27 @@ async function batchReport() {
   for (const task of selectedTasks.value) {
     if (!canReport(task)) { warning.value = `任务 #${task.id} 当前无法批量报工，请刷新后查看任务状态。`; return; }
     const draft = taskDraft(task);
-    const good = Number(draft.goodQuantity ?? 0); const defect = Number(draft.defectQuantity ?? 0);
+    if (props.process === 'MIX' && draft.goodQuantity === undefined) {
+      warning.value = `任务 #${task.id} 请填写本次实点良品张数。`; return;
+    }
+    const good = reportGoodQuantity(task) ?? 0; const defect = Number(draft.defectQuantity ?? 0);
     if (!Number.isFinite(good) || !Number.isFinite(defect) || good < 0 || defect < 0 || good + defect <= 0) {
       warning.value = `任务 #${task.id} 请填写本次完成数量或残次品数量，合计必须大于 0。`; return;
     }
     const available = batchAvailability(task);
-    if (available !== undefined && (props.process === 'LAMINATE' ? good : good + defect) > available) {
+    if (props.process !== 'SLICE' && available !== undefined && (props.process === 'LAMINATE' ? good : good + defect) > available) {
       warning.value = `任务 #${task.id} 当前可领批次可做 ${formatQty(available)} ${task.unit ?? ''}，请调整报工数量或等上道报工后刷新。`; return;
+    }
+    const materials = (materialStockIds[task.id] ?? []).map((stockId) => ({ stockId, quantity: Number(draft.materials[stockId] ?? 0) }));
+    if (props.process === 'SLICE' && (materials.length === 0 || materials.some((line) => !Number.isInteger(line.quantity) || line.quantity <= 0))) {
+      warning.value = `任务 #${task.id} 请选实际领用的板材批次，并填写本次实际使用张数。`; return;
+    }
+    if (props.process === 'SLICE' && materials.some((line) => line.quantity > Number(materialOptions[task.id]?.find((item) => item.id === line.stockId)?.quantity ?? 0))) {
+      warning.value = `任务 #${task.id} 实际使用张数超过该批次可用库存，请核对板材批次和数量。`; return;
+    }
+    const capacity = props.process === 'SLICE' ? sliceBoardCapacity(task) : undefined;
+    if (capacity !== undefined && good + defect > capacity) {
+      warning.value = `任务 #${task.id} 实领板材最多可开 ${formatQty(capacity)} 片，请核对本次良品与残次品数量。`; return;
     }
     if (props.process === 'MIX' && !draft.boardItemCode) { warning.value = `任务 #${task.id} 请先选择本次报工的板材。`; return; }
     if (props.process === 'FOLD' && !draft.foldingType.trim()) { warning.value = `任务 #${task.id} 请填写本次折叠类型。`; return; }
@@ -269,6 +386,7 @@ async function batchReport() {
       ...(props.process === 'MIX' ? { boardItemCode: draft.boardItemCode } : {}),
       ...(props.process === 'FOLD' ? { foldingType: draft.foldingType.trim() } : {}),
       ...(props.process === 'LAMINATE' && draft.laminateLayers ? { laminateDefects: laminationDefects(draft) } : {}),
+      ...(props.process === 'SLICE' ? { materials } : {}),
     });
   }
   const fingerprint = JSON.stringify({ process: props.process, rows });
@@ -282,7 +400,11 @@ async function batchReport() {
     const result = await batchReportWorkbenchTasks({ process: props.process, rows, requestId: request.value.requestId });
     if (version !== contextVersion) return;
     submittedIds.value.push(...rows.map((row) => row.taskId)); selectedIds.value = [];
-    for (const row of rows) Reflect.deleteProperty(drafts, row.taskId);
+    for (const row of rows) {
+      Reflect.deleteProperty(drafts, row.taskId);
+      Reflect.deleteProperty(materialStockIds, row.taskId);
+      Reflect.deleteProperty(materialOptions, row.taskId);
+    }
     request.value = undefined; message.success(`已完成 ${result.reported} 个任务的本次报工`);
     reportWarnings.value = result.warnings ?? [];
     emit('refresh');
@@ -298,6 +420,9 @@ watch([keyword, status], () => { pageNo.value = 1; });
 watch([() => props.factoryId, () => props.process], () => {
   contextVersion++; clearSelection(); expandedOrderKeys.value = []; request.value = undefined;
   submittedIds.value = []; reportWarnings.value = []; busy.value = false; pageNo.value = 1;
+  for (const record of [materialOptions, materialLoading, materialErrors, materialStockIds]) {
+    for (const key of Object.keys(record)) Reflect.deleteProperty(record, key);
+  }
   dispatchOpen.value = false; dispatchWorkers.value = []; operators.value = [];
   view.value = 'stock'; stockIssueOpen.value = false;
   for (const map of [drafts, boardOptions, boardLoading, boardErrors]) for (const key of Object.keys(map)) Reflect.deleteProperty(map, key);
@@ -346,6 +471,7 @@ const taskColumns = computed<TableColumnsType<ScheduleApi.Task>>(() => {
     { key: 'defect', title: isLamination ? '本次片材残次' : '本次残次品', width: 120 },
     ...(isLamination ? [output] : []),
     { key: 'progress', title: '计划 / 累计已报', width: isLamination ? 205 : 125 },
+    ...(props.process === 'SLICE' ? [{ key: 'sliceBoards', title: '领用板材数量', width: 205 }] : []),
     { key: 'focus', title: '成品要求', width: 320 },
     ...(isLamination ? [] : [output]),
   ];
@@ -428,6 +554,7 @@ const mixOutputLines = (task: ScheduleApi.Task) => reportMixPlanLines(task).filt
       <Button :type="view === 'plan' ? 'primary' : 'default'" :aria-pressed="view === 'plan'" :disabled="busy" @click="view = 'plan'">车间日计划</Button>
       <Button :type="view === 'orders' ? 'primary' : 'default'" :aria-pressed="view === 'orders'" :disabled="busy" @click="view = 'orders'">按订单查看</Button>
     </div>
+    <ReportCorrectionQueue :factory-id="factoryId" :process="props.process" @saved="emit('refresh')" />
     <template v-if="view === 'stock'">
       <div class="grid grid-cols-1 gap-3 xl:grid-cols-2">
         <StockCard :stages="process?.sources ?? []" :factory-id="factoryId" :refresh-key="my" mode="source">
@@ -461,7 +588,8 @@ const mixOutputLines = (task: ScheduleApi.Task) => reportMixPlanLines(task).filt
       :saving-work-date="busy"
       :tasks="tasks"
       @open-order="openPlanOrder"
-      @update-work-date="updateWorkDate"
+      @update-deadline-date="(ids, deadlineDate, done) => updateTaskDates(ids, { deadlineDate }, done)"
+      @update-work-date="(ids, workDate, done) => updateTaskDates(ids, { workDate }, done)"
     />
     <template v-else>
       <div class="flex flex-wrap items-center justify-between gap-3 border-y border-border py-2">
@@ -469,7 +597,7 @@ const mixOutputLines = (task: ScheduleApi.Task) => reportMixPlanLines(task).filt
         <div class="flex flex-wrap gap-2"><Input id="workshop-keyword" v-model:value="keyword" allow-clear class="w-64 max-w-full" placeholder="搜索订单、产品或任务编号" aria-label="搜索车间订单" /><Select id="workshop-status" v-model:value="status" :options="orderStatusOptions" class="w-40" aria-label="订单任务状态" /></div>
       </div>
       <div class="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 rounded border border-primary/20 bg-background px-3 py-2 shadow-sm">
-        <div class="text-sm">已勾选 <strong class="text-base text-primary">{{ selectedIds.length }}</strong> 个任务<span class="ml-3 text-xs text-muted-foreground">{{ estimatedMix ? '代报请选实际生产人员。原料按配方预估，已开工任务回原工序单报工。' : '员工自报请先派工；主任代报须选实际人员，按任务用料比例自动领料。已领料任务请回原工序单报工。' }}</span></div>
+        <div class="text-sm">已勾选 <strong class="text-base text-primary">{{ selectedIds.length }}</strong> 个任务<span class="ml-3 text-xs text-muted-foreground">{{ estimatedMix ? '代报请选实际生产人员，填写实点良品；已开工任务回原工序单报工。' : props.process === 'SLICE' ? '代报请选实际生产人员、实领板材批次并填张数；已领料任务从原工序单报工。' : '员工自报请先派工；主任代报须选实际人员，按任务用料比例自动领料。已领料任务请回原工序单报工。' }}</span></div>
         <div class="flex gap-2"><Button :disabled="busy || !selectedIds.length" @click="clearSelection">取消勾选</Button><Button v-if="canDispatch" :disabled="busy || dispatchDisabled" @click="openDispatch">派给员工</Button><Button type="primary" :loading="busy" :disabled="!selectedIds.length" @click="batchReport">批量报工</Button></div>
       </div>
       <p v-if="canDispatch && selectedTasks.some((task) => !canAssign(task))" class="m-0 text-xs text-orange-600">已开过工序单的任务不能重新派工，请先核对原作业及剩余数量。</p>
@@ -525,7 +653,7 @@ v-model:expanded-row-keys="expandedOrderKeys" class="workshop-order-table" :colu
             <Table
               class="workshop-task-table" :columns="taskColumns" :data-source="order.tasks" :row-selection="selection(order as WorkshopOrder)"
               :custom-row="(task: WorkshopOrder['tasks'][number]) => ({ class: 'workshop-task-row', 'data-task-id': task.id, 'data-progress-color': task.progress.color })"
-              row-key="id" :pagination="false" :scroll="{ x: props.process === 'LAMINATE' ? 1600 : 1355 }" bordered size="small"
+              row-key="id" :pagination="false" :scroll="{ x: props.process === 'LAMINATE' ? 1600 : props.process === 'SLICE' ? 1560 : 1355 }" bordered size="small"
 >
               <template #bodyCell="{ column, record: task }">
                 <template v-if="column.key === 'task'">
@@ -555,7 +683,7 @@ v-model:expanded-row-keys="expandedOrderKeys" class="workshop-order-table" :colu
                 <template v-else-if="column.key === 'output'">
                   <div class="mb-1 flex flex-wrap items-baseline gap-x-2"><span class="text-sm font-medium">{{ WORKSHOP_OUTPUT[props.process] }}</span><span class="text-xs text-muted-foreground">本工序规格 {{ outputSize(task as ScheduleApi.Task) }}</span></div>
                   <template v-if="props.process === 'SLICE'">
-                    <div v-if="sliceBoardInputs(task as ScheduleApi.Task)" class="break-words text-xs text-muted-foreground">领用板材 {{ sliceBoardInputs(task as ScheduleApi.Task) }}</div>
+                    <div v-if="sliceBoardInputs(task as ScheduleApi.Task)" class="break-words text-xs text-muted-foreground">计划用板 {{ sliceBoardInputs(task as ScheduleApi.Task) }}</div>
                     <div v-if="task.sliceBoardYield != null" class="text-xs text-muted-foreground">计划用板可开 {{ formatQty(task.sliceBoardYield) }} {{ task.unit }}</div>
                   </template>
                   <template v-if="props.process === 'LAMINATE' && taskDraft(task as ScheduleApi.Task).laminateLayers">
@@ -606,6 +734,50 @@ v-model:expanded-row-keys="expandedOrderKeys" class="workshop-order-table" :colu
                     </div>
                   </template>
                   <div v-else class="text-sm text-muted-foreground">已报残次 {{ formatQty(task.defectQuantity) }} {{ task.unit }}</div>
+                  <p v-if="taskReportWarning(task as ScheduleApi.Task)" class="mb-0 mt-1 text-xs text-warning" role="status">{{ taskReportWarning(task as ScheduleApi.Task) }}</p>
+                </template>
+                <template v-else-if="column.key === 'sliceBoards'">
+                  <div v-if="plannedSliceBoards(task as ScheduleApi.Task) > 0" class="mb-1 text-xs text-muted-foreground">
+                    计划 {{ formatQty(plannedSliceBoards(task as ScheduleApi.Task)) }} 张
+                  </div>
+                  <template v-if="canReport(task as ScheduleApi.Task)">
+                    <template v-if="materialStockIds[task.id]?.length">
+                      <label v-for="id in materialStockIds[task.id]" :key="id" class="mb-1 grid grid-cols-2 items-center gap-1 text-xs">
+                        <span class="break-all">{{ materialLabel(task as ScheduleApi.Task, id) }}</span>
+                        <InputNumber
+                          :id="`material-quantity-${order.key}-${task.id}-${id}`"
+                          :value="taskDraft(task as ScheduleApi.Task).materials[id]"
+                          :aria-label="`${materialLabel(task as ScheduleApi.Task, id)} 实际使用张数`"
+                          :disabled="!selected(task as ScheduleApi.Task) || busy" :min="1" :max="999999999"
+                          :precision="0" addon-after="张" placeholder="实领张数" size="small" class="!w-full"
+                          @update:value="taskDraft(task as ScheduleApi.Task).materials[id] = toNumber($event)"
+                        />
+                      </label>
+                    </template>
+                    <InputNumber
+                      v-else :id="`slice-boards-${order.key}-${task.id}`"
+                      :value="taskDraft(task as ScheduleApi.Task).unassignedBoards"
+                      :aria-label="`任务 ${task.id} 实际领用板材张数`"
+                      :disabled="!selected(task as ScheduleApi.Task) || busy" :min="1" :max="999999999"
+                      :precision="0" addon-after="张" placeholder="实领张数" size="small" class="!w-full"
+                      @update:value="taskDraft(task as ScheduleApi.Task).unassignedBoards = toNumber($event)"
+                    />
+                    <div v-if="sliceBoardCapacity(task as ScheduleApi.Task) !== undefined" class="mt-1 text-xs font-medium text-primary" aria-live="polite">
+                      预计可开 {{ formatQty(sliceBoardCapacity(task as ScheduleApi.Task)) }} 片
+                    </div>
+                    <Select
+                      v-if="selected(task as ScheduleApi.Task)" :id="`material-batches-${order.key}-${task.id}`"
+                      :value="materialStockIds[task.id] || []"
+                      :options="actualMaterialOptions(task as ScheduleApi.Task)" :loading="materialLoading[task.id]"
+                      :disabled="busy" aria-label="实际领用板材批次" class="mt-1 w-full" mode="multiple"
+                      :max-tag-count="1" option-filter-prop="label" placeholder="选择实际领用批次" size="small"
+                      @dropdown-visible-change="($event) => $event && loadMaterialOptions(task as ScheduleApi.Task)"
+                      @update:value="updateMaterialSelection(task as ScheduleApi.Task, $event as number[])"
+                    />
+                    <div v-if="materialErrors[task.id] && selected(task as ScheduleApi.Task)" class="mt-1 text-xs text-destructive">
+                      {{ materialErrors[task.id] }} <Button size="small" type="link" @click="loadMaterialOptions(task as ScheduleApi.Task)">重试</Button>
+                    </div>
+                  </template>
                 </template>
                 <template v-else-if="column.key === 'operator'"><Select :id="`operator-${order.key}-${task.id}`" v-model:value="taskDraft(task as ScheduleApi.Task).operatorUserId" class="w-full" size="small" :options="operatorOptions" :loading="operatorsLoading" :disabled="!selected(task as ScheduleApi.Task) || busy" allow-clear show-search option-filter-prop="label" placeholder="选实际生产人员" :aria-label="`任务 ${task.id} 实际生产人员`" /><p class="mb-0 mt-1 text-xs text-muted-foreground">录入：{{ my.userName || '当前登录人' }}；计件归所选人员</p></template>
                 <template v-else-if="column.key === 'color'">
@@ -616,7 +788,7 @@ v-model:expanded-row-keys="expandedOrderKeys" class="workshop-order-table" :colu
                   <template v-if="taskDraft(task as ScheduleApi.Task).laminateLayers">
                     <div v-for="layer in taskDraft(task as ScheduleApi.Task).laminateLayers" :key="layer.side" class="laminate-color-line"><InputNumber :id="`good-${order.key}-${task.id}-${layer.side}`" :value="layer.goodQuantity" size="small" class="!w-full" :addon-after="task.unit" :min="0" :precision="0" :disabled="!selected(task as ScheduleApi.Task) || busy" placeholder="片材良品数" :aria-label="`任务 ${task.id} ${layer.side === 'FRONT' ? '正面' : '反面'} ${colorLabel(layer.color)} 本次片材良品`" @change="changeLaminationGood(taskDraft(task as ScheduleApi.Task), layer.side, $event === null || $event === '' ? undefined : Number($event))" /></div>
                   </template>
-                  <InputNumber v-else :id="`good-${order.key}-${task.id}`" :value="taskDraft(task as ScheduleApi.Task).goodQuantity" size="small" class="!w-full" :addon-after="task.unit" :min="0" :precision="quantityPrecision(task.unit)" :disabled="!selected(task as ScheduleApi.Task) || busy" placeholder="本次良品数" :aria-label="`任务 ${task.id} 本次完成良品数量`" @update:value="updateReportGood(task as ScheduleApi.Task, $event)" />
+                  <InputNumber v-else :id="`good-${order.key}-${task.id}`" :value="reportGoodQuantity(task as ScheduleApi.Task)" size="small" class="!w-full" :addon-after="task.unit" :min="0" :precision="quantityPrecision(task.unit)" :disabled="!selected(task as ScheduleApi.Task) || busy" :placeholder="props.process === 'MIX' ? '实点良品数' : '本次良品数'" :aria-label="`任务 ${task.id} ${props.process === 'MIX' ? '实点良品数量' : '本次完成良品数量'}`" @update:value="updateReportGood(task as ScheduleApi.Task, $event)" />
                 </template>
                 <template v-else-if="column.key === 'defect'">
                   <template v-if="taskDraft(task as ScheduleApi.Task).laminateLayers">

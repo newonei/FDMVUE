@@ -2,6 +2,7 @@
 import type { FactoryRoute } from '../shared/routes';
 
 import type { FdmgongchangDashboardApi as Api } from '#/api/fdmgongchang/dashboard';
+import type { FactoryOrderBoardApi } from '#/api/fdmgongchang/order-board';
 
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
@@ -15,6 +16,7 @@ import dayjs from 'dayjs';
 
 import { getFactoryDashboard } from '#/api/fdmgongchang/dashboard';
 
+import OrderSummaryCards from '../order-board/order-summary-cards.vue';
 import FactorySwitch from '../shared/factory-switch.vue';
 import { FACTORY_ROUTES } from '../shared/routes';
 import { useFactory } from '../shared/use-factory';
@@ -49,21 +51,25 @@ const loadError = ref(false);
 const noFactory = ref(false);
 const root = ref<HTMLElement>();
 const { isFullscreen, toggle: toggleFullscreen } = useFullscreen(root);
+let requestVersion = 0;
 
 async function load() {
+  const version = ++requestVersion;
   loading.value = true;
   loadError.value = false;
   try {
     if (!factory.loaded.value) await factory.load();
+    if (version !== requestVersion) return;
     if (factory.factoryId.value === null) {
       noFactory.value = true;
       return;
     }
-    data.value = await getFactoryDashboard(range.value);
+    const result = await getFactoryDashboard(range.value);
+    if (version === requestVersion) data.value = result;
   } catch {
-    loadError.value = true;
+    if (version === requestVersion) loadError.value = true;
   } finally {
-    loading.value = false;
+    if (version === requestVersion) loading.value = false;
   }
 }
 
@@ -97,6 +103,13 @@ function changeRange(value: number | string) {
 /** 看板的人不一定能进每个页面（例如审计只读），没有权限时提示一下。 */
 const go = (target: FactoryRoute) =>
   router.push(target).catch(() => message.info('你的账号没有这个页面的权限'));
+
+function openOrderSummary(scope: FactoryOrderBoardApi.Scope) {
+  const factoryId = factory.factoryId.value;
+  if (factoryId !== null) {
+    void router.push({ ...FACTORY_ROUTES.orderBoard, query: { factoryId: String(factoryId), scope } });
+  }
+}
 
 const kpi = computed(() => data.value?.kpi);
 const yieldNow = computed(() => (kpi.value ? yieldRate(kpi.value.good, kpi.value.defect) : null));
@@ -233,6 +246,13 @@ const alerts = computed(() => {
             <KpiCard :hint="kpi.overdueOrders > 0 ? `${kpi.overdueOrders} 张已逾期` : kpi.pendingOrders > 0 ? `${kpi.pendingOrders} 张待接单` : '没有逾期'" :tone="kpi.overdueOrders > 0 ? 'danger' : 'default'" :value="String(kpi.openOrders)" label="待交付订单" unit="张" @open="go(FACTORY_ROUTES.productionOrder)" />
             <KpiCard :change="change(n(kpi.wageAmount), n(kpi.wageAmountPrev))" :hint="kpi.pendingRecords > 0 ? `${kpi.pendingRecords} 条待确认` : '已全部确认'" :tone="kpi.pendingRecords > 0 ? 'warning' : 'default'" :value="money(kpi.wageAmount)" label="报工工资" @open="go(FACTORY_ROUTES.wage)" />
           </section>
+
+          <OrderSummaryCards
+            v-if="data.orderSummary"
+            :interactive="canViewOrderBoard"
+            :summary="data.orderSummary"
+            @select="openOrderSummary"
+          />
 
           <!-- 今天各工序（原工序库存「今日生产」） -->
           <TodayLanes :today="data.today" />

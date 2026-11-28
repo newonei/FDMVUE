@@ -4,39 +4,45 @@ import type { Stage } from './model';
 import type { FactoryOrderBoardApi as Api } from '#/api/fdmgongchang/order-board';
 
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 
 import { useAccess } from '@vben/access';
 import { Page } from '@vben/common-ui';
 
 import { Alert, Button, Descriptions, Input, message, Modal, Result, Select, Spin, Switch, Table, Tag, Tooltip } from 'ant-design-vue';
 
-import { getOrderBoardOrder, getOrderBoardOwners, getOrderBoardPage, setOrderBoardOwner } from '#/api/fdmgongchang/order-board';
+import { getOrderBoardOrder, getOrderBoardOwners, getOrderBoardPage, getOrderBoardSummary, setOrderBoardOwner } from '#/api/fdmgongchang/order-board';
 
-import { dateText, num, ORDER_STATUS, specText, timeText } from '../production-order/shared';
+import { dateText, num, ORDER_STATUS, remainingOrderItemQuantity, specText, timeText } from '../production-order/shared';
 import FactoryDialog from '../shared/factory-dialog.vue';
 import FactorySwitch from '../shared/factory-switch.vue';
+import { FACTORY_ROUTES } from '../shared/routes';
 import { useFactory } from '../shared/use-factory';
-import { currentStage, dueHint, orderStages } from './model';
+import { currentStage, dueHint, ORDER_SUMMARY_LABELS, orderStages, orderSummaryQuantities } from './model';
+import OrderSummaryCards from './order-summary-cards.vue';
 import { refreshOrderBoardShortageBadge } from './shortage-badge';
 import StageDetailModal from './stage-detail-modal.vue';
 
 defineOptions({ name: 'FdmGongchangOrderBoard' });
 
 const factory = useFactory();
+const route = useRoute();
 const { hasAccessByCodes } = useAccess();
 const canAssign = computed(() => hasAccessByCodes(['fdmgongchang:production-order:handle']));
 const rows = ref<Api.Order[]>([]);
+const summary = ref<Api.Summary>();
+const summaryError = ref(false);
 const total = ref(0);
 const loading = ref(false);
 const error = ref(false);
 const initialized = ref(false);
 const noFactory = computed(() => initialized.value && factory.factoryId.value === null);
-const filters = reactive({ keyword: '', ownerUserId: undefined as number | undefined, status: undefined as Api.PageReq['status'] });
+const filters = reactive({ keyword: '', ownerUserId: undefined as number | undefined, scope: undefined as Api.Scope | undefined, status: undefined as Api.PageReq['status'] });
 const pageNo = ref(1);
 const pageSize = ref(10);
 const owners = ref<Api.Owner[]>([]);
 const ownerOptions = computed(() => owners.value.map((owner) => ({ label: owner.name, value: owner.userId })));
-const statusOptions = (['ACCEPTED', 'COMPLETED'] as const).map((value) => ({ label: ORDER_STATUS[value].label, value }));
+const statusOptions = (['SUBMITTED', 'ACCEPTED', 'COMPLETED'] as const).map((value) => ({ label: ORDER_STATUS[value].label, value }));
 const updatedAt = ref('');
 const autoRefresh = ref(true);
 let requestVersion = 0;
@@ -58,6 +64,7 @@ const ownerId = ref<number>();
 const ownerSaving = ref(false);
 const pageSummary = computed(() => ({
   completed: rows.value.filter((order) => order.status === 'COMPLETED').length,
+  pending: rows.value.filter((order) => order.status === 'SUBMITTED').length,
   running: rows.value.filter((order) => order.status === 'ACCEPTED').length,
   unassigned: rows.value.filter((order) => !order.ownerUserId).length,
 }));
@@ -89,6 +96,7 @@ const columns = computed(() => [
   { key: 'status', title: '订单状态', width: 100 },
   { key: 'currentStage', title: '当前进度', width: 155 },
   { key: 'product', title: '产品', width: 190 },
+  ...(filters.scope ? [{ key: 'summaryQuantity', title: ORDER_SUMMARY_LABELS[filters.scope], width: 145 }] : []),
   { key: 'owner', title: '负责人', width: 125 },
   { key: 'due', title: '交货日期', width: 130 },
   { key: 'customer', title: '客户 / 用途', width: 150 },
@@ -103,9 +111,12 @@ const productColumns = computed(() => [
   { dataIndex: 'productCode', key: 'productCode', title: '产品编码', width: 120 },
   { key: 'spec', title: '规格', width: 170 },
   { align: 'right' as const, dataIndex: 'quantity', key: 'quantity', title: '订单需求', width: 100 },
-  { align: 'right' as const, dataIndex: 'completedQuantity', key: 'completedQuantity', title: '已交货 / 入库', width: 110 },
-  { align: 'right' as const, dataIndex: 'shippedQuantity', key: 'shippedQuantity', title: '已出库', width: 100 },
-  ...stageColumns(productRows.value),
+  ...(detail.value?.status === 'SUBMITTED' ? [] : [
+    { align: 'right' as const, dataIndex: 'completedQuantity', key: 'completedQuantity', title: '已交货 / 入库', width: 110 },
+    { align: 'right' as const, key: 'remainingQuantity', title: '未完成数量', width: 100 },
+    { align: 'right' as const, dataIndex: 'shippedQuantity', key: 'shippedQuantity', title: '已出库', width: 100 },
+    ...stageColumns(productRows.value),
+  ]),
 ]);
 const boardWidth = computed(() => columns.value.reduce((width, column) => width + column.width, 0));
 const productWidth = computed(() => productColumns.value.reduce((width, column) => width + column.width, 0));
@@ -123,26 +134,34 @@ const detailFields = computed(() => {
   ] as const;
 });
 
-async function load() {
+async function load(refreshSummary = true) {
   const version = ++requestVersion;
   if (!(await factory.whenActive()) || version !== requestVersion || factory.factoryId.value === null) return;
   loading.value = true;
   error.value = false;
-  try {
-    const data = await getOrderBoardPage({ ...filters, keyword: filters.keyword.trim() || undefined, pageNo: pageNo.value, pageSize: pageSize.value });
-    if (version !== requestVersion) return;
-    rows.value = data.list;
-    total.value = data.total;
+  const shouldLoadSummary = refreshSummary || !summary.value;
+  const [pageResult, summaryResult] = await Promise.allSettled([
+    getOrderBoardPage({ ...filters, keyword: filters.keyword.trim() || undefined, pageNo: pageNo.value, pageSize: pageSize.value }),
+    shouldLoadSummary ? getOrderBoardSummary() : Promise.resolve(undefined),
+  ]);
+  if (version !== requestVersion) return;
+  if (pageResult.status === 'fulfilled') {
+    rows.value = pageResult.value.list;
+    total.value = pageResult.value.total;
     updatedAt.value = new Date().toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
-  } catch {
-    if (version === requestVersion) error.value = true;
-  } finally {
-    if (version === requestVersion) loading.value = false;
+  } else {
+    error.value = true;
   }
+  if (shouldLoadSummary) {
+    summaryError.value = summaryResult.status === 'rejected';
+    if (summaryResult.status === 'fulfilled') summary.value = summaryResult.value;
+  }
+  loading.value = false;
 }
 
 async function loadOwners() {
   const version = ++ownersVersion;
+  if (!(await factory.whenActive()) || version !== ownersVersion) return;
   try {
     const data = await getOrderBoardOwners();
     if (version === ownersVersion) owners.value = data;
@@ -154,6 +173,8 @@ async function loadOwners() {
 async function initialize() {
   try {
     await factory.load();
+    const targetFactory = routeFactoryId();
+    if (targetFactory !== undefined) factory.select(targetFactory);
     initialized.value = true;
     if (factory.factoryId.value !== null) await Promise.all([load(), loadOwners()]);
   } catch {
@@ -172,6 +193,8 @@ async function switchFactory(id: number) {
   rows.value = [];
   owners.value = [];
   total.value = 0;
+  summary.value = undefined;
+  summaryError.value = false;
   filters.ownerUserId = undefined;
   pageNo.value = 1;
   factory.select(id);
@@ -195,17 +218,31 @@ onActivated(() => { startRefresh(); if (initialized.value) void load(); });
 onDeactivated(() => { clearInterval(refreshTimer); clearTimeout(searchTimer); ++requestVersion; ++ownersVersion; ++detailVersion; closeStage(); loading.value = false; detailLoading.value = false; });
 onBeforeUnmount(() => { clearInterval(refreshTimer); clearTimeout(searchTimer); ++requestVersion; ++ownersVersion; ++detailVersion; closeStage(); });
 
-watch(() => [filters.keyword, filters.status, filters.ownerUserId], () => {
+watch(() => [filters.keyword, filters.status, filters.ownerUserId, filters.scope], () => {
   ++requestVersion;
   clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => { pageNo.value = 1; void load(); }, 300);
+  searchTimer = setTimeout(() => { pageNo.value = 1; void load(false); }, 300);
 });
 
-function resetFilters() {
+function resetFilters(scope?: Api.Scope) {
   filters.keyword = '';
   filters.status = undefined;
   filters.ownerUserId = undefined;
+  filters.scope = scope;
 }
+
+function routeFactoryId() {
+  const id = route.query.factoryId;
+  return factory.factories.value.find((candidate) => String(candidate.id) === id)?.id;
+}
+
+watch(() => [route.name, route.query.scope, route.query.factoryId], () => {
+  if (route.name !== FACTORY_ROUTES.orderBoard.name) return;
+  const scope = route.query.scope;
+  if (scope === 'DEMAND' || scope === 'PENDING' || scope === 'UNFINISHED') resetFilters(scope);
+  const targetFactory = routeFactoryId();
+  if (targetFactory !== undefined && initialized.value) void switchFactory(targetFactory);
+}, { immediate: true });
 
 async function openDetail(order: Api.Order) {
   const version = ++detailVersion;
@@ -298,11 +335,19 @@ async function saveOwner() {
         <template #extra><Button type="primary" @click="initialize">重新加载</Button></template>
       </Result>
       <section v-else class="board-panel rounded-xl border border-border bg-card p-4">
-        <div class="board-filters">
+        <OrderSummaryCards
+          :active-scope="filters.scope"
+          :loading="loading"
+          :summary="summary"
+          interactive
+          @select="(scope) => resetFilters(filters.scope === scope ? undefined : scope)"
+        />
+        <Alert v-if="summaryError" class="mt-3" type="warning" show-icon message="订单汇总加载失败，请刷新看板重试。" />
+        <div class="board-filters mt-4">
           <Input v-model:value="filters.keyword" allow-clear class="board-search" aria-label="搜索订单" placeholder="订单号、采购单、合同内部单号、客户、负责人" />
           <Select v-model:value="filters.status" :options="statusOptions" allow-clear placeholder="全部订单状态" class="w-40" aria-label="订单状态" />
           <Select v-model:value="filters.ownerUserId" :options="ownerOptions" allow-clear show-search option-filter-prop="label" placeholder="全部负责人" class="w-40" aria-label="按负责人筛选" />
-          <Button v-if="filters.keyword || filters.status || filters.ownerUserId" @click="resetFilters">重置筛选</Button>
+          <Button v-if="filters.keyword || filters.status || filters.ownerUserId || filters.scope" @click="resetFilters()">重置筛选</Button>
           <span class="ml-auto text-sm text-muted-foreground">共 <b class="text-foreground">{{ total }}</b> 张订单</span>
         </div>
         <div class="board-legend">
@@ -310,7 +355,7 @@ async function saveOwner() {
           <span class="legend-dot legend-dot--partial">部分完成</span>
           <span class="legend-dot legend-dot--done">已达标 / 完成</span>
           <span class="legend-dot legend-dot--reported">已报工，待核对</span>
-          <span class="text-muted-foreground">本页：生产中 {{ pageSummary.running }} · 已完成 {{ pageSummary.completed }} · 未分配负责人 {{ pageSummary.unassigned }}</span>
+          <span class="text-muted-foreground">本页待接单 {{ pageSummary.pending }} · 生产中 {{ pageSummary.running }} · 已完成 {{ pageSummary.completed }} · 未分配负责人 {{ pageSummary.unassigned }}</span>
         </div>
         <Alert v-if="error" class="mb-3" type="warning" show-icon message="刷新失败，当前显示上次加载的订单，请稍后重试。" />
         <Table
@@ -324,9 +369,9 @@ async function saveOwner() {
           sticky
           :scroll="{ x: boardWidth }"
           :pagination="{ current: pageNo, pageSize, total, showSizeChanger: true, pageSizeOptions: ['10', '20', '50'], showTotal: (count: number) => `共 ${count} 张订单` }"
-          @change="(page) => { pageNo = page.current ?? 1; pageSize = page.pageSize ?? 10; load(); }"
+          @change="(page) => { pageNo = page.current ?? 1; pageSize = page.pageSize ?? 10; load(false); }"
         >
-          <template #emptyText><div class="py-10 text-muted-foreground">{{ filters.keyword || filters.status || filters.ownerUserId ? '没有符合筛选条件的订单' : '当前工厂还没有已接单的订单' }}</div></template>
+          <template #emptyText><div class="py-10 text-muted-foreground">{{ filters.keyword || filters.status || filters.ownerUserId || filters.scope ? '没有符合筛选条件的订单' : '当前工厂还没有订单' }}</div></template>
           <template #bodyCell="{ column, record, text }">
             <template v-if="column.key === 'orderNo'">
               <button type="button" class="text-left font-semibold text-primary hover:underline" aria-haspopup="dialog" @click="openDetail(record as Api.Order)">{{ record.orderNo }}</button>
@@ -338,6 +383,9 @@ async function saveOwner() {
                 {{ record.items[0]?.productName || '—' }}<template v-if="record.items.length > 1"> 等 {{ record.items.length }} 个产品</template>
               </span>
             </template>
+            <template v-else-if="column.key === 'summaryQuantity' && filters.scope">
+              <span class="tabular-nums">{{ orderSummaryQuantities(record.items, filters.scope).join(' · ') || '—' }}</span>
+            </template>
             <template v-else-if="column.key === 'owner'">
               <span :class="record.ownerName ? '' : 'text-warning'">{{ record.ownerName || '未分配' }}</span>
               <Button v-if="canAssign" type="link" size="small" aria-haspopup="dialog" @click="assignOwner(record as Api.Order)">{{ record.ownerUserId ? '更换' : '分配' }}</Button>
@@ -348,7 +396,7 @@ async function saveOwner() {
             </template>
             <template v-else-if="column.key === 'customer'">{{ record.customerName || record.purpose || (record.sourceType === 'RESTOCK' ? '系统补库' : '内部生产需求') }}</template>
             <template v-else-if="String(column.key).startsWith('stage:')">
-              <Tooltip v-if="text" :title="text.detail" placement="top">
+              <Tooltip v-if="text && record.status !== 'SUBMITTED'" :title="text.detail" placement="top">
                 <button type="button" class="stage-cell" :class="`stage-cell--${text.state}`" aria-haspopup="dialog" :aria-label="`${text.label}：${text.text}，查看详情`" @click="openStage(record as Api.Order, text)">{{ text.text }}</button>
               </Tooltip>
               <span v-else class="text-muted-foreground">—</span>
@@ -383,7 +431,7 @@ async function saveOwner() {
           </Descriptions>
 
           <section class="min-w-0" aria-labelledby="order-board-detail-progress">
-            <h3 id="order-board-detail-progress" class="mb-2 text-base font-semibold">产品与工序进度</h3>
+            <h3 id="order-board-detail-progress" class="mb-2 text-base font-semibold">{{ detail.status === 'SUBMITTED' ? '产品明细' : '产品与工序进度' }}</h3>
             <Table
               bordered
               :columns="productColumns"
@@ -397,6 +445,7 @@ async function saveOwner() {
               <template #bodyCell="{ column, record, text }">
                 <span v-if="column.key === 'product'" class="font-medium">{{ record.productName }}</span>
                 <template v-else-if="column.key === 'spec'">{{ specText(record as Api.Item) || '—' }}</template>
+                <span v-else-if="column.key === 'remainingQuantity'" class="tabular-nums">{{ remainingOrderItemQuantity(record as Api.Item) }} {{ record.unit }}</span>
                 <span v-else-if="column.align === 'right'" class="tabular-nums">{{ num(text) }} {{ record.unit }}</span>
                 <template v-else-if="String(column.key).startsWith('stage:')">
                   <Tooltip v-if="text" :title="text.detail" placement="top">

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { TableColumnsType } from 'ant-design-vue';
+import type { TableColumnsType, TableProps } from 'ant-design-vue';
 
 import type { WorkshopPlanRow } from './plan-model';
 
@@ -8,9 +8,11 @@ import type { FdmgongchangStageStockApi as StockApi } from '#/api/fdmgongchang/s
 
 import { computed, ref, watch } from 'vue';
 
+import { useIntervalFn } from '@vueuse/core';
 import { Button, DatePicker, Input, Modal, Pagination, Select, Table } from 'ant-design-vue';
 
 import TaskMaterials from '../schedule/modules/task-materials.vue';
+import { factoryTodayText } from '../shared/factory-date';
 import { formatQty, sumQty, toNumber } from '../stage-stock/model';
 import { buildWorkshopPlanRows } from './plan-model';
 import RelatedOrderTable from './related-order-table.vue';
@@ -24,8 +26,12 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   openOrder: [id: number];
-  updateWorkDate: [id: number, workDate: string, done: (success: boolean) => void];
+  updateDeadlineDate: [ids: number[], deadlineDate: null | string, done: (success: boolean) => void];
+  updateWorkDate: [ids: number[], workDate: string, done: (success: boolean) => void];
 }>();
+
+const dateLabels = { date: '生产日期', deadlineDate: '截止日期' } as const;
+type DateField = keyof typeof dateLabels;
 
 const keyword = ref('');
 const date = ref<string>();
@@ -33,10 +39,13 @@ const status = ref<WorkshopPlanRow['progress']['group']>();
 const page = ref(1);
 const pageSize = ref(20);
 const detailId = ref<number>();
-const workDateId = ref<number>();
-const workDateDraft = ref<string>();
+const selectedIds = ref<number[]>([]);
+const dateEditor = ref<{ batch: boolean; field: DateField; ids: number[] }>();
+const dateDraft = ref<null | string>();
+const today = ref(factoryTodayText());
+useIntervalFn(() => { today.value = factoryTodayText(); }, 60_000);
 
-const rows = computed(() => buildWorkshopPlanRows(props.tasks, props.options));
+const rows = computed(() => buildWorkshopPlanRows(props.tasks, props.options, today.value));
 const dateOptions = computed(() => [...new Set(rows.value.map((row) => row.date))]
   .map((value) => ({ label: value || '未定日期', value })));
 const statusOptions = [
@@ -57,11 +66,26 @@ const visibleRows = computed(() => {
   });
 });
 const pageRows = computed(() => visibleRows.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value));
+const selectionWidth = 44;
+const rowSelection = computed<TableProps<WorkshopPlanRow>['rowSelection']>(() => {
+  if (!props.canEditWorkDate) return undefined;
+  return {
+    columnWidth: selectionWidth,
+    fixed: true,
+    getCheckboxProps: (row) => ({
+      'aria-label': `选择任务 ${row.task.id}`,
+      disabled: props.savingWorkDate,
+    }),
+    onChange: (keys) => { selectedIds.value = keys.map(Number); },
+    preserveSelectedRowKeys: true,
+    selectedRowKeys: selectedIds.value,
+  };
+});
 const dateSpans = computed(() => {
   const spans = new Map<number, number>();
   let first: undefined | WorkshopPlanRow;
   for (const row of pageRows.value) {
-    if (first?.date === row.date) {
+    if (first?.date === row.date && first.overdue === row.overdue) {
       spans.set(first.task.id, (spans.get(first.task.id) ?? 1) + 1);
       spans.set(row.task.id, 0);
     } else {
@@ -73,31 +97,63 @@ const dateSpans = computed(() => {
 });
 const pendingCount = computed(() => visibleRows.value.filter((row) => row.progress.group === 'pending').length);
 const detail = computed(() => rows.value.find((row) => row.task.id === detailId.value));
-const workDateRow = computed(() => rows.value.find((row) => row.task.id === workDateId.value));
-const canSaveWorkDate = computed(() => props.canEditWorkDate && !!workDateRow.value
-  && !!workDateDraft.value && workDateDraft.value !== workDateRow.value.date);
+const editorRows = computed(() => {
+  if (!dateEditor.value) return [];
+  const ids = new Set(dateEditor.value.ids);
+  return rows.value.filter((row) => ids.has(row.task.id));
+});
+const editorRow = computed(() => dateEditor.value?.batch ? undefined : editorRows.value[0]);
+const dateLabel = computed(() => dateEditor.value && dateLabels[dateEditor.value.field]);
+const canSaveDate = computed(() => {
+  const editor = dateEditor.value;
+  if (!props.canEditWorkDate || !editor || dateDraft.value === undefined
+    || (editor.field === 'date' && !dateDraft.value)) return false;
+  return editorRows.value.length === editor.ids.length
+    && editorRows.value.some((row) => (row[editor.field] || null) !== dateDraft.value);
+});
 
-watch([keyword, date, status, pageSize], () => { page.value = 1; });
+watch([keyword, date, status], () => {
+  page.value = 1;
+  selectedIds.value = [];
+});
+watch(pageSize, () => { page.value = 1; });
+watch(rows, (currentRows) => {
+  const ids = new Set(currentRows.map((row) => row.task.id));
+  selectedIds.value = selectedIds.value.filter((id) => ids.has(id));
+});
 watch(() => visibleRows.value.length, (total) => {
   page.value = Math.min(page.value, Math.max(1, Math.ceil(total / pageSize.value)));
 });
 
-function openWorkDateEditor(id: number, currentDate: string) {
-  workDateDraft.value = currentDate || undefined;
-  workDateId.value = id;
+function openDateEditor(field: DateField, id: number, currentDate: string) {
+  dateDraft.value = currentDate || undefined;
+  dateEditor.value = { field, ids: [id], batch: false };
 }
 
-function saveWorkDate() {
-  const id = workDateId.value;
-  const workDate = workDateDraft.value;
-  if (id === undefined || !workDate || !canSaveWorkDate.value || props.savingWorkDate) return;
+function openBatchDateEditor(field: DateField) {
+  if (selectedIds.value.length === 0 || props.savingWorkDate) return;
+  dateDraft.value = undefined;
+  dateEditor.value = { field, ids: [...selectedIds.value], batch: true };
+}
 
-  emit('updateWorkDate', id, workDate, (success) => {
-    if (!success || workDateId.value !== id) return;
-    workDateId.value = undefined;
-    if (date.value !== undefined && date.value !== workDate) date.value = undefined;
-    page.value = 1;
-  });
+function saveDate() {
+  const editor = dateEditor.value;
+  const value = dateDraft.value;
+  if (!editor || value === undefined || !canSaveDate.value || props.savingWorkDate) return;
+  const done = (success: boolean) => {
+    if (!success || dateEditor.value !== editor) return;
+    dateEditor.value = undefined;
+    if (editor.batch) selectedIds.value = [];
+    if (editor.field === 'date') {
+      if (date.value !== undefined && date.value !== value) date.value = undefined;
+      page.value = 1;
+    }
+  };
+  if (editor.field === 'deadlineDate') {
+    emit('updateDeadlineDate', editor.ids, value, done);
+  } else if (value) {
+    emit('updateWorkDate', editor.ids, value, done);
+  }
 }
 
 const materialTitles: Record<string, string> = {
@@ -116,12 +172,13 @@ const columns = computed<TableColumnsType<WorkshopPlanRow>>(() => {
   const requirement = requirementTitles[props.process];
   return [
     {
-      key: 'date', title: '生产日期', width: 106, fixed: 'left',
+      key: 'date', title: dateLabels.date, width: 106, fixed: 'left',
       customCell: (row) => ({
         rowSpan: props.canEditWorkDate ? 1 : dateSpans.value.get(row.task.id),
         class: 'plan-date-cell',
       }),
     },
+    { key: 'deadlineDate', title: dateLabels.deadlineDate, width: 106, fixed: 'left' },
     { key: 'order', title: '订单 / 客户', width: 166, fixed: 'left' },
     { key: 'size', title: '成品规格', width: 132 },
     { key: 'colors', title: '颜色 / 正反', width: 136 },
@@ -136,7 +193,9 @@ const columns = computed<TableColumnsType<WorkshopPlanRow>>(() => {
     { key: 'actions', title: '操作', width: 72 },
   ];
 });
-const tableWidth = computed(() => columns.value.reduce((sum, column) => sum + Number(column.width), 0));
+const tableWidth = computed(() => columns.value.reduce(
+  (sum, column) => sum + Number(column.width), rowSelection.value ? selectionWidth : 0,
+));
 const mixSummaryLabels = new Set(['克重', '密炼锅数', '模具']);
 function summaryRequirements(fields: WorkshopPlanRow['requirements']) {
   if (props.process !== 'MIX') return fields;
@@ -156,6 +215,29 @@ const percent = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2, style
       <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
         <h2 class="m-0 text-base font-semibold">车间日计划</h2>
         <span class="text-muted-foreground">共 {{ visibleRows.length }} 项 · 待跟进 {{ pendingCount }} 项</span>
+        <template v-if="canEditWorkDate">
+          <Button
+            :disabled="!selectedIds.length || savingWorkDate"
+            size="small"
+            type="primary"
+            @click="openBatchDateEditor('date')"
+          >
+            批量设置生产日期
+          </Button>
+          <Button
+            :disabled="!selectedIds.length || savingWorkDate"
+            size="small"
+            @click="openBatchDateEditor('deadlineDate')"
+          >
+            批量设置截止日期
+          </Button>
+          <template v-if="selectedIds.length">
+            <span class="text-muted-foreground" role="status">已选 {{ selectedIds.length }} 项</span>
+            <Button :disabled="savingWorkDate" class="!px-0" size="small" type="link" @click="selectedIds = []">
+              清空选择
+            </Button>
+          </template>
+        </template>
       </div>
       <div class="flex flex-wrap gap-2">
         <Input
@@ -190,13 +272,14 @@ const percent = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2, style
     <Table
       :columns="columns"
       :custom-row="(row: WorkshopPlanRow) => ({
-        class: { 'plan-day-start': (dateSpans.get(row.task.id) ?? 0) > 0 },
+        class: { 'plan-day-start': (dateSpans.get(row.task.id) ?? 0) > 0, 'plan-overdue': row.overdue },
         'data-task-id': row.task.id,
       })"
       :data-source="pageRows"
       :locale="{ emptyText: rows.length ? '没有符合条件的任务' : '本车间暂无已下发任务' }"
       :pagination="false"
       :row-key="(row: WorkshopPlanRow) => row.task.id"
+      :row-selection="rowSelection"
       :scroll="{ x: tableWidth, y: 'max(320px, calc(100dvh - 320px))' }"
       bordered
       class="workshop-plan-table"
@@ -206,18 +289,23 @@ const percent = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2, style
         <span v-if="column.key === 'goodRate'" title="本任务实际报工良品 ÷（实际报工良品＋残次品），补派任务按自身报工单独计算">{{ column.title }}</span>
       </template>
       <template #bodyCell="{ column, record: row }">
-        <template v-if="column.key === 'date'">
-          <span class="whitespace-nowrap font-semibold tabular-nums">{{ row.date || '未定日期' }}</span>
+        <template v-if="column.key === 'date' || column.key === 'deadlineDate'">
+          <span class="whitespace-nowrap font-semibold tabular-nums">
+            {{ row[column.key] || (column.key === 'date' ? '未定日期' : '未设置') }}
+          </span>
+          <span v-if="column.key === 'deadlineDate' && row.overdue" class="block whitespace-nowrap text-xs text-destructive">
+            到期未完成
+          </span>
           <Button
             v-if="canEditWorkDate"
-            :aria-label="`${row.date ? '调整' : '设置'}任务 ${row.task.id} 的生产日期`"
+            :aria-label="`${row[column.key] ? '调整' : '设置'}任务 ${row.task.id} 的${dateLabels[column.key]}`"
             :disabled="savingWorkDate"
             class="!block !h-auto !px-0 !text-xs"
             size="small"
             type="link"
-            @click="openWorkDateEditor(row.task.id, row.date)"
+            @click="openDateEditor(column.key, row.task.id, row[column.key])"
           >
-            {{ row.date ? '调整日期' : '设置日期' }}
+            {{ row[column.key] ? '调整' : '设置' }}{{ column.key === 'date' ? '日期' : dateLabels.deadlineDate }}
           </Button>
         </template>
         <template v-else-if="column.key === 'order'">
@@ -331,32 +419,44 @@ const percent = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2, style
     </div>
 
     <Modal
-      :open="!!workDateRow && !!canEditWorkDate"
-      :title="`任务 #${workDateId ?? ''} 的生产日期`"
+      :open="!!canEditWorkDate && (!!dateEditor?.batch || !!editorRow)"
+      :title="dateEditor?.batch ? `批量设置${dateLabel}` : `任务 #${editorRow?.task.id ?? ''} 的${dateLabel ?? ''}`"
       :cancel-button-props="{ disabled: savingWorkDate }"
       :closable="!savingWorkDate"
       :confirm-loading="savingWorkDate"
       :keyboard="!savingWorkDate"
       :mask-closable="false"
-      :ok-button-props="{ disabled: !canSaveWorkDate }"
+      :ok-button-props="{ disabled: !canSaveDate }"
       :width="400"
       ok-text="保存"
-      @cancel="workDateId = undefined"
-      @ok="saveWorkDate"
+      @cancel="dateEditor = undefined"
+      @ok="saveDate"
     >
-      <div v-if="workDateRow" class="flex flex-col gap-4">
-        <p class="m-0 font-semibold">{{ workDateRow.order }}</p>
+      <div v-if="dateEditor" class="flex flex-col gap-4">
+        <p v-if="dateEditor.batch" class="m-0">将为选中的 {{ dateEditor.ids.length }} 项任务统一设置{{ dateLabel }}。</p>
+        <p v-else-if="editorRow" class="m-0 font-semibold">{{ editorRow.order }}</p>
         <label for="workshop-task-work-date" class="flex flex-col gap-1">
-          <span>生产日期</span>
+          <span>{{ dateLabel }}</span>
           <DatePicker
             id="workshop-task-work-date"
-            v-model:value="workDateDraft"
-            :allow-clear="false"
+            :value="dateDraft ?? undefined"
+            :allow-clear="dateEditor.field === 'deadlineDate'"
             :disabled="savingWorkDate"
-            placeholder="选择生产日期"
+            :placeholder="`选择${dateLabel}`"
             value-format="YYYY-MM-DD"
+            @update:value="dateDraft = typeof $event === 'string' ? $event || null : $event?.format('YYYY-MM-DD') ?? null"
           />
         </label>
+        <Button
+          v-if="dateEditor.field === 'deadlineDate' && dateEditor.batch && dateDraft === undefined && editorRows.some((row) => row.deadlineDate)"
+          :disabled="savingWorkDate"
+          class="self-start !px-0"
+          type="link"
+          @click="dateDraft = null"
+        >
+          清除所选任务的截止日期
+        </Button>
+        <p v-if="dateEditor.field === 'deadlineDate' && dateDraft === null" class="m-0 text-muted-foreground">保存后将清除截止日期。</p>
       </div>
     </Modal>
 
@@ -423,6 +523,16 @@ const percent = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2, style
 .workshop-plan-table :deep(.plan-defect-cell),
 .workshop-plan-table :deep(.plan-good-rate-cell) {
   background: color-mix(in srgb, hsl(var(--warning)) 12%, hsl(var(--background)));
+}
+
+.workshop-plan-table :deep(.ant-table-tbody > tr.plan-overdue > td) {
+  background: color-mix(in srgb, hsl(var(--destructive)) 17%, hsl(var(--background)));
+}
+
+.workshop-plan-table :deep(.ant-table-tbody > tr.plan-overdue:hover > td),
+.workshop-plan-table :deep(.ant-table-tbody > tr.plan-overdue > .ant-table-cell-row-hover),
+.workshop-plan-table :deep(.ant-table-tbody > tr.plan-overdue.ant-table-row-selected > td) {
+  background: color-mix(in srgb, hsl(var(--destructive)) 25%, hsl(var(--background)));
 }
 
 .plan-color {

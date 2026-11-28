@@ -12,6 +12,7 @@ import { Alert, Button, message, Table } from 'ant-design-vue';
 
 import { getOrderPage } from '#/api/fdmgongchang/stage-stock';
 
+import ReportCorrectionDialog from '../shared/report-correction-dialog.vue';
 import { formatQty, toNumber } from '../stage-stock/model';
 import OrderModal from '../stage-stock/modules/order-modal.vue';
 import { useJob } from '../workbench/use-job';
@@ -39,6 +40,17 @@ const ownOrders = computed(() =>
   props.refreshKey.inProgress.filter((order) => order.process === props.process),
 );
 const ownById = computed(() => new Map(ownOrders.value.map((order) => [order.id, order])));
+const reportHistory = ref(false);
+const localOrders = computed(() => reportHistory.value
+  ? (props.refreshKey.recentDone ?? []).filter((order) => order.process === props.process)
+  : ownOrders.value);
+const correctionOpen = ref(false);
+const correctionOrder = ref<InProgressOrder>();
+
+function openCorrection(order: InProgressOrder) {
+  correctionOrder.value = order;
+  correctionOpen.value = true;
+}
 
 const columns: TableColumnsType<InProgressOrder> = [
   { key: 'order', title: '工序单', width: 185 },
@@ -58,15 +70,15 @@ const retry = ref(0);
 const reportOpen = ref(false);
 const reportOrderId = ref<number>();
 const ownOnly = computed(() => !canQuery.value || loadFailed.value);
-const visibleOrders = computed(() => ownOnly.value ? ownOrders.value : orders.value);
+const visibleOrders = computed(() => ownOnly.value ? localOrders.value : orders.value);
 const pagination = computed<TablePaginationConfig>(() => ({
   current: ownOnly.value
-    ? Math.min(ownPageNo.value, Math.max(1, Math.ceil(ownOrders.value.length / pageSize)))
+    ? Math.min(ownPageNo.value, Math.max(1, Math.ceil(localOrders.value.length / pageSize)))
     : pageNo.value,
   hideOnSinglePage: true,
   pageSize,
   showSizeChanger: false,
-  total: ownOnly.value ? ownOrders.value.length : total.value,
+  total: ownOnly.value ? localOrders.value.length : total.value,
 }));
 
 const stageUnit = (stage: string) => job.options?.stages.find((item) => item.code === stage)?.unit;
@@ -101,6 +113,13 @@ function changePage(page: TablePaginationConfig) {
   else pageNo.value = page.current ?? 1;
 }
 
+function showHistory(history: boolean) {
+  if (reportHistory.value === history) return;
+  pageNo.value = ownPageNo.value = 1;
+  orders.value = [];
+  reportHistory.value = history;
+}
+
 watch([() => props.factoryId, () => props.process, canQuery], () => {
   pageNo.value = 1;
   ownPageNo.value = 1;
@@ -109,10 +128,12 @@ watch([() => props.factoryId, () => props.process, canQuery], () => {
   loadFailed.value = false;
   reportOpen.value = false;
   reportOrderId.value = undefined;
+  correctionOpen.value = false;
+  correctionOrder.value = undefined;
 });
 
 watch(
-  [() => props.factoryId, () => props.process, () => props.refreshKey, canQuery, pageNo, retry],
+  [() => props.factoryId, () => props.process, () => props.refreshKey, canQuery, pageNo, retry, reportHistory],
   async (_, __, onCleanup) => {
     loading.value = false;
     if (!canQuery.value || props.factoryId === null) return;
@@ -125,7 +146,7 @@ watch(
         pageNo: pageNo.value,
         pageSize,
         process: props.process,
-        status: 'IN_PROGRESS',
+        status: reportHistory.value ? 'COMPLETED' : 'IN_PROGRESS',
       });
       if (!active) return;
 
@@ -150,20 +171,23 @@ watch(
 <template>
   <section class="min-w-0 rounded-lg border border-border bg-card p-3 sm:p-4">
     <header class="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-      <h2 class="m-0 text-base font-semibold">本工序在制</h2>
+      <div class="flex items-center gap-2">
+        <Button :type="reportHistory ? 'default' : 'primary'" size="small" @click="showHistory(false)">本工序在制</Button>
+        <Button :type="reportHistory ? 'primary' : 'default'" size="small" @click="showHistory(true)">报工记录</Button>
+      </div>
       <span v-if="!loading" class="text-xs text-muted-foreground">
-        <template v-if="ownOnly">我的在制 · </template>{{ pagination.total }} 单
+        <template v-if="ownOnly">{{ reportHistory ? '我最近完工' : '我的在制' }} · </template>{{ pagination.total }} 单
       </span>
     </header>
 
-    <Alert v-if="loadFailed" class="mb-3" message="车间在制加载失败，正在显示我的在制" show-icon type="warning">
+    <Alert v-if="loadFailed" class="mb-3" message="车间工序单加载失败，正在显示我的记录" show-icon type="warning">
       <template #action><Button size="small" :loading="loading" @click="retry++">重试</Button></template>
     </Alert>
     <Table
       :columns="columns"
       :data-source="visibleOrders"
       :loading="loading"
-      :locale="{ emptyText: ownOnly ? '我在本工序暂无在制单' : '本工序暂无在制单' }"
+      :locale="{ emptyText: reportHistory ? '暂无已完工的报工记录' : ownOnly ? '我在本工序暂无在制单' : '本工序暂无在制单' }"
       :pagination="pagination"
       :scroll="{ x: 740 }"
       row-key="id"
@@ -188,18 +212,13 @@ watch(
           <span class="tabular-nums">{{ formatQty(record.goodQuantity) }} {{ stageUnit(record.outputStage) }}</span>
         </template>
         <template v-else-if="column.key === 'actions'">
-          <div v-if="ownById.has(record.id) || canReportOthers" class="flex flex-wrap gap-2">
-            <Button :disabled="loading" size="small" type="primary" @click="reportOrder(record.id)">报产出</Button>
-            <Button
-              v-if="ownById.has(record.id) && process !== 'MIX'"
-              :disabled="loading"
-              size="small"
-              @click="supplementOrder(record.id)"
-            >
-              补领
-            </Button>
+          <div class="flex flex-wrap gap-2">
+            <template v-if="!reportHistory && (ownById.has(record.id) || canReportOthers)">
+              <Button :disabled="loading" size="small" type="primary" @click="reportOrder(record.id)">报产出</Button>
+              <Button v-if="ownById.has(record.id) && process !== 'MIX'" :disabled="loading" size="small" @click="supplementOrder(record.id)">补领</Button>
+            </template>
+            <Button v-if="reportHistory || (record.reportCount ?? 0) > 0" :disabled="loading" size="small" @click="openCorrection(record as InProgressOrder)">查看与更正</Button>
           </div>
-          <span v-else class="text-muted-foreground">—</span>
         </template>
       </template>
     </Table>
@@ -211,6 +230,13 @@ watch(
       :order-id="reportOrderId"
       mode="report"
       @saved="onReportSaved"
+    />
+    <ReportCorrectionDialog
+      v-model:open="correctionOpen"
+      :order-id="correctionOrder?.id"
+      :order-no="correctionOrder?.orderNo"
+      :unit="correctionOrder ? stageUnit(correctionOrder.outputStage) : undefined"
+      @saved="emit('refresh')"
     />
   </section>
 </template>

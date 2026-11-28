@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import type { CostMetric } from './analytics-model';
 
-import type { PayrollMonthlyAnalytics } from '#/api/fdmplatform/payroll';
+import type {
+  PayrollAmountField,
+  PayrollMonthlyAnalytics,
+} from '#/api/fdmplatform/payroll';
 
 import { computed } from 'vue';
 
@@ -11,7 +14,6 @@ import {
   average,
   costMetrics,
   reportPeriod,
-  summarize,
 } from './analytics-model';
 import { incomeGroups } from './model';
 import PayrollChartCard from './PayrollChartCard.vue';
@@ -24,6 +26,18 @@ const props = defineProps<{
   rows: PayrollMonthlyAnalytics[];
   startMonth: string;
 }>();
+
+const employeeIncomeGroups = [
+  { title: '底薪', color: '#91a8cc', keys: ['base'] },
+  { title: '提成', color: '#ddca70', keys: ['commission'] },
+  { title: '奖金', color: '#a0c383', keys: ['bonus'] },
+  { title: '公司社保', color: '#dfc4a8', keys: ['employerSocial'] },
+  { title: '公司公积金', color: '#b8ada3', keys: ['employerFund'] },
+] as const satisfies ReadonlyArray<{
+  color: string;
+  keys: readonly PayrollAmountField[];
+  title: string;
+}>;
 
 const range = computed(() => reportPeriod(props.startMonth, props.endMonth));
 const annual = computed(
@@ -84,37 +98,41 @@ const monthCompare = computed(() =>
     }),
   })),
 );
-const compositionAverage = computed(() => {
-  const buckets = props.individual
-    ? range.value.comparisonMonths.map(({ key }) =>
-        summarize(props.rows.filter(({ month }) => month.endsWith(`-${key}`))),
-      )
-    : range.value.years.map((year) => annual.value.get(year));
-  return incomeGroups.map(({ title, color, keys }) => ({
-    color,
-    name: title,
-    values: buckets.map((row) =>
-      row
-        ? average(
-            keys.reduce((sum, key) => sum + (row.income[key] ?? 0), 0),
-            props.individual ? row.months : row.people,
-          )
-        : null,
-    ),
-  }));
-});
-const compositionTotal = computed(() =>
-  incomeGroups.map(({ title, color, keys }) => ({
-    color,
-    name: title,
-    values: range.value.years.map((year) => {
-      const row = annual.value.get(year);
-      return row
-        ? keys.reduce((sum, key) => sum + (row.income[key] ?? 0), 0)
-        : null;
-    }),
-  })),
+const compositionYears = computed(() =>
+  range.value.years.map((year) => annual.value.get(year)),
 );
+
+function compositionSeries(monthlyAverage: boolean) {
+  const groups = props.individual ? employeeIncomeGroups : incomeGroups;
+  return groups.map(({ title, color, keys }) => ({
+    color,
+    name: title,
+    values: compositionYears.value.map((row) => {
+      if (!row) return null;
+      const total = keys.reduce((sum, key) => sum + (row.income[key] ?? 0), 0);
+      return monthlyAverage
+        ? average(total, props.individual ? row.months : row.people)
+        : total;
+    }),
+  }));
+}
+
+function preTaxTooltipTotal(monthlyAverage: boolean) {
+  if (!props.individual) return undefined;
+  return {
+    name: '税前应发（扣除公司缴费）',
+    values: compositionYears.value.map((row) => {
+      if (!row) return null;
+      const total = amount(row, 'cashGross');
+      return monthlyAverage ? average(total, row.months) : total;
+    }),
+  };
+}
+
+const compositionAverage = computed(() => compositionSeries(true));
+const compositionTotal = computed(() => compositionSeries(false));
+const preTaxAverage = computed(() => preTaxTooltipTotal(true));
+const preTaxAnnual = computed(() => preTaxTooltipTotal(false));
 </script>
 
 <template>
@@ -156,25 +174,31 @@ const compositionTotal = computed(() =>
   </div>
   <div v-else class="analysis-charts">
     <PayrollChartCard
-      :columns="individual ? monthsOfYear : yearLabels"
+      :columns="yearLabels"
       :description="
         individual
-          ? '对所选范围内的同一月份取平均'
+          ? '各年合计 ÷ 所选范围内实际有工资记录的月数'
           : '按年度核算人月计算人均月度构成'
       "
       :series="compositionAverage"
-      :title="individual ? '月度平均薪资构成' : '年度平均薪资构成'"
-      stacked
-      type="bar"
+      :stacked="!individual"
+      :title="individual ? '月度平均薪资构成（税前）' : '年度平均薪资构成'"
+      :tooltip-total="preTaxAverage"
+      :type="individual ? 'grouped-bar' : 'bar'"
     />
     <PayrollChartCard
       :columns="yearLabels"
-      description="汇总所选范围内的已记录项目，单位缴费单列"
+      :description="
+        individual
+          ? '按年汇总所选范围内的工资记录'
+          : '汇总所选范围内的已记录项目，单位缴费单列'
+      "
       :large-amounts="!individual"
       :series="compositionTotal"
-      title="年度薪资构成"
-      stacked
-      type="bar"
+      :stacked="!individual"
+      :title="individual ? '年度薪资构成（税前）' : '年度薪资构成'"
+      :tooltip-total="preTaxAnnual"
+      :type="individual ? 'grouped-bar' : 'bar'"
     />
   </div>
 </template>

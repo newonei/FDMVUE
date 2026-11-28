@@ -17,7 +17,7 @@ import {
   toNumber,
 } from '../model';
 
-/** 在制工序单退回余料：退回到原来那一行库存（同批次、同库位）。 */
+/** 退回原批次库存。已完工的工序单补登时记录更正原因。 */
 const props = defineProps<{ options: Api.Options; orderId?: number }>();
 const emit = defineEmits<{ saved: [message: string] }>();
 const open = defineModel<boolean>('open', { required: true });
@@ -28,6 +28,7 @@ const submitting = ref(false);
 const quantities = ref<Record<number, null | number>>({});
 const remark = ref('');
 const errors = ref<string[]>([]);
+const completed = computed(() => order.value?.status === 'COMPLETED');
 const labels = computed(() => makeLabels(props.options));
 const stageOf = (code?: string) =>
   props.options.stages.find((s) => s.code === code);
@@ -43,6 +44,7 @@ watch(open, async (value) => {
   quantities.value = {};
   remark.value = '';
   errors.value = [];
+  order.value = undefined;
   loading.value = true;
   try {
     order.value = await getOrder(props.orderId);
@@ -57,6 +59,7 @@ async function submit() {
     .map((line) => ({ inputId: line.id, quantity: quantities.value[line.id]! }));
   errors.value = [];
   if (lines.length === 0) errors.value.push('请填写要退回的余料数量。');
+  if (completed.value && !remark.value.trim()) errors.value.push('请填写补登退料原因。');
   for (const line of order.value?.inputs ?? []) {
     if ((quantities.value[line.id] ?? 0) > remaining(line))
       errors.value.push(
@@ -88,7 +91,7 @@ async function submit() {
   <Modal
     v-model:open="open"
     :confirm-loading="submitting"
-    :title="`退回余料 · ${order?.orderNo ?? ''}`"
+    :title="`${completed ? '补登退料' : '退回余料'} · ${order?.orderNo ?? ''}`"
     :width="680"
     ok-text="确认退回"
     @ok="submit"
@@ -96,7 +99,7 @@ async function submit() {
     <Spin :spinning="loading">
       <div class="flex flex-col gap-3">
         <p class="m-0 text-xs text-muted-foreground">
-          没用完的料退回原来的库存（同批次、同库位），单子继续在制。
+          {{ completed ? '核对原领料批次和实际用量，把多登记的领用数量退回原库存。' : '没用完的料退回原来的库存（同批次、同库位），单子继续在制。' }}
         </p>
         <div
           v-for="line in order?.inputs ?? []"
@@ -129,8 +132,8 @@ async function submit() {
           />
         </div>
         <label for="return-remark" class="flex flex-col gap-1 text-xs text-muted-foreground">
-          备注
-          <Input id="return-remark" v-model:value="remark" :maxlength="200" placeholder="选填，例如 换色剩余" />
+          {{ completed ? '补登退料原因（必填）' : '备注' }}
+          <Input id="return-remark" v-model:value="remark" :maxlength="200" :placeholder="completed ? '例如领料时多登 3 张，实际未领用' : '选填，例如 换色剩余'" />
         </label>
         <Alert v-if="errors.length > 0" type="error" show-icon>
           <template #message>

@@ -5,6 +5,7 @@ import { Alert, InputNumber } from 'ant-design-vue';
 
 import LaminationCounters from '../../shared/lamination-counters.vue';
 import { quantityPrecision } from '../../shared/quantity';
+import { reportPlanWarning } from '../../shared/report-plan-warning';
 import {
   attrSummary,
   EDITABLE_FIELDS,
@@ -34,6 +35,10 @@ const idPrefix = computed(() => props.embedded ? `batch-${job.order?.id}-` : '')
 const labels = computed(() => makeLabels(job.options));
 const output = computed(() => stageOf(job, job.process?.outputStage));
 const outputUnit = computed(() => output.value?.unit ?? job.process?.outputUnit ?? job.task?.unit);
+const planWarning = computed(() => reportPlanWarning(
+  job.process?.code === 'MIX' ? job.task?.output?.mixPlan?.wholeBatchBoards ?? job.task?.quantity : job.task?.quantity,
+  job.task?.actualQuantity ?? job.order?.goodQuantity, goodTotal(job), outputUnit.value,
+));
 const source = computed(() => stageOf(job, job.sourceStage));
 const editable = computed(() => EDITABLE_FIELDS[job.process?.code ?? ''] ?? []);
 const allowPlainEmboss = computed(() => jobAllowsPlainEmboss(job));
@@ -108,11 +113,12 @@ function next() {
 
           <LaminationCounters v-if="job.process?.code === 'LAMINATE' && line.attrs.frontColor && line.attrs.backColor" :line="line" :id-prefix="`${idPrefix}laminate-${line.key}`" :options="job.options" :unit="outputUnit" />
           <template v-else>
-            <ReportQuantityFields :id-prefix="idPrefix" :line="line" :unit="outputUnit" />
+            <ReportQuantityFields :counted-good="job.process?.code === 'MIX'" :id-prefix="idPrefix" :line="line" :unit="outputUnit" />
             <p class="m-0 text-base tabular-nums" aria-live="polite">良品 <b>{{ formatQty(line.goodQuantity) }} {{ outputUnit }}</b></p>
             <p v-if="slicing" class="m-0 text-sm text-muted-foreground">{{ sliceHint(job.inputs, job.outputs, line) }}</p>
           </template>
         </section>
+        <Alert v-if="planWarning" :message="planWarning" show-icon type="warning" />
 
         <details v-if="slicing && job.inputs.length > 0" class="text-sm text-muted-foreground">
           <summary class="min-h-11 cursor-pointer content-center">查看板材规格</summary>

@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { deriveOutputs } from '../stage-stock/model';
 import ReportStep from './modules/report-step.vue';
-import { changeReportDefect, changeReportTotal, prefillReportQuantity } from './report-quantity';
+import { changeCountedOutput, changeReportDefect, prefillReportQuantity } from './report-quantity';
 import { applyJobTarget, createJob, jobAllowsPlainEmboss, outputPayload, provideJob } from './use-job';
 
 vi.mock('#/components/upload/image-upload.vue', () => ({ default: { render: () => null } }));
@@ -62,7 +62,7 @@ describe('planned workbench report quantities', () => {
     expect(document.body.textContent?.includes('请选择正面或反面纹路')).toBe(!allowed);
   });
 
-  it.each(['MIX', 'SLICE', 'CUT', 'LAMINATE', 'EMBOSS', 'PUNCH', 'ENGRAVE', 'FOLD', 'PACK'])('prefills %s and deducts defects without accumulating deductions', (process) => {
+  it.each(['SLICE', 'CUT', 'LAMINATE', 'EMBOSS', 'PUNCH', 'ENGRAVE', 'FOLD', 'PACK'])('prefills %s and deducts defects without accumulating deductions', (process) => {
     const job = jobFor(process);
     prefillReportQuantity(job);
     const line = job.outputs[0]!;
@@ -90,19 +90,16 @@ describe('planned workbench report quantities', () => {
     expect(job.outputs[0]!.goodQuantity).toBe(0);
   });
 
-  it('uses whole-batch foaming output and preserves a manually reduced partial batch', () => {
+  it('requires counted foaming output and preserves actual good boards when defects change', () => {
     const job = jobFor('MIX');
     job.task!.output = { mixPlan: { wholeBatchBoards: 300 } } as NonNullable<typeof job.task>['output'];
     prefillReportQuantity(job);
     const line = job.outputs[0]!;
-    expect(line.goodQuantity).toBe(300);
-    changeReportTotal(line, 100);
-    changeReportDefect(line, 3);
-    expect(line.goodQuantity).toBe(97);
-    changeReportDefect(line, 110);
-    expect(line.goodQuantity).toBe(0);
-    changeReportDefect(line, 2);
-    expect(line.goodQuantity).toBe(98);
+    expect(line.goodQuantity).toBeUndefined();
+    changeCountedOutput(line, 28, 3);
+    expect(line).toMatchObject({ goodQuantity: 28, defectQuantity: 3, reportTotal: 31 });
+    changeCountedOutput(line, 28, 5);
+    expect(outputPayload(job)[0]).toMatchObject({ goodQuantity: 28, defectQuantity: 5 });
   });
 
   it('does not duplicate a task total across different output rows or invent a plan for independent production', () => {
